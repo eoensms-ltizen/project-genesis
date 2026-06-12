@@ -2,6 +2,9 @@ import { AgentBrain } from "./agents/AgentBrain";
 import { bumpAgentIdCounter, createRandomAgent } from "./agents/Agent";
 import type {
   Agent,
+  Building,
+  BuildingKind,
+  BuildingStage,
   GameClock,
   GameLogEntry,
   SimulationSnapshot,
@@ -34,7 +37,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 const AUTOSAVE_INTERVAL_SECONDS = 15;
 
 type SavedAgent = Omit<Agent, "target" | "path" | "state" | "actionTimer">;
@@ -48,12 +51,16 @@ type SaveData = {
   tiles: string;
   traffic: [number, number][];
   agents: SavedAgent[];
+  buildings: Building[];
+  nextBuildingId: number;
 };
 
 export class Simulation {
   readonly world: WorldMap;
   readonly agents: Agent[] = [];
+  readonly buildings: Building[] = [];
 
+  private nextBuildingId = 1;
   private readonly brain = new AgentBrain();
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
@@ -78,15 +85,19 @@ export class Simulation {
       this.elapsedSeconds = saved.elapsedSeconds;
       this.lastBirthAt = saved.lastBirthAt;
       this.traffic = new Map(saved.traffic);
+      this.nextBuildingId = saved.nextBuildingId;
+      for (const building of saved.buildings) {
+        this.buildings.push(building);
+        if (building.stage !== "built") {
+          this.claimBuildingFootprint(building);
+        }
+      }
       for (const savedAgent of saved.agents) {
         const agent: Agent = {
           ...savedAgent,
           state: "Idle",
           actionTimer: 0,
         };
-        if (agent.homeSite) {
-          this.claimTile(agent.homeSite);
-        }
         this.agents.push(agent);
         const idNumber = Number(agent.id.split("-")[1]);
         if (Number.isFinite(idNumber)) {
@@ -171,6 +182,50 @@ export class Simulation {
     return 0;
   }
 
+  registerBuilding(input: {
+    kind: BuildingKind;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    door: Vec2;
+    ownerId?: string;
+  }): Building {
+    const building: Building = {
+      id: `building-${this.nextBuildingId++}`,
+      stage: "site",
+      ...input,
+    };
+    this.buildings.push(building);
+    return building;
+  }
+
+  getBuilding(id: string): Building | undefined {
+    return this.buildings.find((building) => building.id === id);
+  }
+
+  setBuildingStage(building: Building, stage: BuildingStage) {
+    building.stage = stage;
+    const tileType: TileType =
+      stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
+    for (const position of footprintTiles(building)) {
+      this.world.setTile(position, tileType);
+    }
+    this.notifyChanged();
+  }
+
+  claimBuildingFootprint(building: Building) {
+    for (const position of footprintTiles(building)) {
+      this.claimTile(position);
+    }
+  }
+
+  releaseBuildingFootprint(building: Building) {
+    for (const position of footprintTiles(building)) {
+      this.releaseClaim(position);
+    }
+  }
+
   saveNow() {
     try {
       const data: SaveData = {
@@ -193,7 +248,13 @@ export class Simulation {
           inventory: { ...agent.inventory },
           home: agent.home ? { ...agent.home } : undefined,
           homeSite: agent.homeSite ? { ...agent.homeSite } : undefined,
+          homeBuildingId: agent.homeBuildingId,
         })),
+        buildings: this.buildings.map((building) => ({
+          ...building,
+          door: { ...building.door },
+        })),
+        nextBuildingId: this.nextBuildingId,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -347,7 +408,7 @@ export class Simulation {
       return;
     }
 
-    const houses = this.world.tiles.filter((tile) => tile.type === "House");
+    const houses = this.buildings.filter((building) => building.stage === "built");
     if (houses.length === 0) {
       return;
     }
@@ -358,7 +419,7 @@ export class Simulation {
     }
 
     const house = houses[Math.floor(Math.random() * houses.length)];
-    const spawn = this.findSpawnPosition({ x: house.x, y: house.y });
+    const spawn = this.findSpawnPosition({ x: house.door.x, y: house.door.y + 1 });
     const child = createRandomAgent(spawn);
     this.agents.push(child);
     this.lastBirthAt = this.elapsedSeconds;
@@ -414,4 +475,14 @@ function loadSaveData(): SaveData | undefined {
 
 function claimKey(position: Vec2): string {
   return `${position.x},${position.y}`;
+}
+
+export function footprintTiles(building: Building): Vec2[] {
+  const tiles: Vec2[] = [];
+  for (let y = building.y; y < building.y + building.height; y += 1) {
+    for (let x = building.x; x < building.x + building.width; x += 1) {
+      tiles.push({ x, y });
+    }
+  }
+  return tiles;
 }

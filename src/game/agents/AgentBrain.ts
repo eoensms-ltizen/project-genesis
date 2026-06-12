@@ -5,14 +5,14 @@ import { findPath, roundVec } from "../world/Pathfinder";
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
 const CHOP_DURATION_SECONDS = 1.8;
 const PLAN_DURATION_SECONDS = 1.4;
-const BUILD_DURATION_SECONDS = 4;
+const BUILD_DURATION_SECONDS = 6;
 const EAT_DURATION_SECONDS = 1.5;
 const IDLE_THINK_SECONDS = 0.4;
 const SEARCH_FAIL_BACKOFF_SECONDS = 3;
 const TARGET_CANDIDATE_LIMIT = 12;
 
-const HOUSE_WOOD_COST = 5;
-const WOOD_STOCKPILE_CAP = 8;
+const HOUSE_WOOD_COST = 8;
+const WOOD_STOCKPILE_CAP = 10;
 const HUNGER_SEEK_THRESHOLD = 65;
 const HUNGER_SNACK_THRESHOLD = 40;
 const STAMINA_EXHAUSTED = 25;
@@ -171,22 +171,32 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
-    const site = simulation.world.findHouseSiteCandidate(agent.position, (position) =>
+    const site = simulation.world.findBuildingSite(agent.position, 2, 2, (position) =>
       simulation.isTileClaimed(position),
     );
-    const path =
-      site && !simulation.isTileClaimed(site)
-        ? findPath(simulation.world, { start: agent.position, goal: site })
-        : undefined;
-    if (!site || !path) {
+    const door = site ? { x: site.x, y: site.y + 1 } : undefined;
+    const path = door
+      ? findPath(simulation.world, { start: agent.position, goal: door })
+      : undefined;
+    if (!site || !door || !path) {
       simulation.log(`${agent.name} could not find a house site.`);
       this.backOff(agent, simulation);
       return;
     }
 
-    simulation.claimTile(site);
-    agent.homeSite = { ...site };
-    agent.target = { ...site };
+    const building = simulation.registerBuilding({
+      kind: "house",
+      x: site.x,
+      y: site.y,
+      width: 2,
+      height: 2,
+      door,
+      ownerId: agent.id,
+    });
+    simulation.claimBuildingFootprint(building);
+    agent.homeBuildingId = building.id;
+    agent.homeSite = { ...door };
+    agent.target = { ...door };
     agent.path = path;
     simulation.log(`${agent.name} chose a house site.`);
     this.setState(agent, simulation, "MoveToHouseSite");
@@ -216,8 +226,11 @@ export class AgentBrain {
       return;
     }
 
-    if (agent.target) {
-      simulation.world.setTile(agent.target, "HouseSite");
+    const building = agent.homeBuildingId
+      ? simulation.getBuilding(agent.homeBuildingId)
+      : undefined;
+    if (building) {
+      simulation.setBuildingStage(building, "site");
       simulation.log(`${agent.name} marked a future home.`);
     }
     agent.target = undefined;
@@ -226,12 +239,19 @@ export class AgentBrain {
   }
 
   private buildHouse(agent: Agent, simulation: Simulation, deltaSeconds: number) {
-    if (agent.actionTimer === 0 && agent.target) {
-      const tile = simulation.world.getTile(roundVec(agent.target));
-      if (tile && tile.type !== "HouseFoundation") {
-        simulation.world.setTile(agent.target, "HouseFoundation");
-        simulation.log(`${agent.name} started building a house.`);
-      }
+    const building = agent.homeBuildingId
+      ? simulation.getBuilding(agent.homeBuildingId)
+      : undefined;
+    if (!building) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+
+    if (agent.actionTimer === 0 && building.stage !== "foundation") {
+      simulation.setBuildingStage(building, "foundation");
+      simulation.log(`${agent.name} started building a house.`);
     }
 
     agent.actionTimer += deltaSeconds;
@@ -239,14 +259,12 @@ export class AgentBrain {
       return;
     }
 
-    if (agent.target) {
-      simulation.world.setTile(agent.target, "House");
-      simulation.releaseClaim(agent.target);
-      agent.home = { ...agent.target };
-      agent.homeSite = undefined;
-      agent.inventory.wood = Math.max(0, agent.inventory.wood - HOUSE_WOOD_COST);
-      simulation.log(`${agent.name} finished their house.`);
-    }
+    simulation.setBuildingStage(building, "built");
+    simulation.releaseBuildingFootprint(building);
+    agent.home = { ...building.door };
+    agent.homeSite = undefined;
+    agent.inventory.wood = Math.max(0, agent.inventory.wood - HOUSE_WOOD_COST);
+    simulation.log(`${agent.name} finished their house.`);
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");

@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import type { Agent, TileType, Vec2 } from "../types";
+import type { Agent, Building, TileType, Vec2 } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
@@ -58,7 +58,13 @@ export class PixiRenderer {
     this.initialized = true;
   }
 
-  render(world: WorldMap, agents: Agent[], placementMode: boolean, darkness = 0) {
+  render(
+    world: WorldMap,
+    agents: Agent[],
+    placementMode: boolean,
+    darkness = 0,
+    buildings: Building[] = [],
+  ) {
     if (!this.initialized) {
       return;
     }
@@ -70,6 +76,9 @@ export class PixiRenderer {
       this.worldGraphics.clear();
       for (const tile of world.tiles) {
         drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
+      }
+      for (const building of buildings) {
+        drawBuilding(this.worldGraphics, building);
       }
     }
 
@@ -92,16 +101,16 @@ export class PixiRenderer {
       this.nightGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
       this.nightGraphics.fill({ color: 0x0a1024, alpha: darkness * 0.55 });
 
-      // Warm window light spills out of houses at night.
-      for (const tile of world.tiles) {
-        if (tile.type !== "House") {
+      // Warm window light spills out of finished houses at night.
+      for (const building of buildings) {
+        if (building.stage !== "built") {
           continue;
         }
-        const cx = tile.x * TILE_SIZE + TILE_SIZE / 2;
-        const cy = tile.y * TILE_SIZE + TILE_SIZE / 2;
-        this.nightGraphics.circle(cx, cy, 15);
+        const cx = (building.x + building.width / 2) * TILE_SIZE;
+        const cy = (building.y + building.height / 2) * TILE_SIZE;
+        this.nightGraphics.circle(cx, cy, 24);
         this.nightGraphics.fill({ color: 0xffc97a, alpha: darkness * 0.16 });
-        this.nightGraphics.circle(cx, cy, 6);
+        this.nightGraphics.circle(cx, cy, 10);
         this.nightGraphics.fill({ color: 0xffe1a6, alpha: darkness * 0.32 });
       }
     }
@@ -150,11 +159,6 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0x153f1f);
   }
 
-  if (type === "HouseSite") {
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-    graphics.stroke({ color: 0xe8d16f, width: 2 });
-  }
-
   if (type === "Berry") {
     graphics.circle(px + 5, py + 6, 1.6);
     graphics.fill(0xc0394b);
@@ -164,19 +168,58 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xa12d3e);
   }
 
-  if (type === "HouseFoundation") {
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-    graphics.stroke({ color: 0xb08d57, width: 2 });
-    graphics.rect(px + 5, py + 5, TILE_SIZE - 10, TILE_SIZE - 10);
-    graphics.fill(0x6b5337);
+}
+
+function drawBuilding(graphics: Graphics, building: Building) {
+  const px = building.x * TILE_SIZE;
+  const py = building.y * TILE_SIZE;
+  const w = building.width * TILE_SIZE;
+  const h = building.height * TILE_SIZE;
+
+  if (building.stage === "site") {
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.stroke({ color: 0xe8d16f, width: 2, alpha: 0.9 });
+    for (const [sx, sy] of [
+      [px + 2, py + 2],
+      [px + w - 6, py + 2],
+      [px + 2, py + h - 6],
+      [px + w - 6, py + h - 6],
+    ]) {
+      graphics.rect(sx, sy, 4, 4);
+      graphics.fill(0xe8d16f);
+    }
+    return;
   }
 
-  if (type === "House") {
-    graphics.rect(px + 3, py + 7, TILE_SIZE - 6, TILE_SIZE - 9);
-    graphics.fill(0x8a6a44);
-    graphics.poly([px + 2, py + 8, px + TILE_SIZE / 2, py + 2, px + TILE_SIZE - 2, py + 8]);
-    graphics.fill(0x9c4a38);
+  if (building.stage === "foundation") {
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.fill(0x6b5337);
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.stroke({ color: 0xb08d57, width: 2 });
+    for (const [sx, sy] of [
+      [px + 4, py + 4],
+      [px + w - 9, py + 4],
+      [px + 4, py + h - 9],
+      [px + w - 9, py + h - 9],
+    ]) {
+      graphics.rect(sx, sy, 5, 5);
+      graphics.fill(0x8a6a44);
+    }
+    return;
   }
+
+  // Built: walls, roof, door on the door tile, and a window.
+  graphics.rect(px + 3, py + 10, w - 6, h - 13);
+  graphics.fill(0x8a6a44);
+  graphics.poly([px + 1, py + 13, px + w / 2, py + 1, px + w - 1, py + 13]);
+  graphics.fill(0x9c4a38);
+
+  const doorCenterX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+  graphics.rect(doorCenterX - 3, py + h - 12, 6, 9);
+  graphics.fill(0x3a2c1c);
+
+  graphics.rect(px + w - 12, py + h - 13, 6, 6);
+  graphics.fill(0x2c3a44);
 }
 
 function drawAgent(graphics: Graphics, agent: Agent) {

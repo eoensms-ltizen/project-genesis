@@ -62,6 +62,7 @@ export class GameApp {
       this.simulation.agents,
       this.placementMode,
       this.simulation.getDarkness(),
+      this.simulation.buildings,
     );
   }
 }

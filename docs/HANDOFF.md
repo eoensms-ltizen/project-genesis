@@ -89,7 +89,9 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Resident state machine (see Current Agent Behavior)
 - A* pathfinding with per-tile movement costs
 - Wood chopping from adjacent tiles
-- Staged house construction (site -> foundation -> house, costs 5 wood)
+- Multi-tile building system: Building registry (footprint, door, stage) owned by Simulation
+- Houses are 2x2 buildings (site -> foundation -> built, costs 8 wood) with door, roof, window
+- Building placement keeps a one-tile ring gap and prefers road-adjacent, house-adjacent sites (villages cluster into streets)
 - Hunger-driven berry foraging and eating
 - Berry/tree natural regrowth, berry reseeding if extinct
 - Emergent roads from traffic (Grass -> Dirt -> Road)
@@ -98,7 +100,7 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
 - Day/night cycle: darkness overlay, warm window lights on houses at night
 - Sleep schedule: residents head home at 21:00 and sleep until 06:00
-- Save/load via localStorage (autosave every 15s, on tab hide, on unmount; "New world" button resets)
+- Save/load via localStorage, schema v2 with buildings (autosave every 15s, on tab hide, on unmount; "New world" button resets; older save versions are discarded)
 - React side panel, resident status display, game log display
 - PixiJS map rendering
 - Separation between simulation and renderer
@@ -187,7 +189,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 status: game time, day/night, sleep, and save/load are done; multi-tile buildings are the remaining M1 item and the next priority.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 is complete (game time, day/night, sleep, save/load, multi-tile 2x2 houses). Next is M2: farming, small warehouse, eating schedule, era promotion system.
 
 ## Next Recommended Work
 

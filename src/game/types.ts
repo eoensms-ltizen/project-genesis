@@ -30,6 +30,22 @@ export type AgentState =
   | "Sleep"
   | "Rest";
 
+export type BuildingKind = "house";
+
+export type BuildingStage = "site" | "foundation" | "built";
+
+export type Building = {
+  id: string;
+  kind: BuildingKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  door: Vec2;
+  stage: BuildingStage;
+  ownerId?: string;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -55,6 +71,7 @@ export type Agent = {
   path?: Vec2[];
   home?: Vec2;
   homeSite?: Vec2;
+  homeBuildingId?: string;
   actionTimer: number;
 };
 

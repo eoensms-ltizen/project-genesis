@@ -11,8 +11,8 @@ const MOVE_COSTS: Record<TileType, number> = {
   Dirt: 0.75,
   Grass: 1,
   HouseSite: 1,
-  House: 1,
-  HouseFoundation: 1.2,
+  House: 2.5,
+  HouseFoundation: 2,
   Berry: 1.25,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
@@ -132,27 +132,108 @@ export class WorldMap {
     return best;
   }
 
-  findHouseSiteCandidate(origin: Vec2, isBlocked?: (position: Vec2) => boolean): Vec2 | undefined {
-    const radiusLimit = 12;
-    for (let radius = 2; radius <= radiusLimit; radius += 1) {
-      for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
-        for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
-          const position = { x, y };
-          const tile = this.getTile(position);
-          if (!tile || tile.type !== "Grass") {
-            continue;
-          }
-          if (isBlocked?.(position)) {
-            continue;
-          }
-          if (this.hasOpenArea(position)) {
-            return position;
-          }
+  /**
+   * Best top-left corner for a width x height building. The footprint must be
+   * Grass and unclaimed, the surrounding ring keeps a one-tile gap from other
+   * buildings and water, and the tile in front of the door must be walkable.
+   * Scoring prefers sites close to the resident, next to roads, and near
+   * existing houses, so villages cluster along streets.
+   */
+  findBuildingSite(
+    origin: Vec2,
+    width: number,
+    height: number,
+    isBlocked?: (position: Vec2) => boolean,
+  ): Vec2 | undefined {
+    const houseTiles: Vec2[] = this.tiles.filter((tile) => tile.type === "House");
+
+    let best: Vec2 | undefined;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let y = 1; y <= this.height - height - 1; y += 1) {
+      for (let x = 1; x <= this.width - width - 1; x += 1) {
+        if (!this.isFootprintFree(x, y, width, height, isBlocked)) {
+          continue;
+        }
+
+        const ring = this.ringInfo(x, y, width, height);
+        if (!ring.clear) {
+          continue;
+        }
+
+        const doorFront = { x, y: y + height };
+        if (!this.isWalkable(doorFront)) {
+          continue;
+        }
+
+        const cx = x + width / 2;
+        const cy = y + height / 2;
+        let score = -(Math.abs(cx - origin.x) + Math.abs(cy - origin.y));
+        if (ring.touchesPath) {
+          score += 14;
+        }
+        score += houseProximityBonus(houseTiles, cx, cy);
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = { x, y };
         }
       }
     }
 
-    return this.findNearestType(origin, "Grass");
+    return best;
+  }
+
+  private isFootprintFree(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    isBlocked?: (position: Vec2) => boolean,
+  ): boolean {
+    for (let fy = 0; fy < height; fy += 1) {
+      for (let fx = 0; fx < width; fx += 1) {
+        const position = { x: x + fx, y: y + fy };
+        const tile = this.getTile(position);
+        if (!tile || tile.type !== "Grass" || isBlocked?.(position)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private ringInfo(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): { clear: boolean; touchesPath: boolean } {
+    let touchesPath = false;
+    for (let ry = y - 1; ry <= y + height; ry += 1) {
+      for (let rx = x - 1; rx <= x + width; rx += 1) {
+        const inFootprint = rx >= x && rx < x + width && ry >= y && ry < y + height;
+        if (inFootprint) {
+          continue;
+        }
+        const tile = this.getTile({ x: rx, y: ry });
+        if (!tile) {
+          continue;
+        }
+        if (
+          tile.type === "Water" ||
+          tile.type === "House" ||
+          tile.type === "HouseSite" ||
+          tile.type === "HouseFoundation"
+        ) {
+          return { clear: false, touchesPath: false };
+        }
+        if (tile.type === "Road" || tile.type === "Dirt") {
+          touchesPath = true;
+        }
+      }
+    }
+    return { clear: true, touchesPath };
   }
 
   serializeTiles(): string {
@@ -198,18 +279,6 @@ export class WorldMap {
     }
   }
 
-  private hasOpenArea(position: Vec2): boolean {
-    for (let y = position.y - 1; y <= position.y + 1; y += 1) {
-      for (let x = position.x - 1; x <= position.x + 1; x += 1) {
-        const tile = this.getTile({ x, y });
-        if (!tile || tile.type !== "Grass") {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
   private paintCluster(center: Vec2, radius: number, type: TileType, chance: number) {
     for (let y = center.y - radius; y <= center.y + radius; y += 1) {
       for (let x = center.x - radius; x <= center.x + radius; x += 1) {
@@ -239,4 +308,18 @@ export class WorldMap {
       y: 4 + Math.floor(Math.random() * (this.height - 8)),
     };
   }
+}
+
+function houseProximityBonus(houseTiles: Vec2[], cx: number, cy: number): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const tile of houseTiles) {
+    const distance = Math.abs(tile.x - cx) + Math.abs(tile.y - cy);
+    if (distance < nearest) {
+      nearest = distance;
+    }
+  }
+  if (nearest <= 8) {
+    return 10 - nearest;
+  }
+  return 0;
 }
