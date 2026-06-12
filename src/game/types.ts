@@ -12,7 +12,10 @@ export type TileType =
   | "HouseSite"
   | "HouseFoundation"
   | "House"
-  | "Berry";
+  | "Berry"
+  | "FieldEmpty"
+  | "FieldGrowing"
+  | "FieldRipe";
 
 export type AgentState =
   | "Idle"
@@ -29,9 +32,13 @@ export type AgentState =
   | "MoveHome"
   | "Sleep"
   | "Chat"
+  | "MoveToFarm"
+  | "FarmWork"
+  | "MoveToPave"
+  | "Pave"
   | "Rest";
 
-export type BuildingKind = "house";
+export type BuildingKind = "house" | "warehouse";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -74,8 +81,10 @@ export type Agent = {
   homeSite?: Vec2;
   homeBuildingId?: string;
   actionTimer: number;
+  projectBuildingId?: string;
   socialCooldown?: number;
   resumeState?: AgentState;
+  eatPlan?: "berry" | "warehouse";
 };
 
 export type GameLogEntry = {
@@ -96,4 +105,6 @@ export type SimulationSnapshot = {
   agents: Agent[];
   logs: GameLogEntry[];
   clock: GameClock;
+  era: number;
+  foodStock: number;
 };

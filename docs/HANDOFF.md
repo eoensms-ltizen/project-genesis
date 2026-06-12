@@ -97,6 +97,10 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Emergent roads from traffic (Grass -> Dirt -> Road)
 - Autonomous population growth (births when housing + food allow)
 - Tile claiming so residents do not pick the same tree/berry/site
+- Era system: Pioneer -> Settlement (pop 6 + 4 houses) -> Town (pop 12 + warehouse + food 20); era and food stock shown in the header
+- Farming (Settlement era): residents till 3x3 fields, sow, crops ripen over time, harvest +2 food to the village stock (work pauses at 50 food)
+- Communal warehouse (3x2 building, 10 wood): first priority once Settlement era hits; hungry residents eat from its stock before foraging berries
+- Road paving (Town era): residents pave dirt tiles adjacent to existing roads, formalizing the street network
 - Social chats: free residents who pass within 1.6 tiles stop for a 2.5s chat (speech bubble, log, 40s cooldown), then resume what they were doing
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
@@ -191,7 +195,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 is complete (game time, day/night, sleep, save/load, multi-tile 2x2 houses). Next is M2: farming, small warehouse, eating schedule, era promotion system.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 and the core of M2 are complete (game time, day/night, sleep, save/load, 2x2 houses, eras, farming, warehouse, paving). Town-era paving has not been observed in a live run yet (eras 0-1 verified in browser). Next: M3 — jobs, cooking, church, plaza, livestock/fishing; or visual polish (sprites, seasons).
 
 ## Next Recommended Work
 

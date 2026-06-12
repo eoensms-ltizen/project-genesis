@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
-import { SAVE_KEY } from "./game/Simulation";
+import { ERA_NAMES, SAVE_KEY } from "./game/Simulation";
 import type { Agent, GameClock, GameLogEntry, Vec2 } from "./game/types";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
@@ -15,6 +15,8 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [logs, setLogs] = useState<GameLogEntry[]>([]);
   const [clock, setClock] = useState<GameClock | null>(null);
+  const [era, setEra] = useState(0);
+  const [foodStock, setFoodStock] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -33,6 +35,8 @@ export default function App() {
         setAgents(snapshot.agents);
         setLogs(snapshot.logs);
         setClock(snapshot.clock);
+        setEra(snapshot.era);
+        setFoodStock(snapshot.foodStock);
         forceFrame((value) => value + 1);
       },
       onTileClick: (position) => {
@@ -94,7 +98,9 @@ export default function App() {
   const clockLabel = clock
     ? `Year ${clock.year} · Day ${clock.day} · ${String(clock.hour).padStart(2, "0")}:${String(
         clock.minute,
-      ).padStart(2, "0")} ${clock.isNight ? "🌙" : "☀️"}`
+      ).padStart(2, "0")} ${clock.isNight ? "🌙" : "☀️"} · ${
+        ERA_NAMES[era] ?? "Unknown"
+      } Era · 🌾 ${foodStock}`
     : "";
 
   return (

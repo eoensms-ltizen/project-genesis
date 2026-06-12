@@ -14,6 +14,9 @@ const MOVE_COSTS: Record<TileType, number> = {
   House: 2.5,
   HouseFoundation: 2,
   Berry: 1.25,
+  FieldEmpty: 1.3,
+  FieldGrowing: 1.3,
+  FieldRipe: 1.3,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
 };
@@ -31,6 +34,9 @@ const TILE_CODES: Record<TileType, string> = {
   HouseFoundation: "F",
   House: "H",
   Berry: "B",
+  FieldEmpty: "e",
+  FieldGrowing: "c",
+  FieldRipe: "p",
 };
 
 const CODE_TILES: Record<string, TileType> = Object.fromEntries(

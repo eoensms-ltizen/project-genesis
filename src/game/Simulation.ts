@@ -37,7 +37,10 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
+
+export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
+const CROP_RIPEN_CHANCE = 0.05;
 const AUTOSAVE_INTERVAL_SECONDS = 15;
 
 type SavedAgent = Omit<
@@ -56,12 +59,16 @@ type SaveData = {
   agents: SavedAgent[];
   buildings: Building[];
   nextBuildingId: number;
+  era: number;
+  foodStock: number;
 };
 
 export class Simulation {
   readonly world: WorldMap;
   readonly agents: Agent[] = [];
   readonly buildings: Building[] = [];
+  era = 0;
+  foodStock = 0;
 
   private nextBuildingId = 1;
   private readonly brain = new AgentBrain();
@@ -90,6 +97,8 @@ export class Simulation {
       this.lastBirthAt = saved.lastBirthAt;
       this.traffic = new Map(saved.traffic);
       this.nextBuildingId = saved.nextBuildingId;
+      this.era = saved.era;
+      this.foodStock = saved.foodStock;
       for (const building of saved.buildings) {
         this.buildings.push(building);
         if (building.stage !== "built") {
@@ -133,7 +142,9 @@ export class Simulation {
     if (this.natureTimer >= NATURE_TICK_SECONDS) {
       this.natureTimer = 0;
       this.regrowNature();
+      this.growCrops();
       this.tryBirth();
+      this.checkEraPromotion();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -267,6 +278,8 @@ export class Simulation {
           door: { ...building.door },
         })),
         nextBuildingId: this.nextBuildingId,
+        era: this.era,
+        foodStock: this.foodStock,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -339,6 +352,8 @@ export class Simulation {
       })),
       logs: [...this.logs],
       clock: this.getClock(),
+      era: this.era,
+      foodStock: this.foodStock,
     };
   }
 
@@ -412,6 +427,47 @@ export class Simulation {
     this.world.setTile(position, type);
   }
 
+  private growCrops() {
+    for (const tile of this.world.tiles) {
+      if (tile.type === "FieldGrowing" && Math.random() < CROP_RIPEN_CHANCE) {
+        this.world.setTile(tile, "FieldRipe");
+      }
+    }
+  }
+
+  private checkEraPromotion() {
+    if (this.era === 0) {
+      const builtHouses = this.buildings.filter(
+        (building) => building.kind === "house" && building.stage === "built",
+      ).length;
+      if (this.agents.length >= 6 && builtHouses >= 4) {
+        this.era = 1;
+        this.log("The village entered the Settlement era! Fields and a warehouse are now possible.");
+      }
+      return;
+    }
+
+    if (this.era === 1) {
+      const hasWarehouse = this.buildings.some(
+        (building) => building.kind === "warehouse" && building.stage === "built",
+      );
+      if (this.agents.length >= 12 && hasWarehouse && this.foodStock >= 20) {
+        this.era = 2;
+        this.log("The village entered the Town era! Residents will start paving roads.");
+      }
+    }
+  }
+
+  getWarehouse(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "warehouse" && building.stage === "built",
+    );
+  }
+
+  hasAnyWarehouse(): boolean {
+    return this.buildings.some((building) => building.kind === "warehouse");
+  }
+
   private tryBirth() {
     if (this.agents.length < 2 || this.agents.length >= POPULATION_CAP) {
       return;
@@ -426,7 +482,7 @@ export class Simulation {
     }
 
     const berries = this.world.countType("Berry");
-    if (berries < this.agents.length * 2) {
+    if (berries < this.agents.length * 2 && this.foodStock < this.agents.length) {
       return;
     }
 

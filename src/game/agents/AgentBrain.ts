@@ -12,7 +12,12 @@ const SEARCH_FAIL_BACKOFF_SECONDS = 3;
 const TARGET_CANDIDATE_LIMIT = 12;
 
 const HOUSE_WOOD_COST = 8;
+const WAREHOUSE_WOOD_COST = 10;
 const WOOD_STOCKPILE_CAP = 10;
+const FARM_WORK_DURATION_SECONDS = 2;
+const PAVE_DURATION_SECONDS = 1.5;
+const MAX_FIELD_TILES = 12;
+const FOOD_STOCK_TARGET = 50;
 const HUNGER_SEEK_THRESHOLD = 65;
 const HUNGER_SNACK_THRESHOLD = 40;
 const STAMINA_EXHAUSTED = 25;
@@ -27,6 +32,8 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToTree",
   "MoveToHouseSite",
   "MoveToFood",
+  "MoveToFarm",
+  "MoveToPave",
   "MoveHome",
 ]);
 
@@ -66,17 +73,33 @@ export class AgentBrain {
         this.findHouseSite(agent, simulation);
         break;
       case "MoveToHouseSite": {
+        const building = agent.projectBuildingId
+          ? simulation.getBuilding(agent.projectBuildingId)
+          : undefined;
+        const cost = building ? buildCost(building.kind) : HOUSE_WOOD_COST;
         const targetTile = agent.target
           ? simulation.world.getTile(roundVec(agent.target))
           : undefined;
         const arrival: AgentState =
           (targetTile?.type === "HouseSite" || targetTile?.type === "HouseFoundation") &&
-          agent.inventory.wood >= HOUSE_WOOD_COST
+          agent.inventory.wood >= cost
             ? "BuildHouse"
             : "PlanHouse";
         this.moveAlongPath(agent, simulation, deltaSeconds, arrival);
         break;
       }
+      case "MoveToFarm":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "FarmWork");
+        break;
+      case "FarmWork":
+        this.farmWork(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToPave":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Pave");
+        break;
+      case "Pave":
+        this.pave(agent, simulation, deltaSeconds);
+        break;
       case "PlanHouse":
         this.planHouse(agent, simulation, deltaSeconds);
         break;
@@ -146,8 +169,43 @@ export class AgentBrain {
       return;
     }
 
+    // Resume an unfinished construction project (e.g., after loading a save).
+    if (agent.projectBuildingId) {
+      const building = simulation.getBuilding(agent.projectBuildingId);
+      if (building && building.stage !== "built") {
+        if (agent.inventory.wood >= buildCost(building.kind)) {
+          this.headToProject(agent, simulation, building.door);
+        } else {
+          this.setState(agent, simulation, "FindTree");
+        }
+        return;
+      }
+      agent.projectBuildingId = undefined;
+    }
+
+    if (simulation.era >= 1) {
+      // The warehouse outranks field work: gather wood for it first.
+      if (!simulation.hasAnyWarehouse()) {
+        if (agent.inventory.wood >= WAREHOUSE_WOOD_COST) {
+          if (this.startWarehouse(agent, simulation)) {
+            return;
+          }
+        } else {
+          this.setState(agent, simulation, "FindTree");
+          return;
+        }
+      }
+      if (this.findFarmWork(agent, simulation)) {
+        return;
+      }
+    }
+
     if (agent.inventory.wood < WOOD_STOCKPILE_CAP) {
       this.setState(agent, simulation, "FindTree");
+      return;
+    }
+
+    if (simulation.era >= 2 && this.findPaveWork(agent, simulation)) {
       return;
     }
 
@@ -215,10 +273,53 @@ export class AgentBrain {
     });
     simulation.claimBuildingFootprint(building);
     agent.homeBuildingId = building.id;
+    agent.projectBuildingId = building.id;
     agent.homeSite = { ...door };
     agent.target = { ...door };
     agent.path = path;
     simulation.log(`${agent.name} chose a house site.`);
+    this.setState(agent, simulation, "MoveToHouseSite");
+  }
+
+  private startWarehouse(agent: Agent, simulation: Simulation): boolean {
+    const site = simulation.world.findBuildingSite(agent.position, 3, 2, (position) =>
+      simulation.isTileClaimed(position),
+    );
+    if (!site) {
+      return false;
+    }
+    const door = { x: site.x + 1, y: site.y + 1 };
+    const path = findPath(simulation.world, { start: agent.position, goal: door });
+    if (!path) {
+      return false;
+    }
+
+    const building = simulation.registerBuilding({
+      kind: "warehouse",
+      x: site.x,
+      y: site.y,
+      width: 3,
+      height: 2,
+      door,
+    });
+    simulation.claimBuildingFootprint(building);
+    agent.projectBuildingId = building.id;
+    agent.target = { ...door };
+    agent.path = path;
+    simulation.log(`${agent.name} is planning a village warehouse.`);
+    this.setState(agent, simulation, "MoveToHouseSite");
+    return true;
+  }
+
+  private headToProject(agent: Agent, simulation: Simulation, door: Vec2) {
+    const path = findPath(simulation.world, { start: agent.position, goal: door });
+    if (!path) {
+      simulation.log(`${agent.name} cannot reach the construction site.`);
+      this.backOff(agent, simulation);
+      return;
+    }
+    agent.target = { ...door };
+    agent.path = path;
     this.setState(agent, simulation, "MoveToHouseSite");
   }
 
@@ -246,12 +347,16 @@ export class AgentBrain {
       return;
     }
 
-    const building = agent.homeBuildingId
-      ? simulation.getBuilding(agent.homeBuildingId)
+    const building = agent.projectBuildingId
+      ? simulation.getBuilding(agent.projectBuildingId)
       : undefined;
     if (building) {
       simulation.setBuildingStage(building, "site");
-      simulation.log(`${agent.name} marked a future home.`);
+      simulation.log(
+        building.kind === "warehouse"
+          ? `${agent.name} staked out the warehouse.`
+          : `${agent.name} marked a future home.`,
+      );
     }
     agent.target = undefined;
     agent.path = undefined;
@@ -259,8 +364,8 @@ export class AgentBrain {
   }
 
   private buildHouse(agent: Agent, simulation: Simulation, deltaSeconds: number) {
-    const building = agent.homeBuildingId
-      ? simulation.getBuilding(agent.homeBuildingId)
+    const building = agent.projectBuildingId
+      ? simulation.getBuilding(agent.projectBuildingId)
       : undefined;
     if (!building) {
       agent.target = undefined;
@@ -271,7 +376,11 @@ export class AgentBrain {
 
     if (agent.actionTimer === 0 && building.stage !== "foundation") {
       simulation.setBuildingStage(building, "foundation");
-      simulation.log(`${agent.name} started building a house.`);
+      simulation.log(
+        building.kind === "warehouse"
+          ? `${agent.name} started building the warehouse.`
+          : `${agent.name} started building a house.`,
+      );
     }
 
     agent.actionTimer += deltaSeconds;
@@ -281,16 +390,33 @@ export class AgentBrain {
 
     simulation.setBuildingStage(building, "built");
     simulation.releaseBuildingFootprint(building);
-    agent.home = { ...building.door };
-    agent.homeSite = undefined;
-    agent.inventory.wood = Math.max(0, agent.inventory.wood - HOUSE_WOOD_COST);
-    simulation.log(`${agent.name} finished their house.`);
+    agent.inventory.wood = Math.max(0, agent.inventory.wood - buildCost(building.kind));
+    if (building.kind === "house") {
+      agent.home = { ...building.door };
+      agent.homeSite = undefined;
+      simulation.log(`${agent.name} finished their house.`);
+    } else {
+      simulation.log(`${agent.name} built the village warehouse!`);
+    }
+    agent.projectBuildingId = undefined;
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
   }
 
   private findFood(agent: Agent, simulation: Simulation) {
+    const warehouse = simulation.getWarehouse();
+    if (warehouse && simulation.foodStock > 0) {
+      const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+      if (path) {
+        agent.eatPlan = "warehouse";
+        agent.target = { ...warehouse.door };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveToFood");
+        return;
+      }
+    }
+
     const route = this.routeToNearest(agent, simulation, "Berry", false);
     if (!route) {
       simulation.log(`${agent.name} is hungry but found no food.`);
@@ -299,6 +425,7 @@ export class AgentBrain {
     }
 
     simulation.claimTile(route.target);
+    agent.eatPlan = "berry";
     agent.target = route.target;
     agent.path = route.path;
     simulation.log(`${agent.name} went looking for berries.`);
@@ -311,12 +438,153 @@ export class AgentBrain {
       return;
     }
 
-    if (agent.target) {
-      simulation.world.setTile(agent.target, "Grass");
-      simulation.releaseClaim(agent.target);
+    if (agent.eatPlan === "warehouse") {
+      if (simulation.foodStock > 0) {
+        simulation.foodStock -= 1;
+        agent.health.hunger = Math.max(0, agent.health.hunger - 60);
+        simulation.log(`${agent.name} ate from the warehouse.`);
+      }
+    } else {
+      if (agent.target) {
+        simulation.world.setTile(agent.target, "Grass");
+        simulation.releaseClaim(agent.target);
+      }
+      agent.health.hunger = Math.max(0, agent.health.hunger - 55);
+      simulation.log(`${agent.name} ate berries.`);
     }
-    agent.health.hunger = Math.max(0, agent.health.hunger - 55);
-    simulation.log(`${agent.name} ate berries.`);
+    agent.eatPlan = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  private findFarmWork(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.foodStock >= FOOD_STOCK_TARGET) {
+      return false;
+    }
+    const world = simulation.world;
+    const route =
+      this.routeToNearest(agent, simulation, "FieldRipe", false) ??
+      this.routeToNearest(agent, simulation, "FieldEmpty", false);
+    if (route) {
+      simulation.claimTile(route.target);
+      agent.target = route.target;
+      agent.path = route.path;
+      this.setState(agent, simulation, "MoveToFarm");
+      return true;
+    }
+
+    const fieldCount =
+      world.countType("FieldEmpty") + world.countType("FieldGrowing") + world.countType("FieldRipe");
+    if (fieldCount >= Math.min(MAX_FIELD_TILES, simulation.agents.length * 2)) {
+      return false;
+    }
+
+    const site = world.findBuildingSite(agent.position, 3, 3, (position) =>
+      simulation.isTileClaimed(position),
+    );
+    if (!site) {
+      return false;
+    }
+    const center = { x: site.x + 1, y: site.y + 1 };
+    const path = findPath(world, { start: agent.position, goal: center });
+    if (!path) {
+      return false;
+    }
+
+    simulation.claimTile(center);
+    agent.target = center;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFarm");
+    return true;
+  }
+
+  private farmWork(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < FARM_WORK_DURATION_SECONDS) {
+      return;
+    }
+
+    if (agent.target) {
+      simulation.releaseClaim(agent.target);
+      const center = roundVec(agent.target);
+      const tile = simulation.world.getTile(center);
+      if (tile?.type === "FieldRipe") {
+        simulation.world.setTile(center, "FieldEmpty");
+        simulation.foodStock += 2;
+        simulation.log(`${agent.name} harvested crops. +2 food`);
+      } else if (tile?.type === "FieldEmpty") {
+        simulation.world.setTile(center, "FieldGrowing");
+        if (Math.random() < 0.35) {
+          simulation.log(`${agent.name} sowed seeds.`);
+        }
+      } else if (tile?.type === "Grass") {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const position = { x: center.x + dx, y: center.y + dy };
+            const patch = simulation.world.getTile(position);
+            if (patch?.type === "Grass" && !simulation.isTileClaimed(position)) {
+              simulation.world.setTile(position, "FieldEmpty");
+            }
+          }
+        }
+        simulation.log(`${agent.name} tilled a new field.`);
+      }
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  private findPaveWork(agent: Agent, simulation: Simulation): boolean {
+    const world = simulation.world;
+    let best: Vec2 | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const tile of world.tiles) {
+      if (tile.type !== "Dirt" || simulation.isTileClaimed(tile)) {
+        continue;
+      }
+      if (!hasAdjacentRoad(world, tile)) {
+        continue;
+      }
+      const d = squaredDistance(agent.position, tile);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { x: tile.x, y: tile.y };
+      }
+    }
+    if (!best) {
+      return false;
+    }
+
+    const path = findPath(world, { start: agent.position, goal: best });
+    if (!path) {
+      return false;
+    }
+
+    simulation.claimTile(best);
+    agent.target = best;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToPave");
+    return true;
+  }
+
+  private pave(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < PAVE_DURATION_SECONDS) {
+      return;
+    }
+
+    if (agent.target) {
+      simulation.releaseClaim(agent.target);
+      const tile = simulation.world.getTile(roundVec(agent.target));
+      if (tile?.type === "Dirt") {
+        simulation.world.setTile(agent.target, "Road");
+        if (Math.random() < 0.3) {
+          simulation.log(`${agent.name} paved a stretch of road.`);
+        }
+      }
+    }
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -544,4 +812,22 @@ function squaredDistance(a: Vec2, b: Vec2): number {
 
 function samePos(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y;
+}
+
+function buildCost(kind: "house" | "warehouse"): number {
+  return kind === "warehouse" ? WAREHOUSE_WOOD_COST : HOUSE_WOOD_COST;
+}
+
+function hasAdjacentRoad(world: Simulation["world"], position: Vec2): boolean {
+  for (const [dx, dy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ]) {
+    if (world.getTile({ x: position.x + dx, y: position.y + dy })?.type === "Road") {
+      return true;
+    }
+  }
+  return false;
 }
