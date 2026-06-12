@@ -183,6 +183,8 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. Follow its milestones (M1-M5); M1 (game time + multi-tile buildings + save/load) comes first.
+
 ## Next Recommended Work
 
 (House construction, hunger/food, emergent roads, and population growth are done — see Implemented MVP Features.)
