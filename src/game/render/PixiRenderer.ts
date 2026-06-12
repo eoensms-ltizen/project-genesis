@@ -19,6 +19,8 @@ export class PixiRenderer {
   private readonly worldGraphics = new Graphics();
   private readonly overlayGraphics = new Graphics();
   private readonly agentGraphics = new Graphics();
+  private readonly nightLayer = new Container();
+  private readonly nightGraphics = new Graphics();
   private lastWorldVersion = -1;
   private initialized = false;
 
@@ -37,9 +39,12 @@ export class PixiRenderer {
     this.host.appendChild(this.app.canvas);
     this.app.stage.addChild(this.worldLayer);
     this.app.stage.addChild(this.agentLayer);
+    this.app.stage.addChild(this.nightLayer);
     this.worldLayer.addChild(this.worldGraphics);
     this.worldLayer.addChild(this.overlayGraphics);
     this.agentLayer.addChild(this.agentGraphics);
+    this.nightLayer.addChild(this.nightGraphics);
+    this.nightLayer.eventMode = "none";
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
     this.app.stage.on("pointerdown", (event) => {
@@ -53,7 +58,7 @@ export class PixiRenderer {
     this.initialized = true;
   }
 
-  render(world: WorldMap, agents: Agent[], placementMode: boolean) {
+  render(world: WorldMap, agents: Agent[], placementMode: boolean, darkness = 0) {
     if (!this.initialized) {
       return;
     }
@@ -81,6 +86,25 @@ export class PixiRenderer {
       this.overlayGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
       this.overlayGraphics.stroke({ color: 0xd7b65f, width: 3, alpha: 0.9 });
     }
+
+    this.nightGraphics.clear();
+    if (darkness > 0.02) {
+      this.nightGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+      this.nightGraphics.fill({ color: 0x0a1024, alpha: darkness * 0.55 });
+
+      // Warm window light spills out of houses at night.
+      for (const tile of world.tiles) {
+        if (tile.type !== "House") {
+          continue;
+        }
+        const cx = tile.x * TILE_SIZE + TILE_SIZE / 2;
+        const cy = tile.y * TILE_SIZE + TILE_SIZE / 2;
+        this.nightGraphics.circle(cx, cy, 15);
+        this.nightGraphics.fill({ color: 0xffc97a, alpha: darkness * 0.16 });
+        this.nightGraphics.circle(cx, cy, 6);
+        this.nightGraphics.fill({ color: 0xffe1a6, alpha: darkness * 0.32 });
+      }
+    }
   }
 
   destroy() {
@@ -104,8 +128,10 @@ export class PixiRenderer {
 
     this.worldLayer.scale.set(scale);
     this.agentLayer.scale.set(scale);
+    this.nightLayer.scale.set(scale);
     this.worldLayer.position.set(left, top);
     this.agentLayer.position.set(left, top);
+    this.nightLayer.position.set(left, top);
   }
 }
 

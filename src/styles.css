@@ -98,6 +98,13 @@ button[data-active="true"] {
   font-size: 13px;
 }
 
+.clock-line {
+  margin: -6px 0 0;
+  color: #d8c89a;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+}
+
 .panel-section {
   display: grid;
   gap: 10px;

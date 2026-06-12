@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
-import type { Agent, GameLogEntry, Vec2 } from "./game/types";
+import { SAVE_KEY } from "./game/Simulation";
+import type { Agent, GameClock, GameLogEntry, Vec2 } from "./game/types";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
 import { GameLog } from "./ui/GameLog";
@@ -13,6 +14,7 @@ export default function App() {
   const [, forceFrame] = useState(0);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [logs, setLogs] = useState<GameLogEntry[]>([]);
+  const [clock, setClock] = useState<GameClock | null>(null);
   const [pendingPlacement, setPendingPlacement] = useState(false);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -30,6 +32,7 @@ export default function App() {
         }
         setAgents(snapshot.agents);
         setLogs(snapshot.logs);
+        setClock(snapshot.clock);
         forceFrame((value) => value + 1);
       },
       onTileClick: (position) => {
@@ -53,9 +56,18 @@ export default function App() {
       game.tick(TICK_MS / 1000);
     }, TICK_MS);
 
+    const saveOnHide = () => {
+      if (document.visibilityState === "hidden") {
+        game.simulation.saveNow();
+      }
+    };
+    document.addEventListener("visibilitychange", saveOnHide);
+
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", saveOnHide);
+      game.simulation.saveNow();
       game.destroy();
       gameRef.current = null;
     };
@@ -70,6 +82,20 @@ export default function App() {
     setPendingPlacement(true);
   };
 
+  const resetWorld = () => {
+    if (!window.confirm("Start a new world? The current village will be lost.")) {
+      return;
+    }
+    localStorage.removeItem(SAVE_KEY);
+    window.location.reload();
+  };
+
+  const clockLabel = clock
+    ? `Year ${clock.year} · Day ${clock.day} · ${String(clock.hour).padStart(2, "0")}:${String(
+        clock.minute,
+      ).padStart(2, "0")} ${clock.isNight ? "🌙" : "☀️"}`
+    : "";
+
   return (
     <main className="app-shell">
       <section className="game-surface" aria-label="Project Genesis map">
@@ -80,9 +106,11 @@ export default function App() {
           <h1>Project Genesis</h1>
           <span>{agents.length} residents</span>
         </header>
+        {clockLabel && <p className="clock-line">{clockLabel}</p>}
         <ControlPanel
           onAddRandom={addRandomAgent}
           onPlaceAgent={enablePlacement}
+          onReset={resetWorld}
           placementActive={pendingPlacement}
         />
         <AgentCreator onCreate={addRandomAgent} />

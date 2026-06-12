@@ -13,6 +13,13 @@ const FIRST_NAMES = [
 
 let nextAgentId = 1;
 
+// Keeps ids unique after loading a save that already contains agents.
+export function bumpAgentIdCounter(minimum: number) {
+  if (nextAgentId < minimum) {
+    nextAgentId = minimum;
+  }
+}
+
 export function createRandomAgent(position: Vec2): Agent {
   const gender = Math.random() > 0.5 ? "male" : "female";
   const name = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];

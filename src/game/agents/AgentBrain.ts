@@ -20,10 +20,11 @@ const STAMINA_TIRED = 70;
 
 export class AgentBrain {
   update(agent: Agent, simulation: Simulation, deltaSeconds: number) {
-    agent.health.hunger = Math.min(100, agent.health.hunger + deltaSeconds * 0.35);
+    const hungerRate = agent.state === "Sleep" ? 0.12 : 0.35;
+    agent.health.hunger = Math.min(100, agent.health.hunger + deltaSeconds * hungerRate);
     agent.health.stamina = Math.max(0, agent.health.stamina - deltaSeconds * 0.06);
 
-    if (agent.health.stamina < 12 && agent.state !== "Rest") {
+    if (agent.health.stamina < 12 && agent.state !== "Rest" && agent.state !== "Sleep") {
       this.abandonTask(agent, simulation);
       this.setState(agent, simulation, "Rest");
     }
@@ -75,7 +76,10 @@ export class AgentBrain {
         this.eat(agent, simulation, deltaSeconds);
         break;
       case "MoveHome":
-        this.moveAlongPath(agent, simulation, deltaSeconds, "Rest");
+        this.moveAlongPath(agent, simulation, deltaSeconds, simulation.isNight() ? "Sleep" : "Rest");
+        break;
+      case "Sleep":
+        this.sleep(agent, simulation, deltaSeconds);
         break;
       case "Rest":
         this.rest(agent, simulation, deltaSeconds);
@@ -84,6 +88,11 @@ export class AgentBrain {
   }
 
   private decideNextAction(agent: Agent, simulation: Simulation) {
+    if (simulation.isNight()) {
+      this.goSleep(agent, simulation);
+      return;
+    }
+
     if (agent.health.hunger >= HUNGER_SEEK_THRESHOLD) {
       this.setState(agent, simulation, "FindFood");
       return;
@@ -273,6 +282,31 @@ export class AgentBrain {
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
+  }
+
+  private goSleep(agent: Agent, simulation: Simulation) {
+    if (agent.home && !samePos(roundVec(agent.position), agent.home)) {
+      const path = findPath(simulation.world, { start: agent.position, goal: agent.home });
+      if (path) {
+        agent.target = { ...agent.home };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveHome");
+        return;
+      }
+    }
+    this.setState(agent, simulation, "Sleep");
+  }
+
+  private sleep(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const atHome = Boolean(agent.home && samePos(roundVec(agent.position), agent.home));
+    const regenRate = atHome ? 12 : 6;
+    agent.health.stamina = Math.min(100, agent.health.stamina + deltaSeconds * regenRate);
+
+    if (!simulation.isNight()) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+    }
   }
 
   private goRest(agent: Agent, simulation: Simulation) {

@@ -20,6 +20,23 @@ const MOVE_COSTS: Record<TileType, number> = {
 
 export const MIN_MOVE_COST = MOVE_COSTS.Road;
 
+// Single-character codes for compact save data.
+const TILE_CODES: Record<TileType, string> = {
+  Grass: "G",
+  Tree: "T",
+  Water: "W",
+  Dirt: "D",
+  Road: "R",
+  HouseSite: "S",
+  HouseFoundation: "F",
+  House: "H",
+  Berry: "B",
+};
+
+const CODE_TILES: Record<string, TileType> = Object.fromEntries(
+  Object.entries(TILE_CODES).map(([type, code]) => [code, type as TileType]),
+);
+
 export class WorldMap {
   readonly width: number;
   readonly height: number;
@@ -136,6 +153,27 @@ export class WorldMap {
     }
 
     return this.findNearestType(origin, "Grass");
+  }
+
+  serializeTiles(): string {
+    return this.tiles.map((tile) => TILE_CODES[tile.type]).join("");
+  }
+
+  static fromSerializedTiles(width: number, height: number, codes: string): WorldMap | undefined {
+    if (codes.length !== width * height) {
+      return undefined;
+    }
+
+    const map = new WorldMap(width, height);
+    for (let i = 0; i < codes.length; i += 1) {
+      const type = CODE_TILES[codes[i]];
+      if (!type) {
+        return undefined;
+      }
+      map.tiles[i].type = type;
+    }
+    map.changeVersion += 1;
+    return map;
   }
 
   countType(type: TileType): number {

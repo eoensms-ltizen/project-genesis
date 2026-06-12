@@ -27,6 +27,7 @@ export type AgentState =
   | "MoveToFood"
   | "Eat"
   | "MoveHome"
+  | "Sleep"
   | "Rest";
 
 export type Agent = {
@@ -63,7 +64,16 @@ export type GameLogEntry = {
   message: string;
 };
 
+export type GameClock = {
+  year: number;
+  day: number;
+  hour: number;
+  minute: number;
+  isNight: boolean;
+};
+
 export type SimulationSnapshot = {
   agents: Agent[];
   logs: GameLogEntry[];
+  clock: GameClock;
 };

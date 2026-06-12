@@ -95,6 +95,10 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Emergent roads from traffic (Grass -> Dirt -> Road)
 - Autonomous population growth (births when housing + food allow)
 - Tile claiming so residents do not pick the same tree/berry/site
+- Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
+- Day/night cycle: darkness overlay, warm window lights on houses at night
+- Sleep schedule: residents head home at 21:00 and sleep until 06:00
+- Save/load via localStorage (autosave every 15s, on tab hide, on unmount; "New world" button resets)
 - React side panel, resident status display, game log display
 - PixiJS map rendering
 - Separation between simulation and renderer
@@ -167,7 +171,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 - Newborn residents are functionally adults (age/growth is cosmetic).
 - One house per resident; houses never upgrade or get shared.
 - No starvation or death; hunger only redirects behavior.
-- LocalStorage save/load is not implemented.
+- Saves drop in-flight tasks: agents reload as Idle and re-decide (claims for reserved house sites are restored).
 
 ## Verification Already Performed
 
@@ -183,7 +187,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. Follow its milestones (M1-M5); M1 (game time + multi-tile buildings + save/load) comes first.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 status: game time, day/night, sleep, and save/load are done; multi-tile buildings are the remaining M1 item and the next priority.
 
 ## Next Recommended Work
 

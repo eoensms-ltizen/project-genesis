@@ -57,6 +57,11 @@ export class GameApp {
     if (!this.started) {
       return;
     }
-    this.renderer.render(this.simulation.world, this.simulation.agents, this.placementMode);
+    this.renderer.render(
+      this.simulation.world,
+      this.simulation.agents,
+      this.placementMode,
+      this.simulation.getDarkness(),
+    );
   }
 }

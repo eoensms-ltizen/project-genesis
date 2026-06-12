@@ -1,10 +1,16 @@
 type ControlPanelProps = {
   onAddRandom: () => void;
   onPlaceAgent: () => void;
+  onReset: () => void;
   placementActive: boolean;
 };
 
-export function ControlPanel({ onAddRandom, onPlaceAgent, placementActive }: ControlPanelProps) {
+export function ControlPanel({
+  onAddRandom,
+  onPlaceAgent,
+  onReset,
+  placementActive,
+}: ControlPanelProps) {
   return (
     <section className="panel-section">
       <h2>Controls</h2>
@@ -14,6 +20,9 @@ export function ControlPanel({ onAddRandom, onPlaceAgent, placementActive }: Con
         </button>
         <button type="button" onClick={onPlaceAgent} data-active={placementActive}>
           Place on map
+        </button>
+        <button type="button" onClick={onReset}>
+          New world
         </button>
       </div>
     </section>

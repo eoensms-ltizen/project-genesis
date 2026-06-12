@@ -1,6 +1,13 @@
 import { AgentBrain } from "./agents/AgentBrain";
-import { createRandomAgent } from "./agents/Agent";
-import type { Agent, GameLogEntry, SimulationSnapshot, TileType, Vec2 } from "./types";
+import { bumpAgentIdCounter, createRandomAgent } from "./agents/Agent";
+import type {
+  Agent,
+  GameClock,
+  GameLogEntry,
+  SimulationSnapshot,
+  TileType,
+  Vec2,
+} from "./types";
 import { WorldMap } from "./world/WorldMap";
 
 type SimulationOptions = {
@@ -19,6 +26,30 @@ const TREE_CAP = 320;
 const BIRTH_COOLDOWN_SECONDS = 45;
 const POPULATION_CAP = 30;
 
+// One in-game day passes in five real minutes; the clock starts at 08:00.
+const DAY_LENGTH_SECONDS = 300;
+const DAYS_PER_YEAR = 20;
+const CLOCK_START_OFFSET_SECONDS = (8 / 24) * DAY_LENGTH_SECONDS;
+const NIGHT_START_HOUR = 21;
+const NIGHT_END_HOUR = 6;
+
+export const SAVE_KEY = "project-genesis-save";
+const SAVE_VERSION = 1;
+const AUTOSAVE_INTERVAL_SECONDS = 15;
+
+type SavedAgent = Omit<Agent, "target" | "path" | "state" | "actionTimer">;
+
+type SaveData = {
+  version: number;
+  elapsedSeconds: number;
+  lastBirthAt: number;
+  worldWidth: number;
+  worldHeight: number;
+  tiles: string;
+  traffic: [number, number][];
+  agents: SavedAgent[];
+};
+
 export class Simulation {
   readonly world: WorldMap;
   readonly agents: Agent[] = [];
@@ -27,18 +58,46 @@ export class Simulation {
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
   private readonly claimedTiles = new Set<string>();
-  private readonly traffic = new Map<number, number>();
+  private traffic = new Map<number, number>();
   private elapsedSeconds = 0;
   private natureTimer = 0;
+  private autosaveTimer = 0;
   private lastBirthAt = 0;
   private lastPathLogAt = -PATH_LOG_COOLDOWN_SECONDS;
   private nextLogId = 1;
   private dirty = true;
 
   constructor(options: SimulationOptions) {
-    this.world = WorldMap.createRandom();
     this.onChange = options.onChange;
-    this.log("A new valley is ready.");
+
+    const saved = loadSaveData();
+    if (saved) {
+      this.world =
+        WorldMap.fromSerializedTiles(saved.worldWidth, saved.worldHeight, saved.tiles) ??
+        WorldMap.createRandom();
+      this.elapsedSeconds = saved.elapsedSeconds;
+      this.lastBirthAt = saved.lastBirthAt;
+      this.traffic = new Map(saved.traffic);
+      for (const savedAgent of saved.agents) {
+        const agent: Agent = {
+          ...savedAgent,
+          state: "Idle",
+          actionTimer: 0,
+        };
+        if (agent.homeSite) {
+          this.claimTile(agent.homeSite);
+        }
+        this.agents.push(agent);
+        const idNumber = Number(agent.id.split("-")[1]);
+        if (Number.isFinite(idNumber)) {
+          bumpAgentIdCounter(idNumber + 1);
+        }
+      }
+      this.log("The village awakens.");
+    } else {
+      this.world = WorldMap.createRandom();
+      this.log("A new valley is ready.");
+    }
   }
 
   addRandomAgent(position: Vec2) {
@@ -62,8 +121,83 @@ export class Simulation {
       this.tryBirth();
     }
 
+    this.autosaveTimer += deltaSeconds;
+    if (this.autosaveTimer >= AUTOSAVE_INTERVAL_SECONDS) {
+      this.autosaveTimer = 0;
+      this.saveNow();
+    }
+
+    // The clock display changes every frame's worth of game minutes.
+    this.notifyChanged();
+
     if (this.dirty) {
       this.emitChange();
+    }
+  }
+
+  getClock(): GameClock {
+    const total = this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS;
+    const dayFloat = total / DAY_LENGTH_SECONDS;
+    const dayIndex = Math.floor(dayFloat);
+    const hourFloat = (dayFloat - dayIndex) * 24;
+    const hour = Math.floor(hourFloat);
+    const minute = Math.floor((hourFloat - hour) * 60);
+    return {
+      year: Math.floor(dayIndex / DAYS_PER_YEAR) + 1,
+      day: (dayIndex % DAYS_PER_YEAR) + 1,
+      hour,
+      minute,
+      isNight: hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR,
+    };
+  }
+
+  isNight(): boolean {
+    return this.getClock().isNight;
+  }
+
+  /** 0 in daylight, 1 in deep night, with dusk/dawn ramps. */
+  getDarkness(): number {
+    const total = this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS;
+    const hourFloat = ((total / DAY_LENGTH_SECONDS) % 1) * 24;
+    if (hourFloat >= 22 || hourFloat < 4) {
+      return 1;
+    }
+    if (hourFloat >= 19) {
+      return (hourFloat - 19) / 3;
+    }
+    if (hourFloat < 7) {
+      return (7 - hourFloat) / 3;
+    }
+    return 0;
+  }
+
+  saveNow() {
+    try {
+      const data: SaveData = {
+        version: SAVE_VERSION,
+        elapsedSeconds: this.elapsedSeconds,
+        lastBirthAt: this.lastBirthAt,
+        worldWidth: this.world.width,
+        worldHeight: this.world.height,
+        tiles: this.world.serializeTiles(),
+        traffic: [...this.traffic.entries()],
+        agents: this.agents.map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          age: agent.age,
+          gender: agent.gender,
+          job: agent.job,
+          personality: { ...agent.personality },
+          health: { ...agent.health },
+          position: { ...agent.position },
+          inventory: { ...agent.inventory },
+          home: agent.home ? { ...agent.home } : undefined,
+          homeSite: agent.homeSite ? { ...agent.homeSite } : undefined,
+        })),
+      };
+      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    } catch {
+      // Storage may be full or unavailable; the game keeps running without saves.
     }
   }
 
@@ -131,6 +265,7 @@ export class Simulation {
         inventory: { ...agent.inventory },
       })),
       logs: [...this.logs],
+      clock: this.getClock(),
     };
   }
 
@@ -258,6 +393,22 @@ export class Simulation {
     }
 
     return { x: 0, y: 0 };
+  }
+}
+
+function loadSaveData(): SaveData | undefined {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) {
+      return undefined;
+    }
+    const data = JSON.parse(raw) as SaveData;
+    if (data.version !== SAVE_VERSION || typeof data.tiles !== "string") {
+      return undefined;
+    }
+    return data;
+  } catch {
+    return undefined;
   }
 }
 
