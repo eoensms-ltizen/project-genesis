@@ -28,6 +28,7 @@ export type AgentState =
   | "Eat"
   | "MoveHome"
   | "Sleep"
+  | "Chat"
   | "Rest";
 
 export type BuildingKind = "house";
@@ -73,6 +74,8 @@ export type Agent = {
   homeSite?: Vec2;
   homeBuildingId?: string;
   actionTimer: number;
+  socialCooldown?: number;
+  resumeState?: AgentState;
 };
 
 export type GameLogEntry = {

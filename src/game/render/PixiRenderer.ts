@@ -230,6 +230,26 @@ function drawAgent(graphics: Graphics, agent: Agent) {
   graphics.fill(0xf2e6bd);
   graphics.circle(px + 1.5, py - 1.5, 1.4);
   graphics.fill(0x20231d);
+
+  if (agent.state === "Chat") {
+    drawSpeechBubble(graphics, px, py);
+  } else if (agent.state === "Sleep") {
+    graphics.circle(px + 5, py - 7, 1.2);
+    graphics.fill(0xbfd2e8);
+    graphics.circle(px + 8, py - 10, 1.7);
+    graphics.fill(0xbfd2e8);
+  }
+}
+
+function drawSpeechBubble(graphics: Graphics, px: number, py: number) {
+  graphics.roundRect(px + 2, py - 15, 14, 9, 3);
+  graphics.fill({ color: 0xf7f3e8, alpha: 0.95 });
+  graphics.poly([px + 5, py - 6, px + 9, py - 6, px + 4, py - 2]);
+  graphics.fill({ color: 0xf7f3e8, alpha: 0.95 });
+  for (const dot of [0, 1, 2]) {
+    graphics.circle(px + 6 + dot * 3.4, py - 10.5, 1);
+    graphics.fill(0x4a4a42);
+  }
 }
 
 function drawTarget(graphics: Graphics, target: Vec2) {

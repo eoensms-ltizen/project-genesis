@@ -18,6 +18,18 @@ const HUNGER_SNACK_THRESHOLD = 40;
 const STAMINA_EXHAUSTED = 25;
 const STAMINA_TIRED = 70;
 
+const CHAT_DURATION_SECONDS = 2.5;
+const CHAT_COOLDOWN_SECONDS = 40;
+const CHAT_RANGE_TILES = 1.6;
+// States where a resident is free enough to stop for a quick chat.
+const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
+  "Idle",
+  "MoveToTree",
+  "MoveToHouseSite",
+  "MoveToFood",
+  "MoveHome",
+]);
+
 export class AgentBrain {
   update(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     const hungerRate = agent.state === "Sleep" ? 0.12 : 0.35;
@@ -27,6 +39,11 @@ export class AgentBrain {
     if (agent.health.stamina < 12 && agent.state !== "Rest" && agent.state !== "Sleep") {
       this.abandonTask(agent, simulation);
       this.setState(agent, simulation, "Rest");
+    }
+
+    agent.socialCooldown = Math.max(0, (agent.socialCooldown ?? 15) - deltaSeconds);
+    if (agent.socialCooldown === 0 && CHATTABLE_STATES.has(agent.state)) {
+      this.tryStartChat(agent, simulation);
     }
 
     switch (agent.state) {
@@ -80,6 +97,9 @@ export class AgentBrain {
         break;
       case "Sleep":
         this.sleep(agent, simulation, deltaSeconds);
+        break;
+      case "Chat":
+        this.chat(agent, simulation, deltaSeconds);
         break;
       case "Rest":
         this.rest(agent, simulation, deltaSeconds);
@@ -300,6 +320,40 @@ export class AgentBrain {
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
+  }
+
+  private tryStartChat(agent: Agent, simulation: Simulation) {
+    const partner = simulation.agents.find(
+      (other) =>
+        other !== agent &&
+        (other.socialCooldown ?? 1) === 0 &&
+        CHATTABLE_STATES.has(other.state) &&
+        distance(agent.position, other.position) <= CHAT_RANGE_TILES,
+    );
+    if (!partner) {
+      return;
+    }
+
+    this.startChat(agent, simulation);
+    this.startChat(partner, simulation);
+    simulation.log(`${agent.name} and ${partner.name} stopped for a chat.`);
+  }
+
+  private startChat(agent: Agent, simulation: Simulation) {
+    agent.resumeState = agent.state === "Idle" ? undefined : agent.state;
+    agent.socialCooldown = CHAT_COOLDOWN_SECONDS;
+    this.setState(agent, simulation, "Chat");
+  }
+
+  private chat(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < CHAT_DURATION_SECONDS) {
+      return;
+    }
+
+    const resume = agent.resumeState;
+    agent.resumeState = undefined;
+    this.setState(agent, simulation, resume ?? "Idle");
   }
 
   private goSleep(agent: Agent, simulation: Simulation) {

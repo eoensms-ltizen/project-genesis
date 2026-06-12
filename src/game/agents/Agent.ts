@@ -9,6 +9,22 @@ const FIRST_NAMES = [
   "Sora",
   "Taemin",
   "Yuna",
+  "Jiho",
+  "Seo-yeon",
+  "Minjun",
+  "Haeun",
+  "Siwoo",
+  "Ari",
+  "Geon",
+  "Dahee",
+  "Rowoon",
+  "Bom",
+  "Iseo",
+  "Kyu",
+  "Nari",
+  "Onyu",
+  "Pureum",
+  "Saebyeok",
 ];
 
 let nextAgentId = 1;
@@ -20,9 +36,9 @@ export function bumpAgentIdCounter(minimum: number) {
   }
 }
 
-export function createRandomAgent(position: Vec2): Agent {
+export function createRandomAgent(position: Vec2, takenNames?: Set<string>): Agent {
   const gender = Math.random() > 0.5 ? "male" : "female";
-  const name = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+  const name = pickName(takenNames);
 
   return {
     id: `agent-${nextAgentId++}`,
@@ -51,4 +67,22 @@ export function createRandomAgent(position: Vec2): Agent {
 
 function randomTrait(): number {
   return Math.round((0.25 + Math.random() * 0.75) * 100) / 100;
+}
+
+function pickName(takenNames?: Set<string>): string {
+  const available = takenNames
+    ? FIRST_NAMES.filter((name) => !takenNames.has(name))
+    : FIRST_NAMES;
+  if (available.length > 0) {
+    return available[Math.floor(Math.random() * available.length)];
+  }
+
+  // Every base name is in use; suffix a generation number.
+  const base = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+  for (let generation = 2; ; generation += 1) {
+    const candidate = `${base} ${generation}`;
+    if (!takenNames?.has(candidate)) {
+      return candidate;
+    }
+  }
 }

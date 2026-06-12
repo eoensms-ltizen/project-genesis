@@ -86,6 +86,7 @@ export default function App() {
     if (!window.confirm("Start a new world? The current village will be lost.")) {
       return;
     }
+    gameRef.current?.simulation.disableSaving();
     localStorage.removeItem(SAVE_KEY);
     window.location.reload();
   };

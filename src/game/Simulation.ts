@@ -40,7 +40,10 @@ export const SAVE_KEY = "project-genesis-save";
 const SAVE_VERSION = 2;
 const AUTOSAVE_INTERVAL_SECONDS = 15;
 
-type SavedAgent = Omit<Agent, "target" | "path" | "state" | "actionTimer">;
+type SavedAgent = Omit<
+  Agent,
+  "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
+>;
 
 type SaveData = {
   version: number;
@@ -73,6 +76,7 @@ export class Simulation {
   private lastPathLogAt = -PATH_LOG_COOLDOWN_SECONDS;
   private nextLogId = 1;
   private dirty = true;
+  private savingDisabled = false;
 
   constructor(options: SimulationOptions) {
     this.onChange = options.onChange;
@@ -113,7 +117,7 @@ export class Simulation {
 
   addRandomAgent(position: Vec2) {
     const spawn = this.findSpawnPosition(position);
-    const agent = createRandomAgent(spawn);
+    const agent = createRandomAgent(spawn, this.takenNames());
     this.agents.push(agent);
     this.log(`${agent.name} spawned.`);
     this.notifyChanged();
@@ -226,7 +230,15 @@ export class Simulation {
     }
   }
 
+  /** Stops all future saves; used by "New world" so the wiped save stays wiped. */
+  disableSaving() {
+    this.savingDisabled = true;
+  }
+
   saveNow() {
+    if (this.savingDisabled) {
+      return;
+    }
     try {
       const data: SaveData = {
         version: SAVE_VERSION,
@@ -420,11 +432,15 @@ export class Simulation {
 
     const house = houses[Math.floor(Math.random() * houses.length)];
     const spawn = this.findSpawnPosition({ x: house.door.x, y: house.door.y + 1 });
-    const child = createRandomAgent(spawn);
+    const child = createRandomAgent(spawn, this.takenNames());
     this.agents.push(child);
     this.lastBirthAt = this.elapsedSeconds;
     this.log(`${child.name} was born. The village is growing.`);
     this.notifyChanged();
+  }
+
+  private takenNames(): Set<string> {
+    return new Set(this.agents.map((agent) => agent.name));
   }
 
   private emitChange() {

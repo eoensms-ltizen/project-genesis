@@ -97,6 +97,8 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Emergent roads from traffic (Grass -> Dirt -> Road)
 - Autonomous population growth (births when housing + food allow)
 - Tile claiming so residents do not pick the same tree/berry/site
+- Social chats: free residents who pass within 1.6 tiles stop for a 2.5s chat (speech bubble, log, 40s cooldown), then resume what they were doing
+- Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
 - Day/night cycle: darkness overlay, warm window lights on houses at night
 - Sleep schedule: residents head home at 21:00 and sleep until 06:00
