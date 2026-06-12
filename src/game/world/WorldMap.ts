@@ -25,6 +25,9 @@ export class WorldMap {
   readonly height: number;
   readonly tiles: Tile[];
 
+  // Bumped on every tile change so the renderer can skip redrawing an unchanged world.
+  private changeVersion = 0;
+
   constructor(width = 64, height = 64) {
     this.width = width;
     this.height = height;
@@ -66,9 +69,14 @@ export class WorldMap {
 
   setTile(position: Vec2, type: TileType) {
     const tile = this.getTile(position);
-    if (tile) {
+    if (tile && tile.type !== type) {
       tile.type = type;
+      this.changeVersion += 1;
     }
+  }
+
+  get version(): number {
+    return this.changeVersion;
   }
 
   inBounds(position: Vec2): boolean {
@@ -146,7 +154,7 @@ export class WorldMap {
       for (let x = center.x - 1; x <= center.x + 1; x += 1) {
         const tile = this.getTile({ x, y });
         if (tile && tile.type === "Grass" && Math.random() < 0.65) {
-          tile.type = "Berry";
+          this.setTile({ x, y }, "Berry");
         }
       }
     }

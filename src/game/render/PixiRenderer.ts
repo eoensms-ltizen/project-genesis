@@ -14,6 +14,12 @@ export class PixiRenderer {
   private readonly app = new Application();
   private readonly worldLayer = new Container();
   private readonly agentLayer = new Container();
+  // Graphics are created once and reused: recreating them every frame leaks
+  // GPU geometry (removeChildren does not destroy) and crashes mobile browsers.
+  private readonly worldGraphics = new Graphics();
+  private readonly overlayGraphics = new Graphics();
+  private readonly agentGraphics = new Graphics();
+  private lastWorldVersion = -1;
   private initialized = false;
 
   constructor(host: HTMLElement, options: RendererOptions) {
@@ -31,6 +37,9 @@ export class PixiRenderer {
     this.host.appendChild(this.app.canvas);
     this.app.stage.addChild(this.worldLayer);
     this.app.stage.addChild(this.agentLayer);
+    this.worldLayer.addChild(this.worldGraphics);
+    this.worldLayer.addChild(this.overlayGraphics);
+    this.agentLayer.addChild(this.agentGraphics);
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
     this.app.stage.on("pointerdown", (event) => {
@@ -49,30 +58,28 @@ export class PixiRenderer {
       return;
     }
 
-    this.worldLayer.removeChildren();
-    this.agentLayer.removeChildren();
     this.layoutWorld(world);
 
-    const graphics = new Graphics();
-    for (const tile of world.tiles) {
-      drawTile(graphics, tile.x, tile.y, tile.type);
-    }
-    this.worldLayer.addChild(graphics);
-
-    const agentGraphics = new Graphics();
-    for (const agent of agents) {
-      drawAgent(agentGraphics, agent);
-      if (agent.target) {
-        drawTarget(agentGraphics, agent.target);
+    if (world.version !== this.lastWorldVersion) {
+      this.lastWorldVersion = world.version;
+      this.worldGraphics.clear();
+      for (const tile of world.tiles) {
+        drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
       }
     }
-    this.agentLayer.addChild(agentGraphics);
 
+    this.agentGraphics.clear();
+    for (const agent of agents) {
+      drawAgent(this.agentGraphics, agent);
+      if (agent.target) {
+        drawTarget(this.agentGraphics, agent.target);
+      }
+    }
+
+    this.overlayGraphics.clear();
     if (placementMode) {
-      const overlay = new Graphics();
-      overlay.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
-      overlay.stroke({ color: 0xd7b65f, width: 3, alpha: 0.9 });
-      this.worldLayer.addChild(overlay);
+      this.overlayGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+      this.overlayGraphics.stroke({ color: 0xd7b65f, width: 3, alpha: 0.9 });
     }
   }
 
