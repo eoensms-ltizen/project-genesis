@@ -36,9 +36,13 @@ export type AgentState =
   | "FarmWork"
   | "MoveToPave"
   | "Pave"
+  | "MoveToKitchen"
+  | "Cook"
   | "Rest";
 
-export type BuildingKind = "house" | "warehouse";
+export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook";
+
+export type BuildingKind = "house" | "warehouse" | "kitchen";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -59,7 +63,7 @@ export type Agent = {
   name: string;
   age: number;
   gender: "male" | "female";
-  job: "none" | "builder" | "farmer" | "fisher" | "woodcutter";
+  job: AgentJob;
   personality: {
     diligence: number;
     sociability: number;
@@ -84,7 +88,7 @@ export type Agent = {
   projectBuildingId?: string;
   socialCooldown?: number;
   resumeState?: AgentState;
-  eatPlan?: "berry" | "warehouse";
+  eatPlan?: "berry" | "warehouse" | "meal";
 };
 
 export type GameLogEntry = {
@@ -107,4 +111,5 @@ export type SimulationSnapshot = {
   clock: GameClock;
   era: number;
   foodStock: number;
+  meals: number;
 };

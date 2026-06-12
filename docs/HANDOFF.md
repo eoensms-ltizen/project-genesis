@@ -101,6 +101,8 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Farming (Settlement era): residents till 3x3 fields, sow, crops ripen over time, harvest +2 food to the village stock (work pauses at 50 food)
 - Communal warehouse (3x2 building, 10 wood): first priority once Settlement era hits; hungry residents eat from its stock before foraging berries
 - Road paving (Town era): residents pave dirt tiles adjacent to existing roads, formalizing the street network
+- Jobs (Settlement era): demand-driven assignment of farmers, woodcutters, a cook, and a builder (quotas scale with population); job shown in the resident list and as a colored ring on the map
+- Village kitchen (2x2, second communal project once food >= 10): the cook turns 2 raw food into 2 warm meals; residents prefer meals (hunger -80) over warehouse raw food over berries
 - Social chats: free residents who pass within 1.6 tiles stop for a 2.5s chat (speech bubble, log, 40s cooldown), then resume what they were doing
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
@@ -195,7 +197,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, production chains, industry) lives in `docs/DESIGN.md`. M1 and the core of M2 are complete (game time, day/night, sleep, save/load, 2x2 houses, eras, farming, warehouse, paving). Town-era paving has not been observed in a live run yet (eras 0-1 verified in browser). Next: M3 — jobs, cooking, church, plaza, livestock/fishing; or visual polish (sprites, seasons).
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1, M2, and the core of M3 are complete (game time, day/night, sleep, save/load, 2x2 houses, eras 0-2 all verified live, farming, warehouse, paving, jobs, kitchen/cooking). Remaining M3 items: church + worship gatherings, plaza, livestock, fishing. Then M4: aesthetic jobs and decorations, family-based births, festivals.
 
 ## Next Recommended Work
 

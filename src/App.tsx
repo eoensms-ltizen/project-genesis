@@ -17,6 +17,7 @@ export default function App() {
   const [clock, setClock] = useState<GameClock | null>(null);
   const [era, setEra] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
+  const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -37,6 +38,7 @@ export default function App() {
         setClock(snapshot.clock);
         setEra(snapshot.era);
         setFoodStock(snapshot.foodStock);
+        setMeals(snapshot.meals);
         forceFrame((value) => value + 1);
       },
       onTileClick: (position) => {
@@ -100,7 +102,7 @@ export default function App() {
         clock.minute,
       ).padStart(2, "0")} ${clock.isNight ? "🌙" : "☀️"} · ${
         ERA_NAMES[era] ?? "Unknown"
-      } Era · 🌾 ${foodStock}`
+      } Era · 🌾 ${foodStock} · 🍲 ${meals}`
     : "";
 
   return (
@@ -131,7 +133,10 @@ export default function App() {
                 <article className="agent-row" key={agent.id}>
                   <div>
                     <strong>{agent.name}</strong>
-                    <span>{agent.state}</span>
+                    <span>
+                      {agent.job !== "none" ? `${agent.job} · ` : ""}
+                      {agent.state}
+                    </span>
                   </div>
                   <div>
                     <span>Wood {agent.inventory.wood}</span>

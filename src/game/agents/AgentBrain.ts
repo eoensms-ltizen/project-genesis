@@ -13,7 +13,12 @@ const TARGET_CANDIDATE_LIMIT = 12;
 
 const HOUSE_WOOD_COST = 8;
 const WAREHOUSE_WOOD_COST = 10;
+const KITCHEN_WOOD_COST = 8;
 const WOOD_STOCKPILE_CAP = 10;
+const WOODCUTTER_STOCKPILE_CAP = 14;
+const COOK_DURATION_SECONDS = 3;
+const COOK_RAW_COST = 2;
+const COOK_MEAL_YIELD = 2;
 const FARM_WORK_DURATION_SECONDS = 2;
 const PAVE_DURATION_SECONDS = 1.5;
 const MAX_FIELD_TILES = 12;
@@ -34,6 +39,7 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToFood",
   "MoveToFarm",
   "MoveToPave",
+  "MoveToKitchen",
   "MoveHome",
 ]);
 
@@ -99,6 +105,12 @@ export class AgentBrain {
         break;
       case "Pave":
         this.pave(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToKitchen":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Cook");
+        break;
+      case "Cook":
+        this.cook(agent, simulation, deltaSeconds);
         break;
       case "PlanHouse":
         this.planHouse(agent, simulation, deltaSeconds);
@@ -184,23 +196,23 @@ export class AgentBrain {
     }
 
     if (simulation.era >= 1) {
-      // The warehouse outranks field work: gather wood for it first.
-      if (!simulation.hasAnyWarehouse()) {
-        if (agent.inventory.wood >= WAREHOUSE_WOOD_COST) {
-          if (this.startWarehouse(agent, simulation)) {
-            return;
-          }
-        } else {
-          this.setState(agent, simulation, "FindTree");
-          return;
-        }
+      // Communal buildings outrank field work: gather wood for them first.
+      const communal = this.communalProject(agent, simulation);
+      if (communal === "started") {
+        return;
       }
-      if (this.findFarmWork(agent, simulation)) {
+      if (communal === "gather") {
+        this.setState(agent, simulation, "FindTree");
+        return;
+      }
+
+      if (this.doJobWork(agent, simulation)) {
         return;
       }
     }
 
-    if (agent.inventory.wood < WOOD_STOCKPILE_CAP) {
+    const woodCap = agent.job === "woodcutter" ? WOODCUTTER_STOCKPILE_CAP : WOOD_STOCKPILE_CAP;
+    if (agent.inventory.wood < woodCap) {
       this.setState(agent, simulation, "FindTree");
       return;
     }
@@ -212,6 +224,53 @@ export class AgentBrain {
     // Nothing to do: head home and loiter there, like a villager would.
     if (!samePos(roundVec(agent.position), agent.home)) {
       this.goRest(agent, simulation);
+    }
+  }
+
+  /**
+   * Returns "started" when the agent took on a communal building project,
+   * "gather" when it should collect wood for one, "none" otherwise.
+   */
+  private communalProject(
+    agent: Agent,
+    simulation: Simulation,
+  ): "started" | "gather" | "none" {
+    let kind: "warehouse" | "kitchen" | undefined;
+    if (!simulation.hasAnyWarehouse()) {
+      kind = "warehouse";
+    } else if (
+      !simulation.hasAnyKitchen() &&
+      simulation.getWarehouse() &&
+      simulation.foodStock >= 10
+    ) {
+      kind = "kitchen";
+    }
+    if (!kind) {
+      return "none";
+    }
+
+    const cost = buildCost(kind);
+    if (agent.inventory.wood < cost) {
+      return "gather";
+    }
+    return this.startCommunalBuilding(agent, simulation, kind) ? "started" : "none";
+  }
+
+  private doJobWork(agent: Agent, simulation: Simulation): boolean {
+    switch (agent.job) {
+      case "cook":
+        return this.tryCook(agent, simulation) || this.findFarmWork(agent, simulation);
+      case "farmer":
+        return this.findFarmWork(agent, simulation);
+      case "builder":
+        return (
+          (simulation.era >= 2 && this.findPaveWork(agent, simulation)) ||
+          this.findFarmWork(agent, simulation)
+        );
+      case "woodcutter":
+        return false; // Falls through to the wood-gathering branch below.
+      default:
+        return this.findFarmWork(agent, simulation);
     }
   }
 
@@ -281,34 +340,86 @@ export class AgentBrain {
     this.setState(agent, simulation, "MoveToHouseSite");
   }
 
-  private startWarehouse(agent: Agent, simulation: Simulation): boolean {
-    const site = simulation.world.findBuildingSite(agent.position, 3, 2, (position) =>
+  private startCommunalBuilding(
+    agent: Agent,
+    simulation: Simulation,
+    kind: "warehouse" | "kitchen",
+  ): boolean {
+    const width = kind === "warehouse" ? 3 : 2;
+    const height = 2;
+    const site = simulation.world.findBuildingSite(agent.position, width, height, (position) =>
       simulation.isTileClaimed(position),
     );
     if (!site) {
       return false;
     }
-    const door = { x: site.x + 1, y: site.y + 1 };
+    const door = { x: site.x + Math.floor(width / 2), y: site.y + height - 1 };
     const path = findPath(simulation.world, { start: agent.position, goal: door });
     if (!path) {
       return false;
     }
 
     const building = simulation.registerBuilding({
-      kind: "warehouse",
+      kind,
       x: site.x,
       y: site.y,
-      width: 3,
-      height: 2,
+      width,
+      height,
       door,
     });
     simulation.claimBuildingFootprint(building);
     agent.projectBuildingId = building.id;
     agent.target = { ...door };
     agent.path = path;
-    simulation.log(`${agent.name} is planning a village warehouse.`);
+    simulation.log(
+      kind === "warehouse"
+        ? `${agent.name} is planning a village warehouse.`
+        : `${agent.name} is planning a village kitchen.`,
+    );
     this.setState(agent, simulation, "MoveToHouseSite");
     return true;
+  }
+
+  private tryCook(agent: Agent, simulation: Simulation): boolean {
+    const kitchen = simulation.getKitchen();
+    if (!kitchen) {
+      return false;
+    }
+    if (
+      simulation.foodStock < COOK_RAW_COST ||
+      simulation.meals >= simulation.agents.length * 2
+    ) {
+      return false;
+    }
+
+    const path = findPath(simulation.world, { start: agent.position, goal: kitchen.door });
+    if (!path) {
+      return false;
+    }
+
+    agent.target = { ...kitchen.door };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToKitchen");
+    return true;
+  }
+
+  private cook(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < COOK_DURATION_SECONDS) {
+      return;
+    }
+
+    if (simulation.foodStock >= COOK_RAW_COST) {
+      simulation.foodStock -= COOK_RAW_COST;
+      simulation.meals += COOK_MEAL_YIELD;
+      if (Math.random() < 0.4) {
+        simulation.log(`${agent.name} cooked warm meals at the kitchen.`);
+      }
+      simulation.notifyChanged();
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
   }
 
   private headToProject(agent: Agent, simulation: Simulation, door: Vec2) {
@@ -353,9 +464,9 @@ export class AgentBrain {
     if (building) {
       simulation.setBuildingStage(building, "site");
       simulation.log(
-        building.kind === "warehouse"
-          ? `${agent.name} staked out the warehouse.`
-          : `${agent.name} marked a future home.`,
+        building.kind === "house"
+          ? `${agent.name} marked a future home.`
+          : `${agent.name} staked out the ${building.kind}.`,
       );
     }
     agent.target = undefined;
@@ -377,9 +488,9 @@ export class AgentBrain {
     if (agent.actionTimer === 0 && building.stage !== "foundation") {
       simulation.setBuildingStage(building, "foundation");
       simulation.log(
-        building.kind === "warehouse"
-          ? `${agent.name} started building the warehouse.`
-          : `${agent.name} started building a house.`,
+        building.kind === "house"
+          ? `${agent.name} started building a house.`
+          : `${agent.name} started building the ${building.kind}.`,
       );
     }
 
@@ -396,7 +507,7 @@ export class AgentBrain {
       agent.homeSite = undefined;
       simulation.log(`${agent.name} finished their house.`);
     } else {
-      simulation.log(`${agent.name} built the village warehouse!`);
+      simulation.log(`${agent.name} built the village ${building.kind}!`);
     }
     agent.projectBuildingId = undefined;
     agent.target = undefined;
@@ -405,6 +516,18 @@ export class AgentBrain {
   }
 
   private findFood(agent: Agent, simulation: Simulation) {
+    const kitchen = simulation.getKitchen();
+    if (kitchen && simulation.meals > 0) {
+      const path = findPath(simulation.world, { start: agent.position, goal: kitchen.door });
+      if (path) {
+        agent.eatPlan = "meal";
+        agent.target = { ...kitchen.door };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveToFood");
+        return;
+      }
+    }
+
     const warehouse = simulation.getWarehouse();
     if (warehouse && simulation.foodStock > 0) {
       const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
@@ -438,7 +561,13 @@ export class AgentBrain {
       return;
     }
 
-    if (agent.eatPlan === "warehouse") {
+    if (agent.eatPlan === "meal") {
+      if (simulation.meals > 0) {
+        simulation.meals -= 1;
+        agent.health.hunger = Math.max(0, agent.health.hunger - 80);
+        simulation.log(`${agent.name} enjoyed a warm meal.`);
+      }
+    } else if (agent.eatPlan === "warehouse") {
       if (simulation.foodStock > 0) {
         simulation.foodStock -= 1;
         agent.health.hunger = Math.max(0, agent.health.hunger - 60);
@@ -814,8 +943,14 @@ function samePos(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
-function buildCost(kind: "house" | "warehouse"): number {
-  return kind === "warehouse" ? WAREHOUSE_WOOD_COST : HOUSE_WOOD_COST;
+function buildCost(kind: "house" | "warehouse" | "kitchen"): number {
+  if (kind === "warehouse") {
+    return WAREHOUSE_WOOD_COST;
+  }
+  if (kind === "kitchen") {
+    return KITCHEN_WOOD_COST;
+  }
+  return HOUSE_WOOD_COST;
 }
 
 function hasAdjacentRoad(world: Simulation["world"], position: Vec2): boolean {

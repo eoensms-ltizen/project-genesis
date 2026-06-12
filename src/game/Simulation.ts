@@ -2,6 +2,7 @@ import { AgentBrain } from "./agents/AgentBrain";
 import { bumpAgentIdCounter, createRandomAgent } from "./agents/Agent";
 import type {
   Agent,
+  AgentJob,
   Building,
   BuildingKind,
   BuildingStage,
@@ -37,7 +38,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -61,6 +62,7 @@ type SaveData = {
   nextBuildingId: number;
   era: number;
   foodStock: number;
+  meals: number;
 };
 
 export class Simulation {
@@ -69,6 +71,7 @@ export class Simulation {
   readonly buildings: Building[] = [];
   era = 0;
   foodStock = 0;
+  meals = 0;
 
   private nextBuildingId = 1;
   private readonly brain = new AgentBrain();
@@ -99,6 +102,7 @@ export class Simulation {
       this.nextBuildingId = saved.nextBuildingId;
       this.era = saved.era;
       this.foodStock = saved.foodStock;
+      this.meals = saved.meals;
       for (const building of saved.buildings) {
         this.buildings.push(building);
         if (building.stage !== "built") {
@@ -145,6 +149,7 @@ export class Simulation {
       this.growCrops();
       this.tryBirth();
       this.checkEraPromotion();
+      this.assignJobs();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -280,6 +285,7 @@ export class Simulation {
         nextBuildingId: this.nextBuildingId,
         era: this.era,
         foodStock: this.foodStock,
+        meals: this.meals,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -354,6 +360,7 @@ export class Simulation {
       clock: this.getClock(),
       era: this.era,
       foodStock: this.foodStock,
+      meals: this.meals,
     };
   }
 
@@ -466,6 +473,54 @@ export class Simulation {
 
   hasAnyWarehouse(): boolean {
     return this.buildings.some((building) => building.kind === "warehouse");
+  }
+
+  getKitchen(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "kitchen" && building.stage === "built",
+    );
+  }
+
+  hasAnyKitchen(): boolean {
+    return this.buildings.some((building) => building.kind === "kitchen");
+  }
+
+  /**
+   * Demand-driven job assignment. Quotas grow with population; existing
+   * holders keep their job, spare residents fill openings, excess holders
+   * are released back to general work.
+   */
+  private assignJobs() {
+    if (this.era < 1) {
+      return;
+    }
+
+    const population = this.agents.length;
+    const quotas: [AgentJob, number][] = [
+      ["farmer", Math.min(3, Math.max(1, Math.floor(population / 4)))],
+      ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
+      ["cook", this.hasAnyKitchen() ? 1 : 0],
+      ["builder", this.era >= 2 ? 1 : 0],
+    ];
+
+    for (const [job, quota] of quotas) {
+      const holders = this.agents.filter((agent) => agent.job === job);
+      for (let i = holders.length; i > quota; i -= 1) {
+        const released = holders[i - 1];
+        released.job = "none";
+      }
+      let missing = quota - Math.min(holders.length, quota);
+      for (const agent of this.agents) {
+        if (missing <= 0) {
+          break;
+        }
+        if (agent.job === "none") {
+          agent.job = job;
+          missing -= 1;
+          this.log(`${agent.name} became a ${job}.`);
+        }
+      }
+    }
   }
 
   private tryBirth() {

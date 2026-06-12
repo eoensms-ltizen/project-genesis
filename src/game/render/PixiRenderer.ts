@@ -239,6 +239,20 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  if (building.kind === "kitchen") {
+    // Cookhouse: olive roof and a chimney.
+    graphics.rect(px + 3, py + 10, w - 6, h - 13);
+    graphics.fill(0x8a6a44);
+    graphics.poly([px + 1, py + 13, px + w / 2, py + 2, px + w - 1, py + 13]);
+    graphics.fill(0x6f7a3e);
+    graphics.rect(px + w - 9, py + 2, 4, 8);
+    graphics.fill(0x5a5148);
+    const kitchenDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+    graphics.rect(kitchenDoorX - 3, py + h - 12, 6, 9);
+    graphics.fill(0x3a2c1c);
+    return;
+  }
+
   if (building.kind === "warehouse") {
     // Flat-roofed storehouse with crates by the door.
     graphics.rect(px + 2, py + 6, w - 4, h - 8);
@@ -269,9 +283,22 @@ function drawBuilding(graphics: Graphics, building: Building) {
   graphics.fill(0x2c3a44);
 }
 
+const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
+  farmer: 0x6fae4e,
+  woodcutter: 0x8a6a44,
+  cook: 0xe39a4e,
+  builder: 0x9aa7b5,
+};
+
 function drawAgent(graphics: Graphics, agent: Agent) {
   const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2;
   const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2;
+
+  const jobColor = JOB_COLORS[agent.job];
+  if (jobColor !== undefined) {
+    graphics.circle(px, py, 6);
+    graphics.fill({ color: jobColor, alpha: 0.85 });
+  }
 
   graphics.circle(px, py, 4.6);
   graphics.fill(0xf2e6bd);
