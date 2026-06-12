@@ -1,5 +1,7 @@
 node_modules/
 dist/
+tsconfig.tsbuildinfo
+.claude/
 .env
 .env.local
 .DS_Store

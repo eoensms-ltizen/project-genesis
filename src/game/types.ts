@@ -3,7 +3,16 @@ export type Vec2 = {
   y: number;
 };
 
-export type TileType = "Grass" | "Tree" | "Water" | "Dirt" | "Road" | "HouseSite";
+export type TileType =
+  | "Grass"
+  | "Tree"
+  | "Water"
+  | "Dirt"
+  | "Road"
+  | "HouseSite"
+  | "HouseFoundation"
+  | "House"
+  | "Berry";
 
 export type AgentState =
   | "Idle"
@@ -13,6 +22,11 @@ export type AgentState =
   | "FindHouseSite"
   | "MoveToHouseSite"
   | "PlanHouse"
+  | "BuildHouse"
+  | "FindFood"
+  | "MoveToFood"
+  | "Eat"
+  | "MoveHome"
   | "Rest";
 
 export type Agent = {
@@ -37,6 +51,9 @@ export type Agent = {
   };
   state: AgentState;
   target?: Vec2;
+  path?: Vec2[];
+  home?: Vec2;
+  homeSite?: Vec2;
   actionTimer: number;
 };
 

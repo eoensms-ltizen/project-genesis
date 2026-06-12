@@ -3,6 +3,22 @@ import type { Tile } from "./Tile";
 
 const TREE_CLUSTER_COUNT = 22;
 const WATER_CLUSTER_COUNT = 4;
+const BERRY_CLUSTER_COUNT = 7;
+
+// RimWorld-style per-tile movement cost. Lower is faster; Infinity is impassable.
+const MOVE_COSTS: Record<TileType, number> = {
+  Road: 0.6,
+  Dirt: 0.75,
+  Grass: 1,
+  HouseSite: 1,
+  House: 1,
+  HouseFoundation: 1.2,
+  Berry: 1.25,
+  Tree: Number.POSITIVE_INFINITY,
+  Water: Number.POSITIVE_INFINITY,
+};
+
+export const MIN_MOVE_COST = MOVE_COSTS.Road;
 
 export class WorldMap {
   readonly width: number;
@@ -34,6 +50,10 @@ export class WorldMap {
       map.paintCluster(center, 2 + Math.floor(Math.random() * 3), "Water", 0.78);
     }
 
+    for (let i = 0; i < BERRY_CLUSTER_COUNT; i += 1) {
+      map.seedBerryCluster();
+    }
+
     return map;
   }
 
@@ -61,8 +81,12 @@ export class WorldMap {
   }
 
   isWalkable(position: Vec2): boolean {
+    return Number.isFinite(this.moveCost(position));
+  }
+
+  moveCost(position: Vec2): number {
     const tile = this.getTile(position);
-    return Boolean(tile && tile.type !== "Water" && tile.type !== "Tree");
+    return tile ? MOVE_COSTS[tile.type] : Number.POSITIVE_INFINITY;
   }
 
   findNearestType(origin: Vec2, type: TileType): Vec2 | undefined {
@@ -83,7 +107,7 @@ export class WorldMap {
     return best;
   }
 
-  findHouseSiteCandidate(origin: Vec2): Vec2 | undefined {
+  findHouseSiteCandidate(origin: Vec2, isBlocked?: (position: Vec2) => boolean): Vec2 | undefined {
     const radiusLimit = 12;
     for (let radius = 2; radius <= radiusLimit; radius += 1) {
       for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
@@ -91,6 +115,9 @@ export class WorldMap {
           const position = { x, y };
           const tile = this.getTile(position);
           if (!tile || tile.type !== "Grass") {
+            continue;
+          }
+          if (isBlocked?.(position)) {
             continue;
           }
           if (this.hasOpenArea(position)) {
@@ -101,6 +128,28 @@ export class WorldMap {
     }
 
     return this.findNearestType(origin, "Grass");
+  }
+
+  countType(type: TileType): number {
+    let count = 0;
+    for (const tile of this.tiles) {
+      if (tile.type === type) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  seedBerryCluster() {
+    const center = this.randomLandPosition();
+    for (let y = center.y - 1; y <= center.y + 1; y += 1) {
+      for (let x = center.x - 1; x <= center.x + 1; x += 1) {
+        const tile = this.getTile({ x, y });
+        if (tile && tile.type === "Grass" && Math.random() < 0.65) {
+          tile.type = "Berry";
+        }
+      }
+    }
   }
 
   private hasOpenArea(position: Vec2): boolean {

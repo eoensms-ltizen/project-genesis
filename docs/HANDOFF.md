@@ -80,20 +80,22 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
   - Dirt
   - Road
   - HouseSite
-- Tree clusters
-- Small water clusters
+  - HouseFoundation
+  - House
+  - Berry
+- Tree, water, and berry clusters
 - Resident creation through UI buttons
 - Map-click resident placement mode
-- Resident state machine
-- Autonomous tree search
-- Straight-line movement to target
-- Wood chopping
-- Tree tile conversion to Grass after chopping
-- House site candidate selection
-- HouseSite tile marking
-- React side panel
-- Resident status display
-- Game log display
+- Resident state machine (see Current Agent Behavior)
+- A* pathfinding with per-tile movement costs
+- Wood chopping from adjacent tiles
+- Staged house construction (site -> foundation -> house, costs 5 wood)
+- Hunger-driven berry foraging and eating
+- Berry/tree natural regrowth, berry reseeding if extinct
+- Emergent roads from traffic (Grass -> Dirt -> Road)
+- Autonomous population growth (births when housing + food allow)
+- Tile claiming so residents do not pick the same tree/berry/site
+- React side panel, resident status display, game log display
 - PixiJS map rendering
 - Separation between simulation and renderer
 
@@ -106,6 +108,7 @@ src/game/Simulation.ts
 src/game/types.ts
 src/game/world/WorldMap.ts
 src/game/world/Tile.ts
+src/game/world/Pathfinder.ts
 src/game/agents/Agent.ts
 src/game/agents/AgentBrain.ts
 src/game/render/PixiRenderer.ts
@@ -126,109 +129,79 @@ src/ui/GameLog.tsx
 
 The current design is deliberately simple. Do not introduce ECS, server state, complex pathfinding frameworks, or LLM behavior until the core game loop is more proven.
 
-## Current Agent Flow
+## Current Agent Behavior
 
-```text
-Idle
--> FindTree
--> MoveToTree
--> ChopTree
--> FindHouseSite
--> MoveToHouseSite
--> PlanHouse
--> Idle
-```
+Decision priority in `AgentBrain.decideNextAction` (checked in Idle):
 
-Rest exists as a state, but survival pressure is still shallow.
+1. Hunger >= 65 -> find berries and eat (>= 40 if they already have a home)
+2. Stamina < 25 -> rest (go home first if they have one; rest is faster at home)
+3. No home: claim a house site -> gather 5 wood -> build (HouseSite -> HouseFoundation -> House)
+4. Has home: rest when tired, snack, stockpile wood up to 8, otherwise walk home and loiter
+
+The walk-home loitering matters: it creates commuting traffic, which is what wears footpaths and roads into the map.
+
+States: Idle, FindTree, MoveToTree, ChopTree, FindHouseSite, MoveToHouseSite, PlanHouse, BuildHouse, FindFood, MoveToFood, Eat, MoveHome, Rest.
+
+## Pathfinding (RimWorld-style, implemented)
+
+- `src/game/world/Pathfinder.ts` implements grid A* (8-directional, octile heuristic, no corner cutting).
+- Tiles have per-tile movement costs in `WorldMap` (`MOVE_COSTS`): Road 0.6 < Dirt 0.75 < Grass 1 < HouseFoundation 1.2 < Berry 1.25. Tree and Water are impassable.
+- Agents path around blocked terrain and move faster on cheaper tiles, so roads are automatically preferred once they exist.
+- Work targets that cannot be stood on (trees) are reached by standing on an adjacent walkable tile (`stopAdjacent`), RimWorld-style.
+- Agents replan if a waypoint becomes unwalkable, and back off a few seconds when no target is reachable.
+
+## Emergent Roads (implemented)
+
+`Simulation.recordTraffic` counts waypoint crossings per tile. Grass becomes Dirt after 6 crossings; Dirt becomes Road after 16 cumulative crossings. Path-event logs are throttled to one per 8 seconds. Because Dirt/Road are cheaper for A*, traffic funnels onto existing paths (positive feedback, RimWorld desire-path style). Roads take a few minutes of commuting to appear — that pacing is intentional.
+
+## Population Growth (implemented)
+
+`Simulation.tryBirth` runs on the 5-second nature tick: requires 2+ residents, at least one House, berries >= residents x 2, a 45-second cooldown, and a population cap of 30. Newborns spawn near a random house and behave as normal residents.
+
+## Nature Regrowth (implemented)
+
+Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slowly (cap 320). If berries go extinct a new wild cluster is seeded so the food loop cannot dead-end.
 
 ## Known Limitations
 
-- Movement is straight-line and can pass through blocked terrain visually.
-- Water and tree blocking are not fully respected during movement.
-- There is no A* pathfinding yet.
-- There is no real house construction beyond marking a site.
-- There is no road drawing yet.
-- Road tiles exist only as a prepared tile type.
-- Dirt tile exists only as a prepared tile type.
-- Hunger is tracked but does not yet drive meaningful food behavior.
+- Newborn residents are functionally adults (age/growth is cosmetic).
+- One house per resident; houses never upgrade or get shared.
+- No starvation or death; hunger only redirects behavior.
 - LocalStorage save/load is not implemented.
-- Multiple residents can act, but the design has only been validated for the early single-resident MVP feel.
 
 ## Verification Already Performed
 
-- `npm install`: passed
-- `npm run build`: passed
-- `npm run dev`: passed locally
-- Browser check: map and UI rendered
-- Resident add button worked
-- Resident found a tree
-- Resident moved and chopped wood
-- Tree changed to grass
-- Resident selected and marked a house site
-- Game log updated with behavior changes
-- GitHub Pages returned HTTP 200
-- Deployed JS and CSS assets returned HTTP 200
+- `npm run build`: passed (type-check + bundle)
+- Browser check (2026-06-12): with 3 spawned residents, observed in GameLog —
+  - house sites chosen, wood gathered, houses started and finished
+  - berries foraged and eaten when hungry
+  - footpaths worn into grass, then upgraded to a road (~4 min)
+  - births grew the village from 3 to 9 residents autonomously
+- GitHub Pages returned HTTP 200 (initial MVP deploy)
+
+## Design Direction (updated)
+
+The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
 ## Next Recommended Work
 
-### 1. Road Drawing
+(House construction, hunger/food, emergent roads, and population growth are done — see Implemented MVP Features.)
 
-Add a road-drawing mode to the UI.
+### 1. Jobs And Specialization
 
-Expected behavior:
+Use the existing `job` field: woodcutters stockpile communal wood, farmers tend berry plots, builders pave high-traffic dirt into roads deliberately (`BuildRoad` state).
 
-- Player toggles road tool.
-- Clicking or dragging on Grass turns tiles into Road.
-- Agent movement should later prefer Road tiles.
+### 2. Survival Pressure
 
-Likely files:
+Starvation consequences (slowed work, eventually death), aging from birth to adulthood, day/night cycle with sleep at home.
 
-```text
-src/game/systems/RoadSystem.ts
-src/game/Simulation.ts
-src/game/render/PixiRenderer.ts
-src/App.tsx
-src/ui/ControlPanel.tsx
-```
+### 3. Village Economy
 
-### 2. Road-Biased Movement
+Shared stockpile instead of per-resident inventory; houses requiring wood deliveries; trading or storage buildings.
 
-Add simple path scoring before full pathfinding.
+### 4. Persistence
 
-Initial acceptable approach:
-
-- Keep straight movement for short range.
-- Prefer house sites near roads.
-- Later replace with A*.
-
-### 3. House Construction
-
-Turn `PlanHouse` into a staged building loop.
-
-Possible states:
-
-```text
-GatherWood
-MoveToHouseSite
-BuildHouse
-```
-
-Possible new tiles:
-
-```text
-HouseFoundation
-House
-```
-
-### 4. Hunger And Food
-
-Make hunger affect decisions.
-
-Add:
-
-- Berry/food source tile or farm plot
-- Eat behavior
-- More meaningful Rest behavior
+LocalStorage save/load of world tiles, agents, and traffic counters.
 
 ## Suggested Development Rule
 
@@ -244,4 +217,4 @@ Example:
 
 ## Handoff Summary
 
-The project is in a healthy first-MVP state. The strongest next step is road drawing, because it directly reinforces the intended player fantasy: the player guides the settlement, while residents remain autonomous.
+The autonomous-village loop is complete: residents build homes, eat, wear roads into the map by commuting, and the population grows on its own. The player only spawns residents. The strongest next step is jobs/specialization or survival pressure to deepen the simulation.

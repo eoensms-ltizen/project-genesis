@@ -121,6 +121,29 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
     graphics.stroke({ color: 0xe8d16f, width: 2 });
   }
+
+  if (type === "Berry") {
+    graphics.circle(px + 5, py + 6, 1.6);
+    graphics.fill(0xc0394b);
+    graphics.circle(px + 10, py + 10, 1.6);
+    graphics.fill(0xc0394b);
+    graphics.circle(px + 11, py + 5, 1.3);
+    graphics.fill(0xa12d3e);
+  }
+
+  if (type === "HouseFoundation") {
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.stroke({ color: 0xb08d57, width: 2 });
+    graphics.rect(px + 5, py + 5, TILE_SIZE - 10, TILE_SIZE - 10);
+    graphics.fill(0x6b5337);
+  }
+
+  if (type === "House") {
+    graphics.rect(px + 3, py + 7, TILE_SIZE - 6, TILE_SIZE - 9);
+    graphics.fill(0x8a6a44);
+    graphics.poly([px + 2, py + 8, px + TILE_SIZE / 2, py + 2, px + TILE_SIZE - 2, py + 8]);
+    graphics.fill(0x9c4a38);
+  }
 }
 
 function drawAgent(graphics: Graphics, agent: Agent) {
@@ -155,5 +178,11 @@ function tileColor(type: TileType): number {
       return 0x706a5f;
     case "HouseSite":
       return 0x39402a;
+    case "HouseFoundation":
+      return 0x4a4034;
+    case "House":
+      return 0x55452f;
+    case "Berry":
+      return 0x2c4a28;
   }
 }
