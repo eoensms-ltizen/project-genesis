@@ -110,6 +110,8 @@ export class GameApp {
       this.simulation.getDarkness(),
       this.simulation.buildings,
       this.simulation.animals,
+      this.simulation.getTrainPositions(),
+      this.simulation.getPoweredBuildingIds(),
     );
   }
 }

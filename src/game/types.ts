@@ -20,7 +20,8 @@ export type TileType =
   | "Plaza"
   | "Fountain"
   | "Statue"
-  | "Lamp";
+  | "Lamp"
+  | "Rail";
 
 export type AgentState =
   | "Idle"
@@ -58,7 +59,15 @@ export type AgentState =
 
 export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook" | "hunter";
 
-export type BuildingKind = "house" | "warehouse" | "kitchen" | "church" | "pasture";
+export type BuildingKind =
+  | "house"
+  | "warehouse"
+  | "kitchen"
+  | "church"
+  | "pasture"
+  | "powerplant"
+  | "factory"
+  | "station";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -157,4 +166,6 @@ export type SimulationSnapshot = {
   meals: number;
   buildings: Building[];
   animals: Animal[];
+  trains: Vec2[];
+  poweredBuildingIds: string[];
 };

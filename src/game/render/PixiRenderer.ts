@@ -23,6 +23,8 @@ export class PixiRenderer {
   private readonly nightGraphics = new Graphics();
   private lastWorldVersion = -1;
   private initialized = false;
+  // Cached lamp tile centres, refreshed only when the world changes.
+  private lampCenters: { x: number; y: number }[] = [];
 
   // User-controlled camera on top of the fit-to-screen base transform.
   private userZoom = 1;
@@ -199,6 +201,8 @@ export class PixiRenderer {
     darkness = 0,
     buildings: Building[] = [],
     animals: Animal[] = [],
+    trains: Vec2[] = [],
+    poweredBuildingIds: string[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -209,8 +213,15 @@ export class PixiRenderer {
     if (world.version !== this.lastWorldVersion) {
       this.lastWorldVersion = world.version;
       this.worldGraphics.clear();
+      this.lampCenters = [];
       for (const tile of world.tiles) {
         drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
+        if (tile.type === "Lamp") {
+          this.lampCenters.push({
+            x: tile.x * TILE_SIZE + TILE_SIZE / 2,
+            y: tile.y * TILE_SIZE + TILE_SIZE / 2,
+          });
+        }
       }
       for (const building of buildings) {
         drawBuilding(this.worldGraphics, building);
@@ -220,6 +231,9 @@ export class PixiRenderer {
     this.agentGraphics.clear();
     for (const animal of animals) {
       drawAnimal(this.agentGraphics, animal);
+    }
+    for (const train of trains) {
+      drawTrain(this.agentGraphics, train);
     }
     for (const agent of agents) {
       drawAgent(this.agentGraphics, agent);
@@ -239,17 +253,24 @@ export class PixiRenderer {
       this.nightGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
       this.nightGraphics.fill({ color: 0x0a1024, alpha: darkness * 0.55 });
 
-      // Warm window light spills out of finished houses at night.
+      // Window light at night: warm for unpowered, bright electric when powered.
+      const powered = new Set(poweredBuildingIds);
       for (const building of buildings) {
         if (building.stage !== "built") {
           continue;
         }
         const cx = (building.x + building.width / 2) * TILE_SIZE;
         const cy = (building.y + building.height / 2) * TILE_SIZE;
-        this.nightGraphics.circle(cx, cy, 24);
-        this.nightGraphics.fill({ color: 0xffc97a, alpha: darkness * 0.16 });
-        this.nightGraphics.circle(cx, cy, 10);
-        this.nightGraphics.fill({ color: 0xffe1a6, alpha: darkness * 0.32 });
+        const isPowered = powered.has(building.id);
+        const outer = isPowered ? 34 : 24;
+        const haloColor = isPowered ? 0xbfe3ff : 0xffc97a;
+        const coreColor = isPowered ? 0xeaf6ff : 0xffe1a6;
+        const haloAlpha = isPowered ? 0.26 : 0.16;
+        const coreAlpha = isPowered ? 0.5 : 0.32;
+        this.nightGraphics.circle(cx, cy, outer);
+        this.nightGraphics.fill({ color: haloColor, alpha: darkness * haloAlpha });
+        this.nightGraphics.circle(cx, cy, isPowered ? 14 : 10);
+        this.nightGraphics.fill({ color: coreColor, alpha: darkness * coreAlpha });
       }
 
       // Street lamps light the plaza after dark.
@@ -381,6 +402,17 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xffe6a0);
   }
 
+  if (type === "Rail") {
+    graphics.rect(px, py + 4, TILE_SIZE, 1.5);
+    graphics.fill(0x6b6a64);
+    graphics.rect(px, py + 10, TILE_SIZE, 1.5);
+    graphics.fill(0x6b6a64);
+    for (const tx of [2, 7, 12]) {
+      graphics.rect(px + tx, py + 3, 1.5, 9);
+      graphics.fill(0x4a3a26);
+    }
+  }
+
   if (type === "Berry") {
     graphics.circle(px + 5, py + 6, 1.6);
     graphics.fill(0xc0394b);
@@ -427,6 +459,46 @@ function drawBuilding(graphics: Graphics, building: Building) {
       graphics.rect(sx, sy, 5, 5);
       graphics.fill(0x8a6a44);
     }
+    return;
+  }
+
+  if (building.kind === "powerplant") {
+    // Cooling tower with a wisp of steam.
+    graphics.rect(px + 2, py + 8, w - 4, h - 10);
+    graphics.fill(0x5a5e62);
+    graphics.poly([px + 4, py + 8, px + 7, py + 2, px + 12, py + 2, px + 15, py + 8]);
+    graphics.fill(0x70747a);
+    graphics.circle(px + 9, py + 2, 3);
+    graphics.fill({ color: 0xd8dce0, alpha: 0.7 });
+    graphics.circle(px + 13, py + 0, 2.2);
+    graphics.fill({ color: 0xd8dce0, alpha: 0.5 });
+    return;
+  }
+
+  if (building.kind === "factory") {
+    // Brick hall with two smokestacks.
+    graphics.rect(px + 2, py + 9, w - 4, h - 11);
+    graphics.fill(0x6e4a3a);
+    graphics.rect(px + 5, py + 2, 3, 8);
+    graphics.fill(0x4a4038);
+    graphics.rect(px + w - 9, py + 2, 3, 8);
+    graphics.fill(0x4a4038);
+    graphics.circle(px + 6.5, py + 1, 2.4);
+    graphics.fill({ color: 0x9a9488, alpha: 0.7 });
+    graphics.circle(px + w - 7.5, py + 0, 2);
+    graphics.fill({ color: 0x9a9488, alpha: 0.6 });
+    return;
+  }
+
+  if (building.kind === "station") {
+    // Platform building with an awning.
+    graphics.rect(px + 2, py + 7, w - 4, h - 9);
+    graphics.fill(0x7a5a3a);
+    graphics.rect(px, py + 5, w, 4);
+    graphics.fill(0x9c4a38);
+    const sDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+    graphics.rect(sDoorX - 3, py + h - 11, 6, 9);
+    graphics.fill(0x3a2c1c);
     return;
   }
 
@@ -563,6 +635,20 @@ function drawAnimal(graphics: Graphics, animal: Animal) {
   }
 }
 
+function drawTrain(graphics: Graphics, train: Vec2) {
+  const px = train.x * TILE_SIZE;
+  const py = train.y * TILE_SIZE + 2;
+  // Locomotive plus two cars trailing behind.
+  graphics.rect(px, py, 14, 11);
+  graphics.fill(0x2c3138);
+  graphics.rect(px + 3, py + 2, 5, 4);
+  graphics.fill(0x8fb6d6);
+  graphics.rect(px - 16, py + 1, 13, 10);
+  graphics.fill(0x4a3f37);
+  graphics.rect(px - 31, py + 1, 13, 10);
+  graphics.fill(0x4a3f37);
+}
+
 function drawSpeechBubble(graphics: Graphics, px: number, py: number) {
   graphics.roundRect(px + 2, py - 15, 14, 9, 3);
   graphics.fill({ color: 0xf7f3e8, alpha: 0.95 });
@@ -618,5 +704,7 @@ function tileColor(type: TileType): number {
       return 0x8d8475;
     case "Lamp":
       return 0x8d8475;
+    case "Rail":
+      return 0x3a3b38;
   }
 }

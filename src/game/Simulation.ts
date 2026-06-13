@@ -40,7 +40,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 8;
+const SAVE_VERSION = 9;
 
 // Residents age one year per in-game day; children come of age at 12,
 // retire at 60, and pass away when they outlive their personal lifespan.
@@ -64,9 +64,19 @@ const ANIMAL_FOOD: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 1 };
 const ANIMAL_HEALTH: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 2 };
 const TAMEABLE: Record<AnimalKind, boolean> = { deer: true, boar: false, rabbit: true };
 
+// Industrial era: a power plant electrifies nearby buildings; a factory
+// cans surplus food; a station's trade train delivers goods each pass.
+const POWER_RADIUS = 14;
+const FACTORY_FOOD_PER_TICK = 3;
+const TRAIN_SPEED = 9;
+const TRAIN_DELIVER_FOOD = 8;
+
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
 const AUTOSAVE_INTERVAL_SECONDS = 15;
+// Throttle React panel updates; the Pixi canvas renders independently every tick.
+const UI_EMIT_INTERVAL_SECONDS = 0.25;
+const FOOD_CAP = 400;
 
 type SavedAgent = Omit<
   Agent,
@@ -89,6 +99,9 @@ type SaveData = {
   meals: number;
   animals: Animal[];
   nextAnimalId: number;
+  trainX: number | null;
+  trainRow: number;
+  trainDir: number;
 };
 
 export class Simulation {
@@ -102,6 +115,9 @@ export class Simulation {
 
   private nextBuildingId = 1;
   private nextAnimalId = 1;
+  private trainX: number | null = null;
+  private trainRow = 0;
+  private trainDir = 1;
   private readonly brain = new AgentBrain();
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
@@ -111,6 +127,7 @@ export class Simulation {
   private elapsedSeconds = 0;
   private natureTimer = 0;
   private autosaveTimer = 0;
+  private uiEmitTimer = UI_EMIT_INTERVAL_SECONDS;
   private lastBirthAt = 0;
   private lastPathLogAt = -PATH_LOG_COOLDOWN_SECONDS;
   private nextLogId = 1;
@@ -135,6 +152,9 @@ export class Simulation {
       this.foodStock = saved.foodStock;
       this.meals = saved.meals;
       this.nextAnimalId = saved.nextAnimalId ?? 1;
+      this.trainX = saved.trainX ?? null;
+      this.trainRow = saved.trainRow ?? 0;
+      this.trainDir = saved.trainDir ?? 1;
       for (const animal of saved.animals ?? []) {
         this.animals.push({ ...animal, path: undefined });
       }
@@ -178,6 +198,7 @@ export class Simulation {
     }
 
     this.updateAnimals(deltaSeconds);
+    this.updateTrain(deltaSeconds);
 
     this.natureTimer += deltaSeconds;
     if (this.natureTimer >= NATURE_TICK_SECONDS) {
@@ -190,6 +211,7 @@ export class Simulation {
       this.ageResidents();
       this.updatePlaza();
       this.spawnAnimals();
+      this.runFactories();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -198,10 +220,12 @@ export class Simulation {
       this.saveNow();
     }
 
-    // The clock display changes every frame's worth of game minutes.
-    this.notifyChanged();
-
-    if (this.dirty) {
+    // Refresh the React panel on a fixed cadence rather than every event, so a
+    // busy industrial city does not thrash React. The canvas stays smooth
+    // because GameApp re-renders the Pixi scene every tick regardless.
+    this.uiEmitTimer += deltaSeconds;
+    if (this.uiEmitTimer >= UI_EMIT_INTERVAL_SECONDS && deltaSeconds > 0) {
+      this.uiEmitTimer = 0;
       this.emitChange();
     }
   }
@@ -277,6 +301,9 @@ export class Simulation {
     for (const position of footprintTiles(building)) {
       this.world.setTile(position, tileType);
     }
+    if (stage === "built" && building.kind === "station") {
+      this.layStationRail(building);
+    }
     this.notifyChanged();
   }
 
@@ -343,6 +370,9 @@ export class Simulation {
           path: undefined,
         })),
         nextAnimalId: this.nextAnimalId,
+        trainX: this.trainX,
+        trainRow: this.trainRow,
+        trainDir: this.trainDir,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -451,6 +481,8 @@ export class Simulation {
         position: { ...animal.position },
         path: undefined,
       })),
+      trains: this.getTrainPositions(),
+      poweredBuildingIds: this.getPoweredBuildingIds(),
     };
   }
 
@@ -575,7 +607,117 @@ export class Simulation {
         this.era = 3;
         this.log("The village blossomed into a City! A plaza will grow at its heart.");
       }
+      return;
     }
+
+    if (this.era === 3) {
+      if (this.agents.length >= 26 && this.hasAnyPasture()) {
+        this.era = 4;
+        this.log("The Industrial age dawns! Power, factories, and railways are coming. ⚙️");
+      }
+    }
+  }
+
+  // --- Industry ---------------------------------------------------------
+
+  getPowerPlant(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "powerplant" && building.stage === "built",
+    );
+  }
+
+  hasAnyPowerPlant(): boolean {
+    return this.buildings.some((building) => building.kind === "powerplant");
+  }
+
+  hasAnyFactory(): boolean {
+    return this.buildings.some((building) => building.kind === "factory");
+  }
+
+  hasAnyStation(): boolean {
+    return this.buildings.some((building) => building.kind === "station");
+  }
+
+  getStation(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "station" && building.stage === "built",
+    );
+  }
+
+  isPowered(building: Building): boolean {
+    const plants = this.buildings.filter(
+      (b) => b.kind === "powerplant" && b.stage === "built",
+    );
+    const cx = building.x + building.width / 2;
+    const cy = building.y + building.height / 2;
+    return plants.some((plant) => {
+      const px = plant.x + plant.width / 2;
+      const py = plant.y + plant.height / 2;
+      return Math.hypot(px - cx, py - cy) <= POWER_RADIUS;
+    });
+  }
+
+  getPoweredBuildingIds(): string[] {
+    if (!this.hasAnyPowerPlant()) {
+      return [];
+    }
+    return this.buildings
+      .filter((building) => building.stage === "built" && this.isPowered(building))
+      .map((building) => building.id);
+  }
+
+  getTrainPositions(): Vec2[] {
+    return this.trainX !== null ? [{ x: this.trainX, y: this.trainRow }] : [];
+  }
+
+  private runFactories() {
+    for (const building of this.buildings) {
+      if (building.kind === "factory" && building.stage === "built" && this.isPowered(building)) {
+        this.foodStock = Math.min(FOOD_CAP, this.foodStock + FACTORY_FOOD_PER_TICK);
+      }
+    }
+  }
+
+  /** Lays a rail line across the map through the station's row. */
+  layStationRail(station: Building) {
+    const row = station.y - 1 >= 1 ? station.y - 1 : station.y + station.height;
+    this.trainRow = row;
+    for (let x = 0; x < this.world.width; x += 1) {
+      const tile = this.world.getTile({ x, y: row });
+      if (tile && (tile.type === "Grass" || tile.type === "Dirt" || tile.type === "Stump")) {
+        this.world.setTile({ x, y: row }, "Rail");
+      }
+    }
+    if (this.trainX === null) {
+      this.trainX = 0;
+      this.trainDir = 1;
+    }
+    this.log("A railway now crosses the valley. 🚂");
+  }
+
+  private updateTrain(deltaSeconds: number) {
+    if (this.trainX === null || !this.getStation()) {
+      return;
+    }
+    const prev = this.trainX;
+    this.trainX += this.trainDir * TRAIN_SPEED * deltaSeconds;
+
+    const stationX = (() => {
+      const s = this.getStation();
+      return s ? s.x + s.width / 2 : this.world.width / 2;
+    })();
+    // Deliver goods when the train passes the station.
+    if ((prev < stationX && this.trainX >= stationX) || (prev > stationX && this.trainX <= stationX)) {
+      this.foodStock = Math.min(FOOD_CAP, this.foodStock + TRAIN_DELIVER_FOOD);
+      this.log("A trade train rolled through the station. 🚃 +" + TRAIN_DELIVER_FOOD + " food");
+    }
+
+    if (this.trainX > this.world.width + 3) {
+      this.trainDir = -1;
+    } else if (this.trainX < -3) {
+      this.trainDir = 1;
+    }
+    this.notifyChanged();
   }
 
   /**

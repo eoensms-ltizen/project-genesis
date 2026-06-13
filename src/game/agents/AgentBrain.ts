@@ -17,6 +17,9 @@ const WAREHOUSE_WOOD_COST = 10;
 const KITCHEN_WOOD_COST = 8;
 const CHURCH_WOOD_COST = 14;
 const PASTURE_WOOD_COST = 12;
+const POWERPLANT_WOOD_COST = 16;
+const FACTORY_WOOD_COST = 16;
+const STATION_WOOD_COST = 14;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -298,7 +301,15 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "gather" | "none" {
-    let kind: "warehouse" | "kitchen" | "church" | "pasture" | undefined;
+    let kind:
+      | "warehouse"
+      | "kitchen"
+      | "church"
+      | "pasture"
+      | "powerplant"
+      | "factory"
+      | "station"
+      | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (
@@ -319,6 +330,20 @@ export class AgentBrain {
       simulation.getChurch()
     ) {
       kind = "pasture";
+    } else if (simulation.era >= 4 && !simulation.hasAnyPowerPlant()) {
+      kind = "powerplant";
+    } else if (
+      simulation.era >= 4 &&
+      !simulation.hasAnyFactory() &&
+      simulation.getPowerPlant()
+    ) {
+      kind = "factory";
+    } else if (
+      simulation.era >= 4 &&
+      !simulation.hasAnyStation() &&
+      simulation.getPowerPlant()
+    ) {
+      kind = "station";
     }
     if (!kind) {
       return "none";
@@ -421,10 +446,19 @@ export class AgentBrain {
   private startCommunalBuilding(
     agent: Agent,
     simulation: Simulation,
-    kind: "warehouse" | "kitchen" | "church" | "pasture",
+    kind: Exclude<BuildingKind, "house">,
   ): boolean {
-    const width = kind === "warehouse" || kind === "church" || kind === "pasture" ? 3 : 2;
-    const height = kind === "church" || kind === "pasture" ? 3 : 2;
+    const threeWide = new Set([
+      "warehouse",
+      "church",
+      "pasture",
+      "powerplant",
+      "factory",
+      "station",
+    ]);
+    const threeTall = new Set(["church", "pasture", "powerplant", "factory"]);
+    const width = threeWide.has(kind) ? 3 : 2;
+    const height = threeTall.has(kind) ? 3 : 2;
     const site = simulation.world.findBuildingSite(agent.position, width, height, (position) =>
       simulation.isTileClaimed(position),
     );
@@ -1413,6 +1447,15 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "pasture") {
     return PASTURE_WOOD_COST;
+  }
+  if (kind === "powerplant") {
+    return POWERPLANT_WOOD_COST;
+  }
+  if (kind === "factory") {
+    return FACTORY_WOOD_COST;
+  }
+  if (kind === "station") {
+    return STATION_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }

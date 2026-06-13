@@ -20,6 +20,7 @@ const MOVE_COSTS: Record<TileType, number> = {
   Stump: 1.15,
   Plaza: 0.55,
   Lamp: 0.6,
+  Rail: 1.4,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
   Fountain: Number.POSITIVE_INFINITY,
@@ -47,6 +48,7 @@ const TILE_CODES: Record<TileType, string> = {
   Fountain: "o",
   Statue: "y",
   Lamp: "l",
+  Rail: "=",
 };
 
 const CODE_TILES: Record<string, TileType> = Object.fromEntries(

@@ -121,6 +121,11 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Hunter job (population 8+): chases the nearest wild animal and either hunts it for food (boars always) or tames it (deer/rabbit) once a pasture exists and the herd has room
 - Pasture (3x3 fenced pen, communal project after the church): tamed livestock graze near it and slowly add food to the village stock
 - Clicking an animal inspects its kind, status (wild/tamed), health, and position
+- Industrial era (5th): population 26 + pasture. Unlocks communal industry — power plant, factory, station
+- Power plant electrifies buildings within radius 14; powered buildings glow bright electric-blue at night (vs warm) — the "sea of lights" payoff
+- Factory (when powered) cans surplus food into the village stock each tick
+- Station lays a rail line across its row and a trade train runs back and forth, delivering food each time it passes the station
+- Performance: React panel snapshots are throttled to ~4/s (the Pixi canvas still renders every tick); lamp glow positions are cached per world-version instead of scanning all tiles each frame; food stock is capped
 - Camera: drag to pan, pinch or mouse-wheel to zoom (1x-6x), tap/click to inspect (tap-vs-drag discriminated by a 6px slop); ⌖ button recenters
 - Mobile layout: map fills the screen with a floating HUD bar (clock/era/food + speed + recenter) and a tabbed bottom panel (World / People / Log); tapping a resident row in People opens the inspector overlay
 - Dev aid: in dev builds the GameApp is exposed as window.__genesis for inspection
@@ -217,7 +222,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. Remaining: M5 industry (power plants, electric lighting, factories, trains, vehicles); plus polish — sprites/seasons, family info in the UI, fishing job.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. M5 industry is in (power, electric lighting, factory, station/train). Next direction under discussion: shift from scripted era-unlocks to need/pressure-driven emergence — land scarcity driving housing densification (villa/apartment), infrastructure decay reclaiming unused land, commute distance driving transit/vehicles, wildlife needing water/fruit, and a research lab for earned upgrades.
 
 ## Next Recommended Work
 
