@@ -195,6 +195,13 @@ export default function App() {
                   ? gameRef.current?.simulation.getTrafficAt(selection.position)
                   : undefined
               }
+              homeAmbiance={(() => {
+                if (selection.kind !== "agent") {
+                  return undefined;
+                }
+                const home = agents.find((a) => a.id === selection.agentId)?.home;
+                return home ? gameRef.current?.simulation.ambianceAt(home) : undefined;
+              })()}
               onClose={() => setSelection(null)}
             />
           </div>

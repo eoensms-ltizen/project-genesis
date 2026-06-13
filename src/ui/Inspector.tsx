@@ -15,6 +15,7 @@ type InspectorProps = {
   episodes: GameLogEntry[];
   tileType?: TileType;
   tileTraffic?: number;
+  homeAmbiance?: number;
   onClose: () => void;
 };
 
@@ -26,6 +27,7 @@ export function Inspector({
   episodes,
   tileType,
   tileTraffic,
+  homeAmbiance,
   onClose,
 }: InspectorProps) {
   return (
@@ -41,6 +43,7 @@ export function Inspector({
           agent={agents.find((agent) => agent.id === selection.agentId)}
           agents={agents}
           episodes={episodes}
+          homeAmbiance={homeAmbiance}
         />
       )}
       {selection.kind === "building" && (
@@ -62,6 +65,14 @@ export function Inspector({
       )}
     </section>
   );
+}
+
+function surroundings(ambiance: number): string {
+  if (ambiance >= 3) return "pleasant 🌳";
+  if (ambiance > 0.5) return "agreeable";
+  if (ambiance > -0.5) return "plain";
+  if (ambiance > -3) return "dreary";
+  return "grim 🏭";
 }
 
 function houseTier(level: number): string {
@@ -116,10 +127,12 @@ function AgentInfo({
   agent,
   agents,
   episodes,
+  homeAmbiance,
 }: {
   agent?: Agent;
   agents: Agent[];
   episodes: GameLogEntry[];
+  homeAmbiance?: number;
 }) {
   if (!agent) {
     return <p className="muted">This resident is no longer with us.</p>;
@@ -145,6 +158,12 @@ function AgentInfo({
         <dd>{spouse ? `married to ${spouse.name}` : "single"}</dd>
         <dt>Home</dt>
         <dd>{agent.home ? `(${agent.home.x}, ${agent.home.y})` : "homeless"}</dd>
+        {agent.home && homeAmbiance !== undefined && (
+          <>
+            <dt>Surroundings</dt>
+            <dd>{surroundings(homeAmbiance)}</dd>
+          </>
+        )}
       </dl>
       <h3>Needs</h3>
       <div className="need-bars">

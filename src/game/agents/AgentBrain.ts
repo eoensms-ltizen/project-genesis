@@ -75,6 +75,10 @@ const RELAX_DURATION_SECONDS = 6;
 const COMFORT_CROWD_RADIUS = 6;
 const COMFORT_CROWD_TOLERANCE = 2;
 const COMFORT_CROWD_DECAY = 0.02;
+// How strongly the surrounding ambiance pushes comfort up (amenities) or down
+// (nuisances) per second, and how much it sways where things get built.
+const AMBIANCE_COMFORT_RATE = 0.005;
+const AMBIANCE_SITING_WEIGHT = 1.5;
 // A soft need must reach this urgency to pull an adult away from work.
 const NEED_ACT_THRESHOLD = 55;
 // Work is the baseline drive, so it always carries at least this much pull.
@@ -608,14 +612,18 @@ export class AgentBrain {
     if (simulation.getChurch()) {
       n.faith = clampNeed(n.faith - deltaSeconds * NEED_DECAY.faith);
     }
-    // Comfort drains faster the more crowded the resident's home is.
+    // Comfort drains faster the more crowded the resident's home is, and shifts
+    // with the surroundings: pleasant amenities soothe, nearby nuisances grate.
     const anchor = agent.home ?? roundVec(agent.position);
     const crowd = Math.max(
       0,
       simulation.localHouseDensity(anchor, COMFORT_CROWD_RADIUS) - COMFORT_CROWD_TOLERANCE,
     );
+    const ambiance = simulation.ambianceAt(anchor);
     n.comfort = clampNeed(
-      n.comfort - deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY),
+      n.comfort -
+        deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY) +
+        deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE,
     );
 
     // Refill while engaged in the matching activity.
@@ -762,12 +770,14 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
-    // Homes shun the cemetery's shadow, so the town spreads away from it.
+    // Homes seek pleasant surroundings: drawn to parks/church, away from
+    // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
       agent.position,
       2,
       2,
-      (position) => simulation.isTileClaimed(position) || simulation.isNearNuisance(position),
+      (position) => simulation.isTileClaimed(position),
+      { extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
     );
     const door = site ? { x: site.x, y: site.y + 1 } : undefined;
     const path = door
@@ -1083,8 +1093,14 @@ export class AgentBrain {
       return false;
     }
 
-    const site = world.findBuildingSite(agent.position, 3, 3, (position) =>
-      simulation.isTileClaimed(position),
+    // Fields prefer low-ambiance ground — they cluster together near existing
+    // fields and steer clear of pleasant, residential areas.
+    const site = world.findBuildingSite(
+      agent.position,
+      3,
+      3,
+      (position) => simulation.isTileClaimed(position),
+      { extraScore: (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
     );
     if (!site) {
       return false;

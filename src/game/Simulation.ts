@@ -111,6 +111,31 @@ const ABANDON_DECAY_PER_TICK = 6;
 const CEMETERY_MIN_DISTANCE = 16;
 const CEMETERY_NUISANCE_RADIUS = 9;
 
+// Ambiance: how pleasant a spot feels. Amenities radiate positive ambiance,
+// nuisances negative. Homes seek high ambiance; fields/workshops seek low (so
+// they cluster together, away from housing). A blurred grid is recomputed
+// periodically so lookups are O(1).
+const AMBIANCE_RADIUS = 7;
+const BUILDING_AMBIANCE: Partial<Record<BuildingKind, number>> = {
+  park: 6,
+  church: 5,
+  station: 1,
+  powerplant: -8,
+  factory: -7,
+  cemetery: -10,
+};
+const TILE_AMBIANCE: Partial<Record<TileType, number>> = {
+  Plaza: 4,
+  Fountain: 5,
+  Statue: 3,
+  Lamp: 2,
+  FieldEmpty: -3,
+  FieldGrowing: -3,
+  FieldRipe: -3,
+  Stump: -2,
+};
+const TILE_AMBIANCE_RADIUS = 4;
+
 type SavedAgent = Omit<
   Agent,
   "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
@@ -158,6 +183,7 @@ export class Simulation {
   private readonly claimedTiles = new Set<string>();
   private readonly episodes = new Map<string, GameLogEntry[]>();
   private traffic = new Map<number, number>();
+  private ambianceGrid = new Float32Array(0);
   private elapsedSeconds = 0;
   private natureTimer = 0;
   private autosaveTimer = 0;
@@ -228,6 +254,7 @@ export class Simulation {
       this.world = WorldMap.createRandom();
       this.log("A new valley is ready.");
     }
+    this.recomputeAmbiance();
   }
 
   addRandomAgent(position: Vec2) {
@@ -260,6 +287,7 @@ export class Simulation {
       this.spawnAnimals();
       this.runFactories();
       this.decayInfrastructure();
+      this.recomputeAmbiance();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -756,6 +784,59 @@ export class Simulation {
     }
     const parks = this.buildings.filter((b) => b.kind === "park").length;
     return parks < Math.ceil(this.agents.length / 10) && this.meanComfort() < 60;
+  }
+
+  /** Net pleasantness of a spot: positive near amenities, negative near nuisances. */
+  ambianceAt(position: Vec2): number {
+    const w = this.world.width;
+    const x = Math.round(position.x);
+    const y = Math.round(position.y);
+    if (x < 0 || y < 0 || x >= w || y >= this.world.height) {
+      return 0;
+    }
+    return this.ambianceGrid[y * w + x] ?? 0;
+  }
+
+  /** Rebuild the ambiance grid by scattering each source over a falloff radius. */
+  private recomputeAmbiance() {
+    const w = this.world.width;
+    const h = this.world.height;
+    if (this.ambianceGrid.length !== w * h) {
+      this.ambianceGrid = new Float32Array(w * h);
+    } else {
+      this.ambianceGrid.fill(0);
+    }
+
+    const scatter = (cx: number, cy: number, weight: number, radius: number) => {
+      const minX = Math.max(0, Math.floor(cx - radius));
+      const maxX = Math.min(w - 1, Math.ceil(cx + radius));
+      const minY = Math.max(0, Math.floor(cy - radius));
+      const maxY = Math.min(h - 1, Math.ceil(cy + radius));
+      for (let y = minY; y <= maxY; y += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const d = Math.hypot(x - cx, y - cy);
+          if (d <= radius) {
+            this.ambianceGrid[y * w + x] += weight * (1 - d / radius);
+          }
+        }
+      }
+    };
+
+    for (const building of this.buildings) {
+      if (building.stage !== "built") {
+        continue;
+      }
+      const weight = BUILDING_AMBIANCE[building.kind];
+      if (weight) {
+        scatter(building.x + building.width / 2, building.y + building.height / 2, weight, AMBIANCE_RADIUS);
+      }
+    }
+    for (const tile of this.world.tiles) {
+      const weight = TILE_AMBIANCE[tile.type];
+      if (weight) {
+        scatter(tile.x + 0.5, tile.y + 0.5, weight, TILE_AMBIANCE_RADIUS);
+      }
+    }
   }
 
   /** True if the position sits within the shadow of a cemetery (a nuisance). */

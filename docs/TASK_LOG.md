@@ -36,6 +36,11 @@
   near housing when the town feels cramped (one per ~10 residents). Closes the
   population→density→amenity→space loop. Verified in-browser (comfort crashed to
   28 as the town packed in, parks were built, comfort recovered).
+- Ambiance zoning: a blurred ambiance grid (amenities positive, nuisances like
+  power plants / fields / stumps / cemeteries negative) now drives comfort, home
+  siting (seek pleasant), and field siting (seek low-ambiance, so fields cluster
+  away from homes). The town zones itself. Verified: avg house ambiance +26 vs
+  field −9.9, fields contiguous (2.67/4 neighbours). Inspector shows surroundings.
 
 ## 2026-06-12
 
