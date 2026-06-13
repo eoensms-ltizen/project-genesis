@@ -84,6 +84,13 @@
   doorways: ringInfo now treats claimed (in-progress) tiles as occupied, so
   buildings staked the same tick keep a one-tile gap instead of packing flush.
   Verified: 7 founders reach era 4 with 0 sealed homes; apartments report 2×3.
+- Natural-look pass: buildings render in 2.5D (each rises above its footprint by
+  a kind/level height, with roof, facade, lit windows and rooftop accents —
+  spires, chimneys, cooling towers; drawn north-to-south for depth). Houses may
+  now cluster shoulder-to-shoulder (hamlet feel) while their doorway is reserved
+  as road the instant a site is staked, so clustering never seals anyone in.
+  Fixed police stations being built several at once (any-stage check) and
+  lowered road wear thresholds so streets form more readily.
 
 ## 2026-06-12
 

@@ -436,11 +436,7 @@ export class Simulation {
     // The entrance is always a road: the door tile and the tile in front of it
     // become Road, so a building can never be sealed in by neighbours (other
     // footprints only take grass) and residents can always get out.
-    const front = { x: building.door.x, y: building.door.y + 1 };
-    const frontTile = this.world.getTile(front);
-    if (frontTile && ROADABLE.has(frontTile.type)) {
-      this.world.setTile(front, "Road");
-    }
+    this.reserveEntrance(building.door);
     if (stage === "built") {
       this.world.setTile(building.door, "Road");
     }
@@ -449,6 +445,18 @@ export class Simulation {
     }
     this.refreshDoors();
     this.notifyChanged();
+  }
+
+  /**
+   * Pave the tile in front of a door to Road so nothing can build over it. Call
+   * this the moment a site is staked (before the footprint tiles are typed), so
+   * a clustered neighbour can't drop its footprint onto the doorway first.
+   */
+  reserveEntrance(door: Vec2) {
+    const front = { x: door.x, y: door.y + 1 };
+    if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
+      this.world.setTile(front, "Road");
+    }
   }
 
   /** A built building is solid except its door; tell the world which tiles those are. */
@@ -1036,7 +1044,12 @@ export class Simulation {
   }
 
   needsPoliceStation(): boolean {
-    return this.unrest >= POLICE_STATION_THRESHOLD && !this.hasPoliceStation();
+    // Any-stage check (not just built) so several builders don't each break
+    // ground on their own station in the same moment.
+    return (
+      this.unrest >= POLICE_STATION_THRESHOLD &&
+      !this.buildings.some((b) => b.kind === "police")
+    );
   }
 
   /**

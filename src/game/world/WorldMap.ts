@@ -179,12 +179,21 @@ export class WorldMap {
     width: number,
     height: number,
     isBlocked?: (position: Vec2) => boolean,
-    options?: { far?: boolean; minDistance?: number; extraScore?: (cx: number, cy: number) => number },
+    options?: {
+      far?: boolean;
+      minDistance?: number;
+      extraScore?: (cx: number, cy: number) => number;
+      cluster?: boolean;
+    },
   ): Vec2 | undefined {
     const houseTiles: Vec2[] = this.tiles.filter((tile) => tile.type === "House");
     const far = options?.far ?? false;
     const minDistance = options?.minDistance ?? 0;
     const extraScore = options?.extraScore;
+    // Cluster mode lets buildings sit shoulder-to-shoulder (a hamlet feel); the
+    // only hard rule is that the door (bottom-left, in front) stays clear so the
+    // building is never sealed in. Otherwise a one-tile gap is kept all around.
+    const cluster = options?.cluster ?? false;
 
     let best: Vec2 | undefined;
     let bestScore = Number.NEGATIVE_INFINITY;
@@ -196,12 +205,12 @@ export class WorldMap {
         }
 
         const ring = this.ringInfo(x, y, width, height, isBlocked);
-        if (!ring.clear) {
+        if (!cluster && !ring.clear) {
           continue;
         }
 
         const doorFront = { x, y: y + height };
-        if (!this.isWalkable(doorFront)) {
+        if (!this.isWalkable(doorFront) || isBlocked?.(doorFront)) {
           continue;
         }
 

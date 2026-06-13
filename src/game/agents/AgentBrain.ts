@@ -858,7 +858,11 @@ export class AgentBrain {
       2,
       2,
       (position) => simulation.isTileClaimed(position),
-      { extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
+      {
+        // Homes may cluster into a hamlet, only keeping their doorway clear.
+        cluster: true,
+        extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
+      },
     );
     const door = site ? { x: site.x, y: site.y + 1 } : undefined;
     const path = door
@@ -880,6 +884,9 @@ export class AgentBrain {
       ownerId: agent.id,
     });
     simulation.claimBuildingFootprint(building);
+    // Reserve the doorway as road immediately, before any clustered neighbour
+    // staked the same tick can drop its footprint onto it.
+    simulation.reserveEntrance(door);
     agent.homeBuildingId = building.id;
     agent.projectBuildingId = building.id;
     agent.homeSite = { ...door };

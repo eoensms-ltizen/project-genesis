@@ -224,7 +224,9 @@ export class PixiRenderer {
           });
         }
       }
-      for (const building of buildings) {
+      // Draw north-to-south so a building's raised body overlaps the one behind
+      // it (a simple 2.5D depth order).
+      for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
         drawBuilding(this.worldGraphics, building);
       }
     }
@@ -473,46 +475,6 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
-  if (building.kind === "powerplant") {
-    // Cooling tower with a wisp of steam.
-    graphics.rect(px + 2, py + 8, w - 4, h - 10);
-    graphics.fill(0x5a5e62);
-    graphics.poly([px + 4, py + 8, px + 7, py + 2, px + 12, py + 2, px + 15, py + 8]);
-    graphics.fill(0x70747a);
-    graphics.circle(px + 9, py + 2, 3);
-    graphics.fill({ color: 0xd8dce0, alpha: 0.7 });
-    graphics.circle(px + 13, py + 0, 2.2);
-    graphics.fill({ color: 0xd8dce0, alpha: 0.5 });
-    return;
-  }
-
-  if (building.kind === "factory") {
-    // Brick hall with two smokestacks.
-    graphics.rect(px + 2, py + 9, w - 4, h - 11);
-    graphics.fill(0x6e4a3a);
-    graphics.rect(px + 5, py + 2, 3, 8);
-    graphics.fill(0x4a4038);
-    graphics.rect(px + w - 9, py + 2, 3, 8);
-    graphics.fill(0x4a4038);
-    graphics.circle(px + 6.5, py + 1, 2.4);
-    graphics.fill({ color: 0x9a9488, alpha: 0.7 });
-    graphics.circle(px + w - 7.5, py + 0, 2);
-    graphics.fill({ color: 0x9a9488, alpha: 0.6 });
-    return;
-  }
-
-  if (building.kind === "station") {
-    // Platform building with an awning.
-    graphics.rect(px + 2, py + 7, w - 4, h - 9);
-    graphics.fill(0x7a5a3a);
-    graphics.rect(px, py + 5, w, 4);
-    graphics.fill(0x9c4a38);
-    const sDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
-    graphics.rect(sDoorX - 3, py + h - 11, 6, 9);
-    graphics.fill(0x3a2c1c);
-    return;
-  }
-
   if (building.kind === "pasture") {
     // Fenced grazing yard with posts.
     graphics.rect(px + 2, py + 2, w - 4, h - 4);
@@ -523,52 +485,6 @@ function drawBuilding(graphics: Graphics, building: Building) {
       graphics.rect(px + i * TILE_SIZE - 1, py + 1, 2, 4);
       graphics.fill(0x8a6a44);
     }
-    return;
-  }
-
-  if (building.kind === "church") {
-    // Stone hall with a steeple and cross over the door.
-    graphics.rect(px + 3, py + 8, w - 6, h - 10);
-    graphics.fill(0xb8b0a0);
-    graphics.poly([px + 1, py + 10, px + w / 2, py + 1, px + w - 1, py + 10]);
-    graphics.fill(0x7d8aa0);
-    const steepleX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
-    graphics.rect(steepleX - 1.5, py + 3, 3, 6);
-    graphics.fill(0xe9e2d0);
-    graphics.rect(steepleX - 0.75, py + 1, 1.5, 6);
-    graphics.fill(0xe9e2d0);
-    graphics.rect(steepleX - 3, py + h - 13, 6, 11);
-    graphics.fill(0x4a3a26);
-    return;
-  }
-
-  if (building.kind === "kitchen") {
-    // Cookhouse: olive roof and a chimney.
-    graphics.rect(px + 3, py + 10, w - 6, h - 13);
-    graphics.fill(0x8a6a44);
-    graphics.poly([px + 1, py + 13, px + w / 2, py + 2, px + w - 1, py + 13]);
-    graphics.fill(0x6f7a3e);
-    graphics.rect(px + w - 9, py + 2, 4, 8);
-    graphics.fill(0x5a5148);
-    const kitchenDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
-    graphics.rect(kitchenDoorX - 3, py + h - 12, 6, 9);
-    graphics.fill(0x3a2c1c);
-    return;
-  }
-
-  if (building.kind === "warehouse") {
-    // Flat-roofed storehouse with crates by the door.
-    graphics.rect(px + 2, py + 6, w - 4, h - 8);
-    graphics.fill(0x7d6a4f);
-    graphics.rect(px + 1, py + 2, w - 2, 7);
-    graphics.fill(0x5d4f3a);
-    const doorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
-    graphics.rect(doorX - 4, py + h - 12, 8, 10);
-    graphics.fill(0x3a2c1c);
-    graphics.rect(px + 4, py + h - 9, 6, 6);
-    graphics.fill(0x9a7b4f);
-    graphics.rect(px + w - 11, py + h - 9, 6, 6);
-    graphics.fill(0x9a7b4f);
     return;
   }
 
@@ -589,20 +505,6 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
-  if (building.kind === "police") {
-    // Stone station with a blue lamp and a shield over the door.
-    graphics.rect(px + 2, py + 6, w - 4, h - 8);
-    graphics.fill(0x8a8f99);
-    graphics.rect(px + 1, py + 2, w - 2, 6);
-    graphics.fill(0x3a5a8a);
-    const pDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
-    graphics.rect(pDoorX - 3, py + h - 11, 6, 9);
-    graphics.fill(0x26303f);
-    graphics.circle(pDoorX, py + 5, 1.8);
-    graphics.fill(0x8fd0ff);
-    return;
-  }
-
   if (building.kind === "cemetery") {
     // Quiet walled graveyard with rows of headstones.
     graphics.rect(px + 2, py + 2, w - 4, h - 4);
@@ -620,73 +522,135 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
-  const capacity = building.capacity ?? 1;
+  // --- Everything else is drawn as a 2.5D block rising above its footprint. ---
   const level =
-    building.level ?? (capacity >= 24 ? 4 : capacity >= 12 ? 3 : capacity >= 6 ? 2 : 1);
-  const doorCenterX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+    building.level ??
+    ((building.capacity ?? 1) >= 24
+      ? 4
+      : (building.capacity ?? 1) >= 12
+        ? 3
+        : (building.capacity ?? 1) >= 6
+          ? 2
+          : 1);
+  const lift = buildingLift(building.kind, level);
+  const palette = buildingPalette(building.kind, level);
+  const top = py - lift;
+  const doorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
 
-  if (level >= 4) {
-    // Residential tower: full-footprint slab, dense window grid, rooftop mast.
-    graphics.rect(px + 1, py + 1, w - 2, h - 2);
-    graphics.fill(0x7c7d86);
-    graphics.rect(px + 1, py + 1, w - 2, 3);
-    graphics.fill(0x4f5058);
-    for (let wy = py + 5; wy < py + h - 4; wy += 5) {
-      for (let wx = px + 3; wx < px + w - 4; wx += 5) {
-        graphics.rect(wx, wy, 3, 3);
-        graphics.fill(0xbcd2e6);
-      }
+  // Ground shadow cast to the lower-right.
+  graphics.rect(px + 2, py + 3, w - 1, h - 3);
+  graphics.fill({ color: 0x0c0f0b, alpha: 0.16 });
+  // Front facade from the roof's base down to the footprint's south edge.
+  graphics.rect(px, top + h, w, lift);
+  graphics.fill(palette.wall);
+  graphics.rect(px + w - 3, top + h, 3, lift);
+  graphics.fill({ color: 0x000000, alpha: 0.16 });
+  // Roof / top face.
+  graphics.rect(px, top, w, h);
+  graphics.fill(palette.roof);
+  graphics.rect(px, top, w, 2);
+  graphics.fill({ color: 0xffffff, alpha: 0.12 });
+  // Lit windows on the facade (denser for apartments and towers).
+  const dense = building.kind === "house" && level >= 3;
+  const stepX = dense ? 6 : 8;
+  const stepY = dense ? 6 : 7;
+  for (let wy = top + h + 3; wy < py + h - 9; wy += stepY) {
+    for (let wx = px + 3; wx < px + w - 5; wx += stepX) {
+      graphics.rect(wx, wy, 3, 3);
+      graphics.fill(0x9fb8cc);
     }
-    graphics.rect(doorCenterX - 0.75, py - 3, 1.5, 5);
-    graphics.fill(0x9aa0aa);
-    graphics.rect(doorCenterX - 3, py + h - 7, 6, 5);
-    graphics.fill(0x241c14);
-    return;
   }
+  // Door on the bottom (south) face, on the door column.
+  graphics.rect(doorX - 3, py + h - 9, 6, 9);
+  graphics.fill(0x2c2118);
+  drawRoofAccent(graphics, building.kind, px, w, top, doorX);
+}
 
-  if (level >= 3) {
-    // Apartment block: tall body, flat roof, grid of lit windows.
-    graphics.rect(px + 2, py + 2, w - 4, h - 4);
-    graphics.fill(0x6f6552);
-    graphics.rect(px + 2, py + 2, w - 4, 3);
-    graphics.fill(0x534a3a);
-    for (let wy = py + 6; wy < py + h - 5; wy += 6) {
-      for (let wx = px + 4; wx < px + w - 5; wx += 7) {
-        graphics.rect(wx, wy, 4, 4);
-        graphics.fill(0x9fb8cc);
-      }
-    }
-    graphics.rect(doorCenterX - 3, py + h - 8, 6, 6);
-    graphics.fill(0x2c2118);
-    return;
+function buildingLift(kind: Building["kind"], level: number): number {
+  switch (kind) {
+    case "house":
+      return level >= 4 ? 42 : level >= 3 ? 28 : level >= 2 ? 18 : 11;
+    case "powerplant":
+      return 34;
+    case "church":
+      return 30;
+    case "factory":
+      return 28;
+    case "police":
+      return 18;
+    case "kitchen":
+      return 17;
+    case "warehouse":
+      return 16;
+    case "station":
+      return 16;
+    default:
+      return 14;
   }
+}
 
-  if (level >= 2) {
-    // Villa: two-storey house with extra windows.
-    graphics.rect(px + 3, py + 6, w - 6, h - 8);
-    graphics.fill(0x8a6a44);
-    graphics.poly([px + 1, py + 9, px + w / 2, py + 1, px + w - 1, py + 9]);
+function buildingPalette(kind: Building["kind"], level: number): { roof: number; wall: number } {
+  switch (kind) {
+    case "house":
+      return level >= 3 ? { roof: 0x4f5058, wall: 0x6f6552 } : { roof: 0x9c4a38, wall: 0x8a6a44 };
+    case "warehouse":
+      return { roof: 0x5d4f3a, wall: 0x7d6a4f };
+    case "kitchen":
+      return { roof: 0x6f7a3e, wall: 0x8a6a44 };
+    case "church":
+      return { roof: 0x7d8aa0, wall: 0xb8b0a0 };
+    case "powerplant":
+      return { roof: 0x70747a, wall: 0x5a5e62 };
+    case "factory":
+      return { roof: 0x4a4038, wall: 0x6e4a3a };
+    case "station":
+      return { roof: 0x9c4a38, wall: 0x7a5a3a };
+    case "police":
+      return { roof: 0x3a5a8a, wall: 0x8a8f99 };
+    default:
+      return { roof: 0x9c4a38, wall: 0x8a6a44 };
+  }
+}
+
+function drawRoofAccent(
+  graphics: Graphics,
+  kind: Building["kind"],
+  px: number,
+  w: number,
+  top: number,
+  doorX: number,
+) {
+  if (kind === "church") {
+    graphics.rect(doorX - 1.5, top - 9, 3, 11);
+    graphics.fill(0xe9e2d0);
+    graphics.rect(doorX - 0.75, top - 13, 1.5, 6);
+    graphics.fill(0xe9e2d0);
+    graphics.rect(doorX - 3, top - 12, 6, 1.6);
+    graphics.fill(0xe9e2d0);
+  } else if (kind === "factory") {
+    graphics.rect(px + 4, top - 10, 3, 11);
+    graphics.fill(0x4a4038);
+    graphics.rect(px + w - 8, top - 8, 3, 9);
+    graphics.fill(0x4a4038);
+    graphics.circle(px + 5.5, top - 11, 2.4);
+    graphics.fill({ color: 0x9a9488, alpha: 0.55 });
+  } else if (kind === "powerplant") {
+    graphics.poly([px + 5, top, px + 9, top - 10, px + w - 9, top - 10, px + w - 5, top]);
+    graphics.fill(0x70747a);
+    graphics.circle(px + w / 2, top - 12, 3.2);
+    graphics.fill({ color: 0xd8dce0, alpha: 0.55 });
+  } else if (kind === "kitchen") {
+    graphics.rect(px + w - 8, top - 7, 3, 9);
+    graphics.fill(0x5a5148);
+    graphics.circle(px + w - 6.5, top - 8, 2);
+    graphics.fill({ color: 0xb0a89a, alpha: 0.5 });
+  } else if (kind === "station") {
+    graphics.rect(px - 1, top - 2, w + 2, 3);
     graphics.fill(0x9c4a38);
-    graphics.rect(px + 5, py + 9, 4, 4);
-    graphics.fill(0x2c3a44);
-    graphics.rect(px + w - 9, py + 9, 4, 4);
-    graphics.fill(0x2c3a44);
-    graphics.rect(doorCenterX - 3, py + h - 11, 6, 9);
-    graphics.fill(0x3a2c1c);
-    return;
+  } else if (kind === "police") {
+    graphics.circle(doorX, top - 3, 1.8);
+    graphics.fill(0x8fd0ff);
   }
-
-  // Built house: walls, roof, door on the door tile, and a window.
-  graphics.rect(px + 3, py + 10, w - 6, h - 13);
-  graphics.fill(0x8a6a44);
-  graphics.poly([px + 1, py + 13, px + w / 2, py + 1, px + w - 1, py + 13]);
-  graphics.fill(0x9c4a38);
-
-  graphics.rect(doorCenterX - 3, py + h - 12, 6, 9);
-  graphics.fill(0x3a2c1c);
-
-  graphics.rect(px + w - 12, py + h - 13, 6, 6);
-  graphics.fill(0x2c3a44);
 }
 
 const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
