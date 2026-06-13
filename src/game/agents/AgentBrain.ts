@@ -35,6 +35,9 @@ const COOK_MEAL_YIELD = 2;
 const FARM_WORK_DURATION_SECONDS = 2;
 const PAVE_DURATION_SECONDS = 1.5;
 const MAX_FIELD_TILES = 12;
+// New fields are never tilled within this many tiles of a home, so farmland
+// keeps its distance from where people live.
+const FIELD_HOME_BUFFER = 4;
 const FOOD_STOCK_TARGET = 50;
 const HUNGER_SEEK_THRESHOLD = 65;
 const HUNGER_SNACK_THRESHOLD = 40;
@@ -828,6 +831,7 @@ export class AgentBrain {
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
     const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
+    const avoidsHomes = kind === "powerplant" || kind === "factory";
     const site =
       kind === "cemetery"
         ? simulation.world.findBuildingSite(
@@ -837,7 +841,12 @@ export class AgentBrain {
             isClaimed,
             { far: true, minDistance: 16 },
           )
-        : simulation.world.findBuildingSite(agent.position, width, height, isClaimed);
+        : simulation.world.findBuildingSite(agent.position, width, height, isClaimed, {
+            // Power plants and factories are nuisances — steer them away from homes.
+            extraScore: avoidsHomes
+              ? (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT
+              : undefined,
+          });
     if (!site) {
       return false;
     }
@@ -1099,7 +1108,9 @@ export class AgentBrain {
       agent.position,
       3,
       3,
-      (position) => simulation.isTileClaimed(position),
+      (position) =>
+        simulation.isTileClaimed(position) ||
+        simulation.hasHouseNear(position, FIELD_HOME_BUFFER),
       { extraScore: (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
     );
     if (!site) {

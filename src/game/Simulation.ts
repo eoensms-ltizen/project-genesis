@@ -136,6 +136,12 @@ const TILE_AMBIANCE: Partial<Record<TileType, number>> = {
 };
 const TILE_AMBIANCE_RADIUS = 4;
 
+// Relocation: workplaces that ended up too close to housing are moved out over
+// time, freeing the land for homes and amenities.
+const FIELD_RELOCATE_RADIUS = 4;
+const FIELD_RELOCATE_PER_TICK = 3;
+const WORKSHOP_RELOCATE_RADIUS = 6;
+
 type SavedAgent = Omit<
   Agent,
   "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
@@ -288,6 +294,7 @@ export class Simulation {
       this.runFactories();
       this.decayInfrastructure();
       this.recomputeAmbiance();
+      this.relocateMisplacedWork();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -837,6 +844,67 @@ export class Simulation {
         scatter(tile.x + 0.5, tile.y + 0.5, weight, TILE_AMBIANCE_RADIUS);
       }
     }
+  }
+
+  /** True if a built house centre lies within `radius` tiles of a point. */
+  hasHouseNear(position: Vec2, radius: number): boolean {
+    return this.buildings.some(
+      (b) =>
+        b.kind === "house" &&
+        b.stage === "built" &&
+        Math.hypot(position.x - (b.x + b.width / 2), position.y - (b.y + b.height / 2)) <= radius,
+    );
+  }
+
+  /**
+   * Move workplaces that ended up too close to housing out toward the edges:
+   * clear a few crowded-in field tiles (farmers re-sow them further out), and
+   * decommission a misplaced power plant/factory so it is rebuilt away from
+   * homes. The freed land becomes pleasant ground for houses and amenities.
+   */
+  private relocateMisplacedWork() {
+    let cleared = 0;
+    for (const tile of this.world.tiles) {
+      if (cleared >= FIELD_RELOCATE_PER_TICK) {
+        break;
+      }
+      const isField = tile.type === "FieldEmpty" || tile.type === "FieldGrowing";
+      if (!isField || this.isTileClaimed(tile)) {
+        continue;
+      }
+      if (this.hasHouseNear(tile, FIELD_RELOCATE_RADIUS)) {
+        this.world.setTile(tile, "Grass");
+        cleared += 1;
+      }
+    }
+    if (cleared > 0) {
+      this.logPathEvent("Fields crowding the homes were cleared, to be re-sown further out. 🌱");
+    }
+
+    const misplaced = this.buildings.find(
+      (b) =>
+        (b.kind === "powerplant" || b.kind === "factory") &&
+        b.stage === "built" &&
+        this.hasHouseNear({ x: b.x + b.width / 2, y: b.y + b.height / 2 }, WORKSHOP_RELOCATE_RADIUS),
+    );
+    if (misplaced) {
+      const kind = misplaced.kind;
+      this.removeBuilding(misplaced);
+      this.log(`The ${kind} was too close to the homes — it will be rebuilt on the outskirts. 🏗️`);
+    }
+  }
+
+  /** Tear a building down, returning its footprint to open ground. */
+  private removeBuilding(building: Building) {
+    this.releaseBuildingFootprint(building);
+    for (const position of footprintTiles(building)) {
+      this.world.setTile(position, "Grass");
+    }
+    const index = this.buildings.indexOf(building);
+    if (index >= 0) {
+      this.buildings.splice(index, 1);
+    }
+    this.notifyChanged();
   }
 
   /** True if the position sits within the shadow of a cemetery (a nuisance). */

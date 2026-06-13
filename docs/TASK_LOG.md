@@ -41,6 +41,12 @@
   siting (seek pleasant), and field siting (seek low-ambiance, so fields cluster
   away from homes). The town zones itself. Verified: avg house ambiance +26 vs
   field −9.9, fields contiguous (2.67/4 neighbours). Inspector shows surroundings.
+- Workplace relocation: new power plants/factories site away from homes and new
+  fields keep a 4-tile buffer from housing; existing misplaced work moves out
+  over time — crowded-in field tiles are cleared (re-sown further out) and a
+  power plant/factory within 6 tiles of homes is decommissioned and rebuilt on
+  the outskirts. Verified (8 injected near-home fields cleared to 0; a forced
+  near-home power plant was relocated outward).
 
 ## 2026-06-12
 
