@@ -293,16 +293,18 @@ const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
 function drawAgent(graphics: Graphics, agent: Agent) {
   const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2;
   const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2;
+  const isChild = agent.age < 12;
+  const radius = isChild ? 3 : 4.6;
 
   const jobColor = JOB_COLORS[agent.job];
   if (jobColor !== undefined) {
-    graphics.circle(px, py, 6);
+    graphics.circle(px, py, radius + 1.4);
     graphics.fill({ color: jobColor, alpha: 0.85 });
   }
 
-  graphics.circle(px, py, 4.6);
-  graphics.fill(0xf2e6bd);
-  graphics.circle(px + 1.5, py - 1.5, 1.4);
+  graphics.circle(px, py, radius);
+  graphics.fill(isChild ? 0xf7ecd0 : 0xf2e6bd);
+  graphics.circle(px + radius * 0.33, py - radius * 0.33, isChild ? 1 : 1.4);
   graphics.fill(0x20231d);
 
   if (agent.state === "Chat") {

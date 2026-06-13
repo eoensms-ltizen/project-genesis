@@ -38,6 +38,7 @@ export type AgentState =
   | "Pave"
   | "MoveToKitchen"
   | "Cook"
+  | "Wander"
   | "Rest";
 
 export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook";
@@ -84,6 +85,7 @@ export type Agent = {
   home?: Vec2;
   homeSite?: Vec2;
   homeBuildingId?: string;
+  spouseId?: string;
   actionTimer: number;
   projectBuildingId?: string;
   socialCooldown?: number;

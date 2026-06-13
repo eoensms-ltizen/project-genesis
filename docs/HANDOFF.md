@@ -104,6 +104,10 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Jobs (Settlement era): demand-driven assignment of farmers, woodcutters, a cook, and a builder (quotas scale with population); job shown in the resident list and as a colored ring on the map
 - Village kitchen (2x2, second communal project once food >= 10): the cook turns 2 raw food into 2 warm meals; residents prefer meals (hunger -80) over warehouse raw food over berries
 - Social chats: free residents who pass within 1.6 tiles stop for a 2.5s chat (speech bubble, log, 40s cooldown), then resume what they were doing
+- Marriage: single adults of opposite gender who chat may marry (40%) when at least one has a house; the couple shares one home (a pending house plan of the mover is cancelled)
+- Family births: babies are born to married couples at their home (replaces random spawning); children wander near home, do not work, and render smaller
+- Aging: residents age one year per in-game day; children come of age at 12 (logged)
+- Time controls: pause / 1x / 2x / 4x speed buttons in the panel
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
 - Day/night cycle: darkness overlay, warm window lights on houses at night

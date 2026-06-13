@@ -38,7 +38,10 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
+
+// Residents age one year per in-game day; children come of age at 12.
+export const ADULT_AGE = 12;
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -87,6 +90,7 @@ export class Simulation {
   private nextLogId = 1;
   private dirty = true;
   private savingDisabled = false;
+  private lastAgedDayIndex = -1;
 
   constructor(options: SimulationOptions) {
     this.onChange = options.onChange;
@@ -150,6 +154,7 @@ export class Simulation {
       this.tryBirth();
       this.checkEraPromotion();
       this.assignJobs();
+      this.ageResidents();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -514,7 +519,7 @@ export class Simulation {
         if (missing <= 0) {
           break;
         }
-        if (agent.job === "none") {
+        if (agent.job === "none" && agent.age >= ADULT_AGE) {
           agent.job = job;
           missing -= 1;
           this.log(`${agent.name} became a ${job}.`);
@@ -523,30 +528,90 @@ export class Simulation {
     }
   }
 
+  /** Babies are born to married couples with a shared home and enough food. */
   private tryBirth() {
-    if (this.agents.length < 2 || this.agents.length >= POPULATION_CAP) {
+    if (this.agents.length >= POPULATION_CAP) {
       return;
     }
     if (this.elapsedSeconds - this.lastBirthAt < BIRTH_COOLDOWN_SECONDS) {
       return;
     }
 
-    const houses = this.buildings.filter((building) => building.stage === "built");
-    if (houses.length === 0) {
+    const couples: [Agent, Agent][] = [];
+    for (const agent of this.agents) {
+      if (!agent.spouseId || !agent.home || agent.id >= agent.spouseId) {
+        continue;
+      }
+      const spouse = this.agents.find((other) => other.id === agent.spouseId);
+      if (spouse) {
+        couples.push([agent, spouse]);
+      }
+    }
+    if (couples.length === 0) {
       return;
     }
 
     const berries = this.world.countType("Berry");
-    if (berries < this.agents.length * 2 && this.foodStock < this.agents.length) {
+    if (
+      berries < this.agents.length * 2 &&
+      this.foodStock + this.meals < this.agents.length
+    ) {
       return;
     }
 
-    const house = houses[Math.floor(Math.random() * houses.length)];
-    const spawn = this.findSpawnPosition({ x: house.door.x, y: house.door.y + 1 });
-    const child = createRandomAgent(spawn, this.takenNames());
-    this.agents.push(child);
+    const [parentA, parentB] = couples[Math.floor(Math.random() * couples.length)];
+    const home = parentA.home;
+    if (!home) {
+      return;
+    }
+    const spawn = this.findSpawnPosition(home);
+    const baby = createRandomAgent(spawn, this.takenNames());
+    baby.age = 0;
+    baby.home = { ...home };
+    baby.homeBuildingId = parentA.homeBuildingId;
+    this.agents.push(baby);
     this.lastBirthAt = this.elapsedSeconds;
-    this.log(`${child.name} was born. The village is growing.`);
+    this.log(`${parentA.name} and ${parentB.name} had a baby: ${baby.name}! 👶`);
+    this.notifyChanged();
+  }
+
+  private ageResidents() {
+    const total = this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS;
+    const dayIndex = Math.floor(total / DAY_LENGTH_SECONDS);
+    if (this.lastAgedDayIndex === -1) {
+      this.lastAgedDayIndex = dayIndex;
+      return;
+    }
+    if (dayIndex === this.lastAgedDayIndex) {
+      return;
+    }
+    this.lastAgedDayIndex = dayIndex;
+
+    for (const agent of this.agents) {
+      agent.age += 1;
+      if (agent.age === ADULT_AGE) {
+        this.log(`${agent.name} came of age. 🎓`);
+      }
+    }
+    this.notifyChanged();
+  }
+
+  /** Removes an unbuilt building and reverts its tiles (used when plans are abandoned). */
+  cancelBuilding(building: Building) {
+    if (building.stage === "built") {
+      return;
+    }
+    this.releaseBuildingFootprint(building);
+    for (const position of footprintTiles(building)) {
+      const tile = this.world.getTile(position);
+      if (tile && (tile.type === "HouseSite" || tile.type === "HouseFoundation")) {
+        this.world.setTile(position, "Grass");
+      }
+    }
+    const index = this.buildings.indexOf(building);
+    if (index >= 0) {
+      this.buildings.splice(index, 1);
+    }
     this.notifyChanged();
   }
 

@@ -1,5 +1,6 @@
 import type { Agent, AgentState, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
+import { ADULT_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
 
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
@@ -31,6 +32,8 @@ const STAMINA_TIRED = 70;
 const CHAT_DURATION_SECONDS = 2.5;
 const CHAT_COOLDOWN_SECONDS = 40;
 const CHAT_RANGE_TILES = 1.6;
+const MARRIAGE_CHANCE = 0.4;
+const WANDER_RADIUS_TILES = 5;
 // States where a resident is free enough to stop for a quick chat.
 const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "Idle",
@@ -41,6 +44,7 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToPave",
   "MoveToKitchen",
   "MoveHome",
+  "Wander",
 ]);
 
 export class AgentBrain {
@@ -112,6 +116,9 @@ export class AgentBrain {
       case "Cook":
         this.cook(agent, simulation, deltaSeconds);
         break;
+      case "Wander":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
+        break;
       case "PlanHouse":
         this.planHouse(agent, simulation, deltaSeconds);
         break;
@@ -155,6 +162,12 @@ export class AgentBrain {
 
     if (agent.health.stamina < STAMINA_EXHAUSTED) {
       this.goRest(agent, simulation);
+      return;
+    }
+
+    // Children play near home instead of working.
+    if (agent.age < ADULT_AGE) {
+      this.wanderNearHome(agent, simulation);
       return;
     }
 
@@ -733,7 +746,65 @@ export class AgentBrain {
 
     this.startChat(agent, simulation);
     this.startChat(partner, simulation);
-    simulation.log(`${agent.name} and ${partner.name} stopped for a chat.`);
+
+    if (this.canMarry(agent, partner) && Math.random() < MARRIAGE_CHANCE) {
+      this.marry(agent, partner, simulation);
+    } else {
+      simulation.log(`${agent.name} and ${partner.name} stopped for a chat.`);
+    }
+  }
+
+  private canMarry(a: Agent, b: Agent): boolean {
+    return (
+      !a.spouseId &&
+      !b.spouseId &&
+      a.age >= ADULT_AGE &&
+      b.age >= ADULT_AGE &&
+      a.gender !== b.gender &&
+      Boolean(a.home || b.home)
+    );
+  }
+
+  private marry(a: Agent, b: Agent, simulation: Simulation) {
+    const homeOwner = a.home ? a : b;
+    const mover = homeOwner === a ? b : a;
+
+    // The mover gives up any house of their own and any pending house plan.
+    if (mover.projectBuildingId) {
+      const pending = simulation.getBuilding(mover.projectBuildingId);
+      if (pending && pending.stage !== "built" && pending.kind === "house") {
+        simulation.cancelBuilding(pending);
+      }
+      mover.projectBuildingId = undefined;
+    }
+    mover.homeSite = undefined;
+    mover.home = homeOwner.home ? { ...homeOwner.home } : undefined;
+    mover.homeBuildingId = homeOwner.homeBuildingId;
+
+    a.spouseId = b.id;
+    b.spouseId = a.id;
+    simulation.log(`${a.name} and ${b.name} got married! 💍`);
+  }
+
+  private wanderNearHome(agent: Agent, simulation: Simulation) {
+    const anchor = agent.home ?? roundVec(agent.position);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const candidate = {
+        x: anchor.x + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+        y: anchor.y + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+      };
+      if (!simulation.world.isWalkable(candidate)) {
+        continue;
+      }
+      const path = findPath(simulation.world, { start: agent.position, goal: candidate });
+      if (path) {
+        agent.target = candidate;
+        agent.path = path;
+        this.setState(agent, simulation, "Wander");
+        return;
+      }
+    }
+    this.backOff(agent, simulation);
   }
 
   private startChat(agent: Agent, simulation: Simulation) {

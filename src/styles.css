@@ -105,6 +105,21 @@ button[data-active="true"] {
   letter-spacing: 0.4px;
 }
 
+.speed-row {
+  display: flex;
+  gap: 6px;
+}
+
+.speed-row button {
+  flex: 1;
+  padding: 6px 0;
+}
+
+.speed-row button[data-active="true"] {
+  border-color: #d7b65f;
+  color: #f3eadb;
+}
+
 .panel-section {
   display: grid;
   gap: 10px;

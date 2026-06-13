@@ -19,6 +19,8 @@ export default function App() {
   const [foodStock, setFoodStock] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(1);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
@@ -59,7 +61,7 @@ export default function App() {
     });
 
     const intervalId = window.setInterval(() => {
-      game.tick(TICK_MS / 1000);
+      game.tick((TICK_MS / 1000) * speedRef.current);
     }, TICK_MS);
 
     const saveOnHide = () => {
@@ -86,6 +88,11 @@ export default function App() {
   const enablePlacement = () => {
     gameRef.current?.setPlacementMode(true);
     setPendingPlacement(true);
+  };
+
+  const changeSpeed = (value: number) => {
+    speedRef.current = value;
+    setSpeed(value);
   };
 
   const resetWorld = () => {
@@ -120,7 +127,9 @@ export default function App() {
           onAddRandom={addRandomAgent}
           onPlaceAgent={enablePlacement}
           onReset={resetWorld}
+          onSpeedChange={changeSpeed}
           placementActive={pendingPlacement}
+          speed={speed}
         />
         <AgentCreator onCreate={addRandomAgent} />
         <section className="panel-section">
