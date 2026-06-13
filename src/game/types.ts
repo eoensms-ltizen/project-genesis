@@ -210,4 +210,6 @@ export type SimulationSnapshot = {
   litter: number;
   // Public-order pressure (0..100) — rising friction that calls for police.
   unrest: number;
+  // Steel (rebar) stock from factories; gates apartment/tower construction.
+  steel: number;
 };

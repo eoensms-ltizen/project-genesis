@@ -76,6 +76,12 @@ const TAMEABLE: Record<AnimalKind, boolean> = { deer: true, boar: false, rabbit:
 // cans surplus food; a station's trade train delivers goods each pass.
 const POWER_RADIUS = 14;
 const FACTORY_FOOD_PER_TICK = 3;
+// A powered factory also forges steel (rebar). Apartments and towers can only
+// be built once the town produces steel — so before industry, growth spreads
+// outward into more homes rather than upward.
+const FACTORY_STEEL_PER_TICK = 2;
+const STEEL_CAP = 240;
+const REDEVELOP_STEEL_COST = 10;
 const TRAIN_SPEED = 9;
 const TRAIN_DELIVER_FOOD = 8;
 
@@ -218,6 +224,7 @@ export class Simulation {
   era = 0;
   foodStock = 0;
   meals = 0;
+  steel = 0;
   deaths = 0;
 
   private nextBuildingId = 1;
@@ -650,6 +657,7 @@ export class Simulation {
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
       unrest: Math.round(this.unrest),
+      steel: Math.round(this.steel),
     };
   }
 
@@ -1162,6 +1170,7 @@ export class Simulation {
     for (const building of this.buildings) {
       if (building.kind === "factory" && building.stage === "built" && this.isPowered(building)) {
         this.foodStock = Math.min(FOOD_CAP, this.foodStock + FACTORY_FOOD_PER_TICK);
+        this.steel = Math.min(STEEL_CAP, this.steel + FACTORY_STEEL_PER_TICK);
       }
     }
   }
@@ -1831,8 +1840,11 @@ export class Simulation {
    * that keeps the settlement small and makes each new birth feel earned.
    */
   supportedPopulation(): number {
-    const eraCeiling = ERA_POP_CEILING[this.era] ?? ERA_POP_CEILING[ERA_POP_CEILING.length - 1];
-    return Math.min(this.housingCapacity(), eraCeiling);
+    // Paced by the era (and by wellbeing, in tryBirth) rather than by current
+    // housing: the population grows to the era's ceiling and housing must spread
+    // or build taller to shelter them. Overcrowding is the pressure that drives
+    // new homes — so growth never deadlocks waiting on a material it can't get.
+    return ERA_POP_CEILING[this.era] ?? ERA_POP_CEILING[ERA_POP_CEILING.length - 1];
   }
 
   /** Average contentment of working-age residents, 0..100. Gates births. */
@@ -1899,12 +1911,13 @@ export class Simulation {
         .map((a) => a.projectBuildingId),
     );
     const center = this.villageCenter();
+    const max = this.maxRedevelopLevel();
     return this.buildings
       .filter(
         (b) =>
           b.kind === "house" &&
           b.stage === "built" &&
-          this.houseLevel(b) < HOUSE_MAX_LEVEL &&
+          this.houseLevel(b) < max &&
           !inProgress.has(b.id),
       )
       .sort(
@@ -1944,15 +1957,22 @@ export class Simulation {
       )[0];
   }
 
+  /**
+   * The tallest tier a house may currently reach. Villas (level 2) are wood; an
+   * apartment or tower (level 3+) needs steel, so without a steel supply growth
+   * stays low-rise and spreads outward instead.
+   */
+  maxRedevelopLevel(): number {
+    return this.steel >= REDEVELOP_STEEL_COST ? HOUSE_MAX_LEVEL : 2;
+  }
+
   /** A built house that can still be upgraded to a denser tier. */
   findDensifiableHouse(): Building | undefined {
     const center = this.villageCenter();
+    const max = this.maxRedevelopLevel();
     return this.buildings
       .filter(
-        (b) =>
-          b.kind === "house" &&
-          b.stage === "built" &&
-          this.houseLevel(b) < HOUSE_MAX_LEVEL,
+        (b) => b.kind === "house" && b.stage === "built" && this.houseLevel(b) < max,
       )
       .sort(
         (a, b) =>
@@ -2028,13 +2048,16 @@ export class Simulation {
 
   /** Redevelop a house one tier taller, packing more households per tile. */
   levelUpHouse(building: Building) {
-    const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
+    const next = Math.min(this.houseLevel(building) + 1, this.maxRedevelopLevel());
     building.level = next;
     building.capacity = HOUSE_CAPACITY_BY_LEVEL[next];
     building.durability = 100;
-    // Apartments and towers need a larger 2x3 footprint than a cottage/villa.
-    if (next >= 3 && building.height < 3) {
-      this.expandHouseFootprint(building);
+    // Apartments and towers consume steel and need a larger 2x3 footprint.
+    if (next >= 3) {
+      this.steel = Math.max(0, this.steel - REDEVELOP_STEEL_COST);
+      if (building.height < 3) {
+        this.expandHouseFootprint(building);
+      }
     }
     // Re-tile the (possibly grown) footprint, then keep the doorway a road so
     // the rebuilt block is never sealed in.

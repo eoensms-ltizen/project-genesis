@@ -489,18 +489,32 @@ function drawBuilding(graphics: Graphics, building: Building) {
   }
 
   if (building.kind === "park") {
-    // Green square with a path, a leafy tree, and a flower bed.
+    // Green square with crossing paths, leafy trees, a pond and flower beds.
     graphics.rect(px + 1, py + 1, w - 2, h - 2);
     graphics.fill(0x3f6b32);
     graphics.rect(px + Math.floor(w / 2) - 1, py + 1, 2, h - 2);
-    graphics.fill({ color: 0xb6a06a, alpha: 0.7 });
-    graphics.circle(px + 6, py + 6, 4);
-    graphics.fill(0x2f5a26);
-    graphics.rect(px + 5.2, py + 6, 1.6, 4);
-    graphics.fill(0x5a4326);
-    graphics.circle(px + w - 6, py + h - 6, 1.6);
+    graphics.fill({ color: 0xb6a06a, alpha: 0.6 });
+    graphics.rect(px + 1, py + Math.floor(h / 2) - 1, w - 2, 2);
+    graphics.fill({ color: 0xb6a06a, alpha: 0.6 });
+    // A small pond.
+    graphics.circle(px + w - 9, py + 9, 4);
+    graphics.fill(0x3f6f8a);
+    // Leafy trees scattered across the lawn.
+    for (const [tx, ty] of [
+      [6, 6],
+      [w - 8, h - 9],
+      [9, h - 8],
+      [w - 12, 7],
+    ]) {
+      graphics.circle(px + tx, py + ty, 4);
+      graphics.fill(0x2f5a26);
+      graphics.rect(px + tx - 0.8, py + ty, 1.6, 4);
+      graphics.fill(0x5a4326);
+    }
+    // Flower bed dots.
+    graphics.circle(px + 7, py + h - 5, 1.4);
     graphics.fill(0xd98ab0);
-    graphics.circle(px + w - 9, py + h - 7, 1.4);
+    graphics.circle(px + 10, py + h - 6, 1.3);
     graphics.fill(0xe8d16f);
     return;
   }

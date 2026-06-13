@@ -91,6 +91,15 @@
   as road the instant a site is staked, so clustering never seals anyone in.
   Fixed police stations being built several at once (any-stage check) and
   lowered road wear thresholds so streets form more readily.
+- Spread vs vertical, gated by steel: apartments/towers (level 3+) now require
+  steel, forged by a powered factory (which is now sited next to the power plant
+  so it's electrified). Without steel, redevelopment caps at villas and grown,
+  unmarried residents move out of overcrowded homes to build nearby — the town
+  spreads into a low-rise cluster; once steel flows it redevelops upward instead.
+  Population is now paced by the era ceiling (not current housing), so it never
+  deadlocks waiting on a material. Parks enlarged to 3×3; overcrowded homes lose
+  comfort. Verified: low-rise spread through eras 1–3, then apartments/towers in
+  the industrial era, no deadlock to pop 40.
 
 ## 2026-06-12
 

@@ -319,6 +319,17 @@ export class AgentBrain {
       return;
     }
 
+    // A grown, unmarried adult leaves an overcrowded family home to start a
+    // place of their own nearby — this is how the town spreads into a cluster
+    // of homes instead of cramming everyone into a few.
+    if (this.shouldMoveOut(agent, simulation)) {
+      agent.home = undefined;
+      agent.homeBuildingId = undefined;
+      agent.homeSite = undefined;
+      simulation.log(`${agent.name} moved out to find a place of their own. 🧳`, [agent]);
+      return;
+    }
+
     // Resume an unfinished construction project (e.g., after loading a save).
     if (agent.projectBuildingId) {
       const building = simulation.getBuilding(agent.projectBuildingId);
@@ -572,6 +583,29 @@ export class AgentBrain {
     this.setState(agent, simulation, "Idle");
   }
 
+  /**
+   * A single grown-up strikes out on their own when the town is full and can't
+   * simply build taller — so the settlement grows by spreading into a new home
+   * (a hamlet of houses) rather than stalling. When apartments are possible
+   * (steel) the village redevelops upward instead, so no one needs to move out.
+   */
+  private shouldMoveOut(agent: Agent, simulation: Simulation): boolean {
+    if (agent.spouseId || !agent.homeBuildingId) {
+      return false;
+    }
+    const home = simulation.getBuilding(agent.homeBuildingId);
+    if (!home || home.kind !== "house" || home.ownerId === agent.id) {
+      return false;
+    }
+    // Only when the home is overcrowded AND can't be built any taller right now
+    // (no steel for apartments): then the grown-up spreads out into a new home.
+    // When apartments are possible the village redevelops upward instead.
+    if (simulation.occupantsOf(home.id) <= simulation.houseCapacity(home)) {
+      return false;
+    }
+    return simulation.houseLevel(home) >= simulation.maxRedevelopLevel();
+  }
+
   /** Lifestage idle for children and elders: company if lonely, else a stroll. */
   private liveByLeisure(agent: Agent, simulation: Simulation) {
     const social = (100 - agent.needs.social) * (0.6 + agent.personality.sociability);
@@ -639,9 +673,15 @@ export class AgentBrain {
       simulation.localHouseDensity(anchor, COMFORT_CROWD_RADIUS) - COMFORT_CROWD_TOLERANCE,
     );
     const ambiance = simulation.ambianceAt(anchor);
+    // An overcrowded home (more residents than it can comfortably hold) grates too.
+    const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
+    const overcrowd =
+      home && home.kind === "house"
+        ? Math.max(0, simulation.occupantsOf(home.id) - simulation.houseCapacity(home))
+        : 0;
     n.comfort = clampNeed(
       n.comfort -
-        deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY) +
+        deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY + overcrowd * 0.03) +
         deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE,
     );
 
@@ -909,14 +949,29 @@ export class AgentBrain {
       "factory",
       "station",
       "cemetery",
+      "park",
     ]);
-    const threeTall = new Set(["church", "pasture", "powerplant", "factory", "cemetery"]);
+    const threeTall = new Set([
+      "church",
+      "pasture",
+      "powerplant",
+      "factory",
+      "cemetery",
+      "park",
+    ]);
     const width = threeWide.has(kind) ? 3 : 2;
     const height = threeTall.has(kind) ? 3 : 2;
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
     const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
     const avoidsHomes = kind === "powerplant" || kind === "factory";
+    // A factory must sit near the power plant to be electrified (and so forge
+    // steel), so it builds next to it; other industry just shuns housing.
+    const powerplant = simulation.getPowerPlant();
+    const origin =
+      kind === "factory" && powerplant
+        ? { x: Math.round(powerplant.x + powerplant.width / 2), y: Math.round(powerplant.y + powerplant.height / 2) }
+        : agent.position;
     const site =
       kind === "cemetery"
         ? simulation.world.findBuildingSite(
@@ -926,7 +981,7 @@ export class AgentBrain {
             isClaimed,
             { far: true, minDistance: 16 },
           )
-        : simulation.world.findBuildingSite(agent.position, width, height, isClaimed, {
+        : simulation.world.findBuildingSite(origin, width, height, isClaimed, {
             // Power plants and factories are nuisances — steer them away from homes.
             extraScore: avoidsHomes
               ? (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT

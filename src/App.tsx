@@ -29,6 +29,7 @@ export default function App() {
   const [foodStock, setFoodStock] = useState(0);
   const [litter, setLitter] = useState(0);
   const [unrest, setUnrest] = useState(0);
+  const [steel, setSteel] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -60,6 +61,7 @@ export default function App() {
         setMeals(snapshot.meals);
         setLitter(snapshot.litter);
         setUnrest(snapshot.unrest);
+        setSteel(snapshot.steel);
         setBuildings(snapshot.buildings);
         setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
@@ -155,6 +157,7 @@ export default function App() {
                   {meals}
                   {litter > 0 ? ` · 🗑️${litter}` : ""}
                   {unrest >= 20 ? ` · 😠${unrest}` : ""}
+                  {steel > 0 ? ` · 🔩${steel}` : ""}
                 </span>
               </>
             ) : (
