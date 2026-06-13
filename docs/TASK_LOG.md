@@ -12,6 +12,10 @@
 - Added land-pressure housing density and infrastructure decay.
 - Brought the docs in line with the code (eras 0–4 shipped); marked DESIGN.md
   milestone status and recorded the remaining backlog.
+- Replaced the scripted decision ladder with a needs-driven utility arbiter:
+  six soft needs (social, purpose, faith, leisure + hunger, energy) that drain
+  by personality and refill through activity; inspector need bars + motivation;
+  needs persisted (save v10).
 
 ## 2026-06-12
 
