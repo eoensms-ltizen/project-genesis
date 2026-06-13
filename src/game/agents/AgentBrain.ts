@@ -1,4 +1,4 @@
-import type { Agent, AgentState, TileType, Vec2 } from "../types";
+import type { Agent, AgentState, BuildingKind, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
@@ -15,6 +15,9 @@ const TARGET_CANDIDATE_LIMIT = 12;
 const HOUSE_WOOD_COST = 8;
 const WAREHOUSE_WOOD_COST = 10;
 const KITCHEN_WOOD_COST = 8;
+const CHURCH_WOOD_COST = 14;
+const WORSHIP_RADIUS_TILES = 4;
+const TRANSPLANT_DISTANCE_TILES = 6;
 const WOOD_STOCKPILE_CAP = 10;
 const WOODCUTTER_STOCKPILE_CAP = 14;
 const COOK_DURATION_SECONDS = 3;
@@ -43,6 +46,9 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToFarm",
   "MoveToPave",
   "MoveToKitchen",
+  "MoveToWorship",
+  "MoveToStump",
+  "MoveToPlant",
   "MoveHome",
   "Wander",
 ]);
@@ -115,6 +121,24 @@ export class AgentBrain {
         break;
       case "Cook":
         this.cook(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToWorship":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Worship");
+        break;
+      case "Worship":
+        this.worship(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToStump":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Transplant");
+        break;
+      case "Transplant":
+        this.transplantDig(agent, simulation);
+        break;
+      case "MoveToPlant":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Plant");
+        break;
+      case "Plant":
+        this.plantTree(agent, simulation);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -197,6 +221,13 @@ export class AgentBrain {
       return;
     }
 
+    // Morning worship gathering at the church.
+    if (simulation.isWorshipMorning() && simulation.getChurch()) {
+      if (this.goWorship(agent, simulation)) {
+        return;
+      }
+    }
+
     // Resume an unfinished construction project (e.g., after loading a save).
     if (agent.projectBuildingId) {
       const building = simulation.getBuilding(agent.projectBuildingId);
@@ -251,7 +282,7 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "gather" | "none" {
-    let kind: "warehouse" | "kitchen" | undefined;
+    let kind: "warehouse" | "kitchen" | "church" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (
@@ -260,6 +291,12 @@ export class AgentBrain {
       simulation.foodStock >= 10
     ) {
       kind = "kitchen";
+    } else if (
+      simulation.era >= 2 &&
+      !simulation.hasAnyChurch() &&
+      simulation.getKitchen()
+    ) {
+      kind = "church";
     }
     if (!kind) {
       return "none";
@@ -284,7 +321,8 @@ export class AgentBrain {
           this.findFarmWork(agent, simulation)
         );
       case "woodcutter":
-        return false; // Falls through to the wood-gathering branch below.
+        // Reforest by relocating an in-the-way stump, otherwise gather wood below.
+        return this.findTransplantWork(agent, simulation);
       default:
         return this.findFarmWork(agent, simulation);
     }
@@ -359,10 +397,10 @@ export class AgentBrain {
   private startCommunalBuilding(
     agent: Agent,
     simulation: Simulation,
-    kind: "warehouse" | "kitchen",
+    kind: "warehouse" | "kitchen" | "church",
   ): boolean {
-    const width = kind === "warehouse" ? 3 : 2;
-    const height = 2;
+    const width = kind === "warehouse" ? 3 : kind === "church" ? 3 : 2;
+    const height = kind === "church" ? 3 : 2;
     const site = simulation.world.findBuildingSite(agent.position, width, height, (position) =>
       simulation.isTileClaimed(position),
     );
@@ -387,11 +425,7 @@ export class AgentBrain {
     agent.projectBuildingId = building.id;
     agent.target = { ...door };
     agent.path = path;
-    simulation.log(
-      kind === "warehouse"
-        ? `${agent.name} is planning a village warehouse.`
-        : `${agent.name} is planning a village kitchen.`,
-    );
+    simulation.log(`${agent.name} is planning a village ${kind}.`);
     this.setState(agent, simulation, "MoveToHouseSite");
     return true;
   }
@@ -735,6 +769,171 @@ export class AgentBrain {
     this.setState(agent, simulation, "Idle");
   }
 
+  private goWorship(agent: Agent, simulation: Simulation): boolean {
+    const church = simulation.getChurch();
+    if (!church) {
+      return false;
+    }
+    const cx = church.x + church.width / 2;
+    const cy = church.y + church.height / 2;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = {
+        x: Math.round(cx) + Math.floor(Math.random() * (WORSHIP_RADIUS_TILES * 2 + 1)) -
+          WORSHIP_RADIUS_TILES,
+        y: Math.round(cy) + Math.floor(Math.random() * (WORSHIP_RADIUS_TILES * 2 + 1)) -
+          WORSHIP_RADIUS_TILES,
+      };
+      if (!simulation.world.isWalkable(candidate)) {
+        continue;
+      }
+      const path = findPath(simulation.world, { start: agent.position, goal: candidate });
+      if (path) {
+        agent.target = candidate;
+        agent.path = path;
+        this.setState(agent, simulation, "MoveToWorship");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private worship(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    if (agent.actionTimer === 0) {
+      simulation.noteWorshipGathering();
+    }
+    agent.actionTimer += deltaSeconds;
+    // Stand and pray until the morning service ends.
+    if (!simulation.isWorshipMorning() || agent.actionTimer > 40) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+    }
+  }
+
+  private findTransplantWork(agent: Agent, simulation: Simulation): boolean {
+    const world = simulation.world;
+    let best: Vec2 | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const tile of world.tiles) {
+      if (tile.type !== "Stump" || simulation.isTileClaimed(tile)) {
+        continue;
+      }
+      // Only relocate stumps that sit in developed areas (near paths/buildings).
+      if (!this.stumpInTheWay(world, tile)) {
+        continue;
+      }
+      const d = squaredDistance(agent.position, tile);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { x: tile.x, y: tile.y };
+      }
+    }
+    if (!best) {
+      return false;
+    }
+
+    const path = findPath(world, { start: agent.position, goal: best, stopAdjacent: true });
+    if (!path) {
+      return false;
+    }
+
+    simulation.claimTile(best);
+    agent.target = best;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToStump");
+    return true;
+  }
+
+  private transplantDig(agent: Agent, simulation: Simulation) {
+    if (!agent.target) {
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    const stump = roundVec(agent.target);
+    simulation.releaseClaim(stump);
+    if (simulation.world.getTile(stump)?.type === "Stump") {
+      simulation.world.setTile(stump, "Grass");
+    }
+
+    // Find a clear spot a little away to replant the sapling.
+    const plant = this.findPlantSpot(simulation, stump);
+    if (!plant) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+
+    const path = findPath(simulation.world, { start: agent.position, goal: plant, stopAdjacent: true });
+    if (!path) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    simulation.claimTile(plant);
+    agent.target = plant;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToPlant");
+  }
+
+  private plantTree(agent: Agent, simulation: Simulation) {
+    if (agent.target) {
+      const spot = roundVec(agent.target);
+      simulation.releaseClaim(spot);
+      if (simulation.world.getTile(spot)?.type === "Grass") {
+        simulation.world.setTile(spot, "Tree");
+        simulation.log(`${agent.name} transplanted a sapling to greener ground. 🌱`);
+      }
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  private findPlantSpot(simulation: Simulation, from: Vec2): Vec2 | undefined {
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = TRANSPLANT_DISTANCE_TILES + Math.floor(Math.random() * 5);
+      const candidate = {
+        x: Math.round(from.x + Math.cos(angle) * radius),
+        y: Math.round(from.y + Math.sin(angle) * radius),
+      };
+      const tile = simulation.world.getTile(candidate);
+      if (
+        tile?.type === "Grass" &&
+        !simulation.isTileClaimed(candidate) &&
+        !this.stumpInTheWay(simulation.world, candidate)
+      ) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  private stumpInTheWay(world: Simulation["world"], position: Vec2): boolean {
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const type = world.getTile({ x: position.x + dx, y: position.y + dy })?.type;
+      if (
+        type === "Road" ||
+        type === "Dirt" ||
+        type === "Plaza" ||
+        type === "House" ||
+        type === "FieldEmpty" ||
+        type === "FieldGrowing" ||
+        type === "FieldRipe"
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private tryStartChat(agent: Agent, simulation: Simulation) {
     const partner = simulation.agents.find(
       (other) =>
@@ -1043,12 +1242,15 @@ function samePos(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
-function buildCost(kind: "house" | "warehouse" | "kitchen"): number {
+function buildCost(kind: BuildingKind): number {
   if (kind === "warehouse") {
     return WAREHOUSE_WOOD_COST;
   }
   if (kind === "kitchen") {
     return KITCHEN_WOOD_COST;
+  }
+  if (kind === "church") {
+    return CHURCH_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }

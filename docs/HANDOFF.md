@@ -113,6 +113,11 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Chopped trees leave stumps that regrow into trees over time; buildings weather slowly (durability display only)
 - Per-couple birth cooldown (90s) replaces the single global pacing
 - Time controls: pause / 1x / 2x / 4x speed buttons in the panel
+- Church (3x3, Town era, after warehouse+kitchen): morning worship gathers adults at the church on alternating mornings (06:00-09:00), logged once per service
+- City era (4th): pop 20 + church + kitchen
+- Plaza: a dense cluster of roads (3x3 window mostly paved) condenses into a plaza, then absorbs adjacent roads as the town grows; decorations appear — central fountain, corner lamps, and a statue past a size threshold; lamps glow at night
+- Stump transplanting: woodcutters relocate stumps that sit in developed areas (next to roads/plaza/houses/fields), digging them up and replanting a tree on open ground further out; stumps already block building/roads (footprint and paving only act on grass/dirt)
+- Dev aid: in dev builds the GameApp is exposed as window.__genesis for inspection
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
 - Day/night cycle: darkness overlay, warm window lights on houses at night
@@ -206,7 +211,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1, M2, and the core of M3 are complete (game time, day/night, sleep, save/load, 2x2 houses, eras 0-2 all verified live, farming, warehouse, paving, jobs, kitchen/cooking). Remaining M3 items: church + worship gatherings, plaza, livestock, fishing. Then M4: aesthetic jobs and decorations, family-based births, festivals.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. Remaining: animals (wild spawn, hunting for food, taming into livestock) — next priority; then M5 industry (power, factory, trains).
 
 ## Next Recommended Work
 

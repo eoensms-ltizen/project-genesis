@@ -16,7 +16,11 @@ export type TileType =
   | "FieldEmpty"
   | "FieldGrowing"
   | "FieldRipe"
-  | "Stump";
+  | "Stump"
+  | "Plaza"
+  | "Fountain"
+  | "Statue"
+  | "Lamp";
 
 export type AgentState =
   | "Idle"
@@ -39,12 +43,18 @@ export type AgentState =
   | "Pave"
   | "MoveToKitchen"
   | "Cook"
+  | "MoveToWorship"
+  | "Worship"
+  | "MoveToStump"
+  | "Transplant"
+  | "MoveToPlant"
+  | "Plant"
   | "Wander"
   | "Rest";
 
 export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook";
 
-export type BuildingKind = "house" | "warehouse" | "kitchen";
+export type BuildingKind = "house" | "warehouse" | "kitchen" | "church";
 
 export type BuildingStage = "site" | "foundation" | "built";
 

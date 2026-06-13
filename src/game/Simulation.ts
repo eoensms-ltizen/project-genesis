@@ -38,7 +38,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 
 // Residents age one year per in-game day; children come of age at 12,
 // retire at 60, and pass away when they outlive their personal lifespan.
@@ -48,6 +48,9 @@ const COUPLE_BIRTH_COOLDOWN_SECONDS = 90;
 const STUMP_REGROW_CHANCE = 0.03;
 const DURABILITY_DECAY_PER_TICK = 0.012;
 const EPISODE_CAP = 15;
+
+// A 3x3 block of roads becomes a plaza; it then grows along adjacent roads.
+const PLAZA_DECOR_INTERVAL = 12;
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -98,6 +101,7 @@ export class Simulation {
   private dirty = true;
   private savingDisabled = false;
   private lastAgedDayIndex = -1;
+  private lastWorshipLogDay = -1;
 
   constructor(options: SimulationOptions) {
     this.onChange = options.onChange;
@@ -162,6 +166,7 @@ export class Simulation {
       this.checkEraPromotion();
       this.assignJobs();
       this.ageResidents();
+      this.updatePlaza();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -528,7 +533,109 @@ export class Simulation {
         this.era = 2;
         this.log("The village entered the Town era! Residents will start paving roads.");
       }
+      return;
     }
+
+    if (this.era === 2) {
+      if (this.agents.length >= 20 && this.getChurch() && this.getKitchen()) {
+        this.era = 3;
+        this.log("The village blossomed into a City! A plaza will grow at its heart.");
+      }
+    }
+  }
+
+  /**
+   * A 3x3 cluster of roads condenses into a plaza, then keeps absorbing any
+   * road tiles that touch it. Decorations (fountain, lamps, statue) appear as
+   * the plaza grows, giving the town centre its civic landmark.
+   */
+  private updatePlaza() {
+    const world = this.world;
+    let plazaCount = world.countType("Plaza");
+
+    if (plazaCount === 0) {
+      // A dense cluster of roads (a 3x3 window mostly paved) seeds a plaza.
+      for (let y = 1; y < world.height - 3 && plazaCount === 0; y += 1) {
+        for (let x = 1; x < world.width - 3 && plazaCount === 0; x += 1) {
+          if (this.roadDensity(x, y, 3) >= 7) {
+            for (let dy = 0; dy < 3; dy += 1) {
+              for (let dx = 0; dx < 3; dx += 1) {
+                const position = { x: x + dx, y: y + dy };
+                if (world.getTile(position)?.type === "Road") {
+                  world.setTile(position, "Plaza");
+                }
+              }
+            }
+            world.setTile({ x: x + 1, y: y + 1 }, "Fountain");
+            world.setTile({ x, y }, "Lamp");
+            world.setTile({ x: x + 2, y: y + 2 }, "Lamp");
+            this.log("A village plaza has formed at the town's heart! ⛲");
+            plazaCount = world.countType("Plaza");
+          }
+        }
+      }
+      return;
+    }
+
+    // Grow: absorb roads adjacent to the plaza.
+    const toPromote: Vec2[] = [];
+    for (const tile of world.tiles) {
+      if (tile.type !== "Road") {
+        continue;
+      }
+      if (this.hasOrthatType(tile, "Plaza")) {
+        toPromote.push({ x: tile.x, y: tile.y });
+      }
+    }
+    for (const position of toPromote) {
+      world.setTile(position, "Plaza");
+    }
+
+    // Add decorations as the plaza grows past size thresholds.
+    plazaCount += toPromote.length;
+    if (plazaCount >= PLAZA_DECOR_INTERVAL && !world.tiles.some((t) => t.type === "Statue")) {
+      const spot = world.tiles.find(
+        (t) => t.type === "Plaza" && this.hasOrthatType(t, "Plaza"),
+      );
+      if (spot) {
+        world.setTile(spot, "Statue");
+        this.log("A statue was raised in the plaza. 🗽");
+      }
+    }
+    if (toPromote.length > 0 && plazaCount % PLAZA_DECOR_INTERVAL < toPromote.length) {
+      // Sprinkle a lamp on a fresh plaza edge for night lighting.
+      const edge = toPromote.find((p) => this.hasOrthatType(p, "Grass"));
+      if (edge) {
+        world.setTile(edge, "Lamp");
+      }
+    }
+  }
+
+  private roadDensity(x: number, y: number, size: number): number {
+    let count = 0;
+    for (let dy = 0; dy < size; dy += 1) {
+      for (let dx = 0; dx < size; dx += 1) {
+        const type = this.world.getTile({ x: x + dx, y: y + dy })?.type;
+        if (type === "Road" || type === "Plaza") {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }
+
+  private hasOrthatType(position: Vec2, type: TileType): boolean {
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      if (this.world.getTile({ x: position.x + dx, y: position.y + dy })?.type === type) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getWarehouse(): Building | undefined {
@@ -549,6 +656,31 @@ export class Simulation {
 
   hasAnyKitchen(): boolean {
     return this.buildings.some((building) => building.kind === "kitchen");
+  }
+
+  getChurch(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "church" && building.stage === "built",
+    );
+  }
+
+  hasAnyChurch(): boolean {
+    return this.buildings.some((building) => building.kind === "church");
+  }
+
+  /** Worship gathers on alternating mornings once a church exists. */
+  isWorshipMorning(): boolean {
+    const clock = this.getClock();
+    return clock.day % 2 === 0 && clock.hour >= 6 && clock.hour < 9;
+  }
+
+  noteWorshipGathering() {
+    const day = this.getClock().day;
+    if (this.lastWorshipLogDay === day) {
+      return;
+    }
+    this.lastWorshipLogDay = day;
+    this.log("The villagers gathered for morning worship. 🙏");
   }
 
   /**

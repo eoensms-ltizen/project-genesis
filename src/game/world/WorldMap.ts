@@ -18,8 +18,12 @@ const MOVE_COSTS: Record<TileType, number> = {
   FieldGrowing: 1.3,
   FieldRipe: 1.3,
   Stump: 1.15,
+  Plaza: 0.55,
+  Lamp: 0.6,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
+  Fountain: Number.POSITIVE_INFINITY,
+  Statue: Number.POSITIVE_INFINITY,
 };
 
 export const MIN_MOVE_COST = MOVE_COSTS.Road;
@@ -39,6 +43,10 @@ const TILE_CODES: Record<TileType, string> = {
   FieldGrowing: "c",
   FieldRipe: "p",
   Stump: "u",
+  Plaza: "z",
+  Fountain: "o",
+  Statue: "y",
+  Lamp: "l",
 };
 
 const CODE_TILES: Record<string, TileType> = Object.fromEntries(
@@ -236,7 +244,7 @@ export class WorldMap {
         ) {
           return { clear: false, touchesPath: false };
         }
-        if (tile.type === "Road" || tile.type === "Dirt") {
+        if (tile.type === "Road" || tile.type === "Dirt" || tile.type === "Plaza") {
           touchesPath = true;
         }
       }

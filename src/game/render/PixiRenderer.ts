@@ -113,6 +113,19 @@ export class PixiRenderer {
         this.nightGraphics.circle(cx, cy, 10);
         this.nightGraphics.fill({ color: 0xffe1a6, alpha: darkness * 0.32 });
       }
+
+      // Street lamps light the plaza after dark.
+      for (const tile of world.tiles) {
+        if (tile.type !== "Lamp") {
+          continue;
+        }
+        const lx = tile.x * TILE_SIZE + TILE_SIZE / 2;
+        const ly = tile.y * TILE_SIZE + TILE_SIZE / 2;
+        this.nightGraphics.circle(lx, ly, 20);
+        this.nightGraphics.fill({ color: 0xffe6a0, alpha: darkness * 0.2 });
+        this.nightGraphics.circle(lx, ly, 8);
+        this.nightGraphics.fill({ color: 0xfff0c0, alpha: darkness * 0.34 });
+      }
     }
   }
 
@@ -197,6 +210,37 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0x8f6a40);
   }
 
+  if (type === "Plaza") {
+    // Paved flagstones.
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.stroke({ color: 0x756d5f, width: 1, alpha: 0.6 });
+  }
+
+  if (type === "Fountain") {
+    graphics.circle(px + 8, py + 8, 6.5);
+    graphics.fill(0x6d6557);
+    graphics.circle(px + 8, py + 8, 5);
+    graphics.fill(0x3f8aa3);
+    graphics.circle(px + 8, py + 8, 1.8);
+    graphics.fill(0xbfe6f0);
+  }
+
+  if (type === "Statue") {
+    graphics.rect(px + 4, py + 11, 8, 3);
+    graphics.fill(0x6d6557);
+    graphics.rect(px + 6.5, py + 4, 3, 8);
+    graphics.fill(0xb9b4a6);
+    graphics.circle(px + 8, py + 4, 2.2);
+    graphics.fill(0xc7c2b4);
+  }
+
+  if (type === "Lamp") {
+    graphics.rect(px + 7, py + 5, 2, 9);
+    graphics.fill(0x4a4438);
+    graphics.circle(px + 8, py + 4, 2.4);
+    graphics.fill(0xffe6a0);
+  }
+
   if (type === "Berry") {
     graphics.circle(px + 5, py + 6, 1.6);
     graphics.fill(0xc0394b);
@@ -243,6 +287,22 @@ function drawBuilding(graphics: Graphics, building: Building) {
       graphics.rect(sx, sy, 5, 5);
       graphics.fill(0x8a6a44);
     }
+    return;
+  }
+
+  if (building.kind === "church") {
+    // Stone hall with a steeple and cross over the door.
+    graphics.rect(px + 3, py + 8, w - 6, h - 10);
+    graphics.fill(0xb8b0a0);
+    graphics.poly([px + 1, py + 10, px + w / 2, py + 1, px + w - 1, py + 10]);
+    graphics.fill(0x7d8aa0);
+    const steepleX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+    graphics.rect(steepleX - 1.5, py + 3, 3, 6);
+    graphics.fill(0xe9e2d0);
+    graphics.rect(steepleX - 0.75, py + 1, 1.5, 6);
+    graphics.fill(0xe9e2d0);
+    graphics.rect(steepleX - 3, py + h - 13, 6, 11);
+    graphics.fill(0x4a3a26);
     return;
   }
 
@@ -371,5 +431,13 @@ function tileColor(type: TileType): number {
       return 0x554427;
     case "Stump":
       return 0x243c24;
+    case "Plaza":
+      return 0x8d8475;
+    case "Fountain":
+      return 0x8d8475;
+    case "Statue":
+      return 0x8d8475;
+    case "Lamp":
+      return 0x8d8475;
   }
 }

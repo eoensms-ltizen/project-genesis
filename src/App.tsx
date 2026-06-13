@@ -69,6 +69,9 @@ export default function App() {
     });
 
     gameRef.current = game;
+    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+      (window as unknown as { __genesis?: GameApp }).__genesis = game;
+    }
     void game.start().then(() => {
       if (disposed) {
         game.destroy();
