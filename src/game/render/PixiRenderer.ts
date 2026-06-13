@@ -561,13 +561,47 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  const capacity = building.capacity ?? 1;
+  const doorCenterX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+
+  if (capacity >= 4) {
+    // Apartment block: tall body, flat roof, grid of lit windows.
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.fill(0x6f6552);
+    graphics.rect(px + 2, py + 2, w - 4, 3);
+    graphics.fill(0x534a3a);
+    for (let wy = py + 6; wy < py + h - 5; wy += 6) {
+      for (let wx = px + 4; wx < px + w - 5; wx += 7) {
+        graphics.rect(wx, wy, 4, 4);
+        graphics.fill(0x9fb8cc);
+      }
+    }
+    graphics.rect(doorCenterX - 3, py + h - 8, 6, 6);
+    graphics.fill(0x2c2118);
+    return;
+  }
+
+  if (capacity >= 2) {
+    // Villa: two-storey house with extra windows.
+    graphics.rect(px + 3, py + 6, w - 6, h - 8);
+    graphics.fill(0x8a6a44);
+    graphics.poly([px + 1, py + 9, px + w / 2, py + 1, px + w - 1, py + 9]);
+    graphics.fill(0x9c4a38);
+    graphics.rect(px + 5, py + 9, 4, 4);
+    graphics.fill(0x2c3a44);
+    graphics.rect(px + w - 9, py + 9, 4, 4);
+    graphics.fill(0x2c3a44);
+    graphics.rect(doorCenterX - 3, py + h - 11, 6, 9);
+    graphics.fill(0x3a2c1c);
+    return;
+  }
+
   // Built house: walls, roof, door on the door tile, and a window.
   graphics.rect(px + 3, py + 10, w - 6, h - 13);
   graphics.fill(0x8a6a44);
   graphics.poly([px + 1, py + 13, px + w / 2, py + 1, px + w - 1, py + 13]);
   graphics.fill(0x9c4a38);
 
-  const doorCenterX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
   graphics.rect(doorCenterX - 3, py + h - 12, 6, 9);
   graphics.fill(0x3a2c1c);
 

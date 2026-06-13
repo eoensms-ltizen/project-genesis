@@ -83,6 +83,8 @@ export type Building = {
   ownerId?: string;
   builtAtDay?: number;
   durability?: number;
+  // Household capacity for houses: 1 = house, 2 = villa, 4+ = apartment.
+  capacity?: number;
 };
 
 export type AnimalKind = "deer" | "boar" | "rabbit";

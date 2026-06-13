@@ -1,4 +1,4 @@
-import type { Agent, AgentState, BuildingKind, TileType, Vec2 } from "../types";
+import type { Agent, AgentState, Building, BuildingKind, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
@@ -216,6 +216,9 @@ export class AgentBrain {
 
     if (!agent.home) {
       if (this.tryClaimEmptyHouse(agent, simulation)) {
+        return;
+      }
+      if (this.tryHousing(agent, simulation)) {
         return;
       }
       if (!agent.homeSite) {
@@ -1185,6 +1188,53 @@ export class AgentBrain {
     a.spouseId = b.id;
     b.spouseId = a.id;
     simulation.log(`${a.name} and ${b.name} got married! 💍`, [a, b]);
+  }
+
+  /**
+   * Under land pressure, homeless adults move into shared housing instead of
+   * sprawling: fill a free slot in an existing villa/apartment, or densify a
+   * central house (house -> villa -> apartment) and move in.
+   */
+  private tryHousing(agent: Agent, simulation: Simulation): boolean {
+    const spare = simulation.findHouseWithSpareCapacity();
+    if (spare) {
+      this.moveInto(agent, simulation, spare, "moved into shared housing");
+      return true;
+    }
+
+    if (!simulation.isLandTight()) {
+      return false; // open land nearby — build a fresh house (sprawl).
+    }
+
+    const house = simulation.findDensifiableHouse();
+    if (!house) {
+      return false; // nothing left to densify — allow distant sprawl.
+    }
+    if (agent.inventory.wood < HOUSE_WOOD_COST) {
+      this.setState(agent, simulation, "FindTree");
+      return true;
+    }
+    agent.inventory.wood -= HOUSE_WOOD_COST;
+    simulation.densifyHouse(house);
+    this.moveInto(agent, simulation, house, "joined a denser household");
+    return true;
+  }
+
+  private moveInto(agent: Agent, simulation: Simulation, house: Building, reason: string) {
+    if (agent.projectBuildingId) {
+      const pending = simulation.getBuilding(agent.projectBuildingId);
+      if (pending && pending.stage !== "built" && pending.kind === "house") {
+        simulation.cancelBuilding(pending);
+      }
+      agent.projectBuildingId = undefined;
+    }
+    if (!house.ownerId) {
+      house.ownerId = agent.id;
+    }
+    agent.home = { ...house.door };
+    agent.homeBuildingId = house.id;
+    agent.homeSite = undefined;
+    simulation.log(`${agent.name} ${reason}. 🏠`, [agent]);
   }
 
   /** Homeless adults move into a built house whose owner has passed away. */

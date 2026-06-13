@@ -155,6 +155,19 @@ function BuildingInfo({ building, agents }: { building?: Building; agents: Agent
             </dd>
           </>
         )}
+        {building.kind === "house" && (
+          <>
+            <dt>Type</dt>
+            <dd>
+              {(building.capacity ?? 1) >= 4
+                ? "apartment"
+                : (building.capacity ?? 1) >= 2
+                  ? "villa"
+                  : "house"}{" "}
+              · {building.capacity ?? 1} households
+            </dd>
+          </>
+        )}
         {building.durability !== undefined && (
           <>
             <dt>Durability</dt>

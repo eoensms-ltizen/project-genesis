@@ -78,6 +78,14 @@ const AUTOSAVE_INTERVAL_SECONDS = 15;
 const UI_EMIT_INTERVAL_SECONDS = 0.25;
 const FOOD_CAP = 400;
 
+// Land pressure: when the nearest open plot to the village centre is farther
+// than this, residents densify existing housing instead of sprawling.
+const SPRAWL_LIMIT = 9;
+const HOUSE_MAX_CAPACITY = 4;
+// Roads/paths with no recent traffic weather back toward nature.
+const DECAY_CHANCE = 0.05;
+const ABANDON_DECAY_PER_TICK = 6;
+
 type SavedAgent = Omit<
   Agent,
   "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
@@ -212,6 +220,7 @@ export class Simulation {
       this.updatePlaza();
       this.spawnAnimals();
       this.runFactories();
+      this.decayInfrastructure();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -510,13 +519,6 @@ export class Simulation {
         if (!this.isTileClaimed(tile)) {
           this.world.setTile(tile, "Tree");
         }
-      }
-    }
-
-    // Buildings weather slowly over time.
-    for (const building of this.buildings) {
-      if (building.stage === "built" && building.durability !== undefined) {
-        building.durability = Math.max(0, building.durability - DURABILITY_DECAY_PER_TICK);
       }
     }
 
@@ -1239,6 +1241,174 @@ export class Simulation {
       }
     }
     return undefined;
+  }
+
+  // --- Land use: density and decay --------------------------------------
+
+  /** Centroid of built houses; the gravitational centre of the settlement. */
+  villageCenter(): Vec2 {
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (const building of this.buildings) {
+      if (building.kind === "house" && building.stage === "built") {
+        sx += building.x + building.width / 2;
+        sy += building.y + building.height / 2;
+        n += 1;
+      }
+    }
+    if (n === 0) {
+      return { x: this.world.width / 2, y: this.world.height / 2 };
+    }
+    return { x: sx / n, y: sy / n };
+  }
+
+  occupantsOf(buildingId: string): number {
+    return this.agents.filter((agent) => agent.homeBuildingId === buildingId).length;
+  }
+
+  houseCapacity(building: Building): number {
+    return building.capacity ?? 1;
+  }
+
+  /** Is there an open building plot near the village centre? */
+  hasOpenPlotNear(radius: number): boolean {
+    const center = this.villageCenter();
+    const site = this.world.findBuildingSite(center, 2, 2, (position) =>
+      this.isTileClaimed(position),
+    );
+    if (!site) {
+      return false;
+    }
+    const d = Math.hypot(site.x + 1 - center.x, site.y + 1 - center.y);
+    return d <= radius;
+  }
+
+  /** A built house with room for another household, nearest the centre. */
+  findHouseWithSpareCapacity(): Building | undefined {
+    const center = this.villageCenter();
+    return this.buildings
+      .filter(
+        (b) =>
+          b.kind === "house" &&
+          b.stage === "built" &&
+          this.occupantsOf(b.id) < this.houseCapacity(b),
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - center.x, a.y - center.y) -
+          Math.hypot(b.x - center.x, b.y - center.y),
+      )[0];
+  }
+
+  /** A built house that can still be upgraded to a denser tier. */
+  findDensifiableHouse(): Building | undefined {
+    const center = this.villageCenter();
+    return this.buildings
+      .filter(
+        (b) =>
+          b.kind === "house" &&
+          b.stage === "built" &&
+          this.houseCapacity(b) < HOUSE_MAX_CAPACITY,
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - center.x, a.y - center.y) -
+          Math.hypot(b.x - center.x, b.y - center.y),
+      )[0];
+  }
+
+  densifyHouse(building: Building) {
+    const current = this.houseCapacity(building);
+    building.capacity = current < 2 ? 2 : HOUSE_MAX_CAPACITY;
+    building.durability = 100;
+    this.world.setTile(building.door, "House");
+    this.log(
+      building.capacity >= HOUSE_MAX_CAPACITY
+        ? "A house grew into an apartment block. 🏢"
+        : "A house was extended into a villa. 🏘️",
+    );
+    this.notifyChanged();
+  }
+
+  isLandTight(): boolean {
+    return !this.hasOpenPlotNear(SPRAWL_LIMIT + Math.sqrt(this.agents.length));
+  }
+
+  private decayInfrastructure() {
+    // Traffic memory fades; unused paths weather back toward nature.
+    for (const [index, count] of [...this.traffic.entries()]) {
+      const next = count - 1;
+      if (next <= 0) {
+        this.traffic.delete(index);
+      } else {
+        this.traffic.set(index, next);
+      }
+    }
+
+    for (const tile of this.world.tiles) {
+      if (tile.type !== "Road" && tile.type !== "Dirt") {
+        continue;
+      }
+      const idx = tile.y * this.world.width + tile.x;
+      if ((this.traffic.get(idx) ?? 0) > 0 || this.adjacentToStructure(tile)) {
+        continue;
+      }
+      if (Math.random() < DECAY_CHANCE) {
+        this.world.setTile(tile, tile.type === "Road" ? "Dirt" : "Grass");
+      }
+    }
+
+    // Houses are maintained while lived in, but abandoned ones crumble away.
+    for (const building of this.buildings) {
+      if (building.stage !== "built" || building.durability === undefined) {
+        continue;
+      }
+      if (building.kind !== "house") {
+        building.durability = 100;
+        continue;
+      }
+      if (this.occupantsOf(building.id) > 0) {
+        building.durability = Math.min(100, building.durability + DURABILITY_DECAY_PER_TICK);
+      } else {
+        building.durability -= ABANDON_DECAY_PER_TICK;
+        if (building.durability <= 0) {
+          this.collapseHouse(building);
+        }
+      }
+    }
+  }
+
+  private collapseHouse(building: Building) {
+    for (const position of footprintTiles(building)) {
+      this.world.setTile(position, Math.random() < 0.4 ? "Stump" : "Grass");
+    }
+    const index = this.buildings.indexOf(building);
+    if (index >= 0) {
+      this.buildings.splice(index, 1);
+    }
+    this.log("An abandoned house crumbled back into the land. 🍂");
+    this.notifyChanged();
+  }
+
+  private adjacentToStructure(position: Vec2): boolean {
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const type = this.world.getTile({ x: position.x + dx, y: position.y + dy })?.type;
+      if (
+        type === "House" ||
+        type === "HouseFoundation" ||
+        type === "Plaza" ||
+        type === "Rail"
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private takenNames(): Set<string> {

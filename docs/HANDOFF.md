@@ -222,7 +222,14 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. M5 industry is in (power, electric lighting, factory, station/train). Next direction under discussion: shift from scripted era-unlocks to need/pressure-driven emergence — land scarcity driving housing densification (villa/apartment), infrastructure decay reclaiming unused land, commute distance driving transit/vehicles, wildlife needing water/fruit, and a research lab for earned upgrades.
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. M5 industry is in (power, electric lighting, factory, station/train). The project is now pivoting from scripted era-unlocks toward need/pressure-driven emergence.
+
+First emergence slice DONE — land scarcity drives housing density + decay:
+- When the nearest open plot to the village centre is farther than ~SPRAWL_LIMIT (Simulation.isLandTight), homeless adults densify a central house (house cap1 -> villa cap2 -> apartment cap4) and move in, instead of sprawling; villas/apartments render distinctly and hold multiple households (Building.capacity).
+- Lived-in houses are maintained; abandoned houses lose durability and collapse back to grass/stumps.
+- Roads/dirt with no recent traffic (traffic counts now decay each nature tick) and not next to a structure weather back: Road -> Dirt -> Grass.
+
+Next emergence slices (not yet built): commute distance -> emergent transit/vehicles; wildlife needing water/fruit; research lab for earned upgrades; a city-planner role that relocates inefficient layouts. See the design discussion — the throughline is making land and distance real costs so infrastructure emerges as the optimisation response.
 
 ## Next Recommended Work
 
