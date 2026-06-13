@@ -3,6 +3,8 @@ import { bumpAgentIdCounter, createRandomAgent } from "./agents/Agent";
 import type {
   Agent,
   AgentJob,
+  Animal,
+  AnimalKind,
   Building,
   BuildingKind,
   BuildingStage,
@@ -38,7 +40,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8;
 
 // Residents age one year per in-game day; children come of age at 12,
 // retire at 60, and pass away when they outlive their personal lifespan.
@@ -51,6 +53,16 @@ const EPISODE_CAP = 15;
 
 // A 3x3 block of roads becomes a plaza; it then grows along adjacent roads.
 const PLAZA_DECOR_INTERVAL = 12;
+
+const ANIMAL_CAP = 8;
+const ANIMAL_MOVE_INTERVAL = 0.6;
+const ANIMAL_SPAWN_CHANCE = 0.5;
+const PASTURE_HERD_CAP = 6;
+const PASTURE_YIELD_CHANCE = 0.25;
+
+const ANIMAL_FOOD: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 1 };
+const ANIMAL_HEALTH: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 2 };
+const TAMEABLE: Record<AnimalKind, boolean> = { deer: true, boar: false, rabbit: true };
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -75,17 +87,21 @@ type SaveData = {
   era: number;
   foodStock: number;
   meals: number;
+  animals: Animal[];
+  nextAnimalId: number;
 };
 
 export class Simulation {
   readonly world: WorldMap;
   readonly agents: Agent[] = [];
   readonly buildings: Building[] = [];
+  readonly animals: Animal[] = [];
   era = 0;
   foodStock = 0;
   meals = 0;
 
   private nextBuildingId = 1;
+  private nextAnimalId = 1;
   private readonly brain = new AgentBrain();
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
@@ -118,6 +134,10 @@ export class Simulation {
       this.era = saved.era;
       this.foodStock = saved.foodStock;
       this.meals = saved.meals;
+      this.nextAnimalId = saved.nextAnimalId ?? 1;
+      for (const animal of saved.animals ?? []) {
+        this.animals.push({ ...animal, path: undefined });
+      }
       for (const building of saved.buildings) {
         this.buildings.push(building);
         if (building.stage !== "built") {
@@ -157,6 +177,8 @@ export class Simulation {
       this.brain.update(agent, this, deltaSeconds);
     }
 
+    this.updateAnimals(deltaSeconds);
+
     this.natureTimer += deltaSeconds;
     if (this.natureTimer >= NATURE_TICK_SECONDS) {
       this.natureTimer = 0;
@@ -167,6 +189,7 @@ export class Simulation {
       this.assignJobs();
       this.ageResidents();
       this.updatePlaza();
+      this.spawnAnimals();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -314,6 +337,12 @@ export class Simulation {
         era: this.era,
         foodStock: this.foodStock,
         meals: this.meals,
+        animals: this.animals.map((animal) => ({
+          ...animal,
+          position: { ...animal.position },
+          path: undefined,
+        })),
+        nextAnimalId: this.nextAnimalId,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -416,6 +445,11 @@ export class Simulation {
       buildings: this.buildings.map((building) => ({
         ...building,
         door: { ...building.door },
+      })),
+      animals: this.animals.map((animal) => ({
+        ...animal,
+        position: { ...animal.position },
+        path: undefined,
       })),
     };
   }
@@ -699,6 +733,7 @@ export class Simulation {
       ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
       ["cook", this.hasAnyKitchen() ? 1 : 0],
       ["builder", this.era >= 2 ? 1 : 0],
+      ["hunter", population >= 8 ? Math.min(2, Math.floor(population / 8)) : 0],
     ];
 
     for (const [job, quota] of quotas) {
@@ -865,6 +900,203 @@ export class Simulation {
       this.buildings.splice(index, 1);
     }
     this.notifyChanged();
+  }
+
+  // --- Wildlife ---------------------------------------------------------
+
+  getAnimal(id: string): Animal | undefined {
+    return this.animals.find((animal) => animal.id === id);
+  }
+
+  getPasture(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "pasture" && building.stage === "built",
+    );
+  }
+
+  hasAnyPasture(): boolean {
+    return this.buildings.some((building) => building.kind === "pasture");
+  }
+
+  tamedHerdSize(): number {
+    return this.animals.filter((animal) => animal.state === "tamed").length;
+  }
+
+  isTameable(kind: AnimalKind): boolean {
+    return TAMEABLE[kind];
+  }
+
+  animalFoodValue(kind: AnimalKind): number {
+    return ANIMAL_FOOD[kind];
+  }
+
+  /** A hunter strikes an animal; returns true once it is felled. */
+  strikeAnimal(animal: Animal): boolean {
+    animal.health -= 1;
+    animal.state = "fleeing";
+    if (animal.health <= 0) {
+      this.foodStock += ANIMAL_FOOD[animal.kind];
+      this.removeAnimal(animal.id);
+      return true;
+    }
+    this.notifyChanged();
+    return false;
+  }
+
+  tameAnimal(animal: Animal): boolean {
+    const pasture = this.getPasture();
+    if (!pasture || !TAMEABLE[animal.kind]) {
+      return false;
+    }
+    animal.state = "tamed";
+    animal.penId = pasture.id;
+    animal.path = undefined;
+    this.notifyChanged();
+    return true;
+  }
+
+  removeAnimal(id: string) {
+    const index = this.animals.findIndex((animal) => animal.id === id);
+    if (index >= 0) {
+      this.animals.splice(index, 1);
+    }
+    this.notifyChanged();
+  }
+
+  private spawnAnimals() {
+    const wild = this.animals.filter((animal) => animal.state !== "tamed").length;
+    if (wild >= ANIMAL_CAP || Math.random() > ANIMAL_SPAWN_CHANCE) {
+      return;
+    }
+
+    const edge = this.randomEdgeTile();
+    if (!edge) {
+      return;
+    }
+    const roll = Math.random();
+    const kind: AnimalKind = roll < 0.5 ? "rabbit" : roll < 0.8 ? "deer" : "boar";
+    this.animals.push({
+      id: `animal-${this.nextAnimalId++}`,
+      kind,
+      position: edge,
+      state: "wild",
+      health: ANIMAL_HEALTH[kind],
+      moveTimer: Math.random() * ANIMAL_MOVE_INTERVAL,
+      path: undefined,
+    });
+    this.notifyChanged();
+  }
+
+  private updateAnimals(deltaSeconds: number) {
+    for (const animal of this.animals) {
+      animal.moveTimer -= deltaSeconds;
+      if (animal.moveTimer > 0) {
+        continue;
+      }
+      animal.moveTimer = ANIMAL_MOVE_INTERVAL * (animal.kind === "rabbit" ? 0.7 : 1);
+
+      if (animal.state === "tamed") {
+        this.stepTamedAnimal(animal);
+      } else {
+        this.stepWildAnimal(animal);
+      }
+    }
+
+    // Tamed herds graze and slowly yield food into the village stock.
+    if (Math.random() < 0.04) {
+      const herd = this.tamedHerdSize();
+      if (herd > 0 && Math.random() < PASTURE_YIELD_CHANCE) {
+        this.foodStock += 1;
+        this.notifyChanged();
+      }
+    }
+  }
+
+  private stepWildAnimal(animal: Animal) {
+    // Flee from the nearest hunter, otherwise wander.
+    let flee: Vec2 | undefined;
+    let nearest = 5;
+    for (const agent of this.agents) {
+      if (agent.job !== "hunter") {
+        continue;
+      }
+      const d = Math.abs(agent.position.x - animal.position.x) +
+        Math.abs(agent.position.y - animal.position.y);
+      if (d < nearest) {
+        nearest = d;
+        flee = agent.position;
+      }
+    }
+
+    let dir: Vec2;
+    if (flee) {
+      dir = {
+        x: Math.sign(animal.position.x - flee.x) || (Math.random() < 0.5 ? 1 : -1),
+        y: Math.sign(animal.position.y - flee.y) || (Math.random() < 0.5 ? 1 : -1),
+      };
+      animal.state = "wild";
+    } else {
+      const steps = [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ];
+      dir = steps[Math.floor(Math.random() * steps.length)];
+    }
+
+    const next = { x: animal.position.x + dir.x, y: animal.position.y + dir.y };
+    if (this.world.isWalkable(next)) {
+      animal.position = next;
+      this.notifyChanged();
+    }
+  }
+
+  private stepTamedAnimal(animal: Animal) {
+    const pasture = animal.penId ? this.getBuilding(animal.penId) : this.getPasture();
+    if (!pasture) {
+      animal.state = "wild";
+      animal.penId = undefined;
+      return;
+    }
+    const cx = pasture.x + pasture.width / 2;
+    const cy = pasture.y + pasture.height / 2;
+    const dx = cx - animal.position.x;
+    const dy = cy - animal.position.y;
+    // Stay loosely near the pasture, drifting back when wandering too far.
+    let dir: Vec2;
+    if (Math.abs(dx) + Math.abs(dy) > 3) {
+      dir = { x: Math.sign(dx), y: 0 };
+      if (dir.x === 0) {
+        dir = { x: 0, y: Math.sign(dy) };
+      }
+    } else {
+      const steps = [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ];
+      dir = steps[Math.floor(Math.random() * steps.length)];
+    }
+    const next = { x: animal.position.x + dir.x, y: animal.position.y + dir.y };
+    if (this.world.isWalkable(next)) {
+      animal.position = next;
+      this.notifyChanged();
+    }
+  }
+
+  private randomEdgeTile(): Vec2 | undefined {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const onVertical = Math.random() < 0.5;
+      const position = onVertical
+        ? { x: Math.random() < 0.5 ? 1 : this.world.width - 2, y: 1 + Math.floor(Math.random() * (this.world.height - 2)) }
+        : { x: 1 + Math.floor(Math.random() * (this.world.width - 2)), y: Math.random() < 0.5 ? 1 : this.world.height - 2 };
+      if (this.world.isWalkable(position)) {
+        return position;
+      }
+    }
+    return undefined;
   }
 
   private takenNames(): Set<string> {

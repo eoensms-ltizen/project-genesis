@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import type { Agent, Building, TileType, Vec2 } from "../types";
+import type { Agent, Animal, Building, TileType, Vec2 } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
@@ -64,6 +64,7 @@ export class PixiRenderer {
     placementMode: boolean,
     darkness = 0,
     buildings: Building[] = [],
+    animals: Animal[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -83,6 +84,9 @@ export class PixiRenderer {
     }
 
     this.agentGraphics.clear();
+    for (const animal of animals) {
+      drawAnimal(this.agentGraphics, animal);
+    }
     for (const agent of agents) {
       drawAgent(this.agentGraphics, agent);
       if (agent.target) {
@@ -290,6 +294,19 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  if (building.kind === "pasture") {
+    // Fenced grazing yard with posts.
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.fill(0x39521f);
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.stroke({ color: 0x8a6a44, width: 2 });
+    for (let i = 0; i <= building.width; i += 1) {
+      graphics.rect(px + i * TILE_SIZE - 1, py + 1, 2, 4);
+      graphics.fill(0x8a6a44);
+    }
+    return;
+  }
+
   if (building.kind === "church") {
     // Stone hall with a steeple and cross over the door.
     graphics.rect(px + 3, py + 8, w - 6, h - 10);
@@ -381,6 +398,32 @@ function drawAgent(graphics: Graphics, agent: Agent) {
     graphics.fill(0xbfd2e8);
     graphics.circle(px + 8, py - 10, 1.7);
     graphics.fill(0xbfd2e8);
+  }
+}
+
+const ANIMAL_COLORS = {
+  deer: 0xb07a48,
+  boar: 0x6b5240,
+  rabbit: 0xcabfb0,
+};
+
+function drawAnimal(graphics: Graphics, animal: Animal) {
+  const px = animal.position.x * TILE_SIZE + TILE_SIZE / 2;
+  const py = animal.position.y * TILE_SIZE + TILE_SIZE / 2;
+  const r = animal.kind === "rabbit" ? 2.6 : animal.kind === "boar" ? 4 : 3.4;
+
+  if (animal.state === "tamed") {
+    graphics.circle(px, py, r + 1.5);
+    graphics.fill({ color: 0x9ad17a, alpha: 0.6 });
+  }
+  // Body + head nub so animals read differently from round residents.
+  graphics.ellipse(px, py, r + 1.4, r);
+  graphics.fill(ANIMAL_COLORS[animal.kind]);
+  graphics.circle(px + r, py - r * 0.5, r * 0.5);
+  graphics.fill(ANIMAL_COLORS[animal.kind]);
+  if (animal.kind === "deer") {
+    graphics.rect(px + r - 0.5, py - r * 1.6, 1, 2.4);
+    graphics.fill(0x6d4b2d);
   }
 }
 

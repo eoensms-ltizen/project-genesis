@@ -3,6 +3,7 @@ import { GameApp } from "./game/GameApp";
 import { ERA_NAMES, SAVE_KEY } from "./game/Simulation";
 import type {
   Agent,
+  Animal,
   Building,
   GameClock,
   GameLogEntry,
@@ -30,6 +31,7 @@ export default function App() {
   const [speed, setSpeed] = useState(1);
   const speedRef = useRef(1);
   const [buildings, setBuildings] = useState<Building[]>([]);
+  const [animals, setAnimals] = useState<Animal[]>([]);
   const [selection, setSelection] = useState<InspectionTarget | null>(null);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -52,6 +54,7 @@ export default function App() {
         setFoodStock(snapshot.foodStock);
         setMeals(snapshot.meals);
         setBuildings(snapshot.buildings);
+        setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
       },
       onTileClick: (position) => {
@@ -146,6 +149,7 @@ export default function App() {
             selection={selection}
             agents={agents}
             buildings={buildings}
+            animals={animals}
             episodes={
               selection.kind === "agent"
                 ? (gameRef.current?.simulation.getEpisodes(selection.agentId) ?? [])

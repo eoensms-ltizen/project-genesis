@@ -49,12 +49,16 @@ export type AgentState =
   | "Transplant"
   | "MoveToPlant"
   | "Plant"
+  | "MoveToHunt"
+  | "Hunt"
+  | "MoveToTame"
+  | "Tame"
   | "Wander"
   | "Rest";
 
-export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook";
+export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook" | "hunter";
 
-export type BuildingKind = "house" | "warehouse" | "kitchen" | "church";
+export type BuildingKind = "house" | "warehouse" | "kitchen" | "church" | "pasture";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -72,9 +76,25 @@ export type Building = {
   durability?: number;
 };
 
+export type AnimalKind = "deer" | "boar" | "rabbit";
+
+export type AnimalState = "wild" | "fleeing" | "tamed";
+
+export type Animal = {
+  id: string;
+  kind: AnimalKind;
+  position: Vec2;
+  state: AnimalState;
+  health: number;
+  path?: Vec2[];
+  moveTimer: number;
+  penId?: string;
+};
+
 export type InspectionTarget =
   | { kind: "agent"; agentId: string }
   | { kind: "building"; buildingId: string }
+  | { kind: "animal"; animalId: string }
   | { kind: "tile"; position: Vec2 };
 
 export type Agent = {
@@ -83,6 +103,7 @@ export type Agent = {
   age: number;
   gender: "male" | "female";
   job: AgentJob;
+  huntTargetId?: string;
   personality: {
     diligence: number;
     sociability: number;
@@ -135,4 +156,5 @@ export type SimulationSnapshot = {
   foodStock: number;
   meals: number;
   buildings: Building[];
+  animals: Animal[];
 };

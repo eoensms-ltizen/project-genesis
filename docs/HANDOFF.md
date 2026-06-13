@@ -117,6 +117,10 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - City era (4th): pop 20 + church + kitchen
 - Plaza: a dense cluster of roads (3x3 window mostly paved) condenses into a plaza, then absorbs adjacent roads as the town grows; decorations appear — central fountain, corner lamps, and a statue past a size threshold; lamps glow at night
 - Stump transplanting: woodcutters relocate stumps that sit in developed areas (next to roads/plaza/houses/fields), digging them up and replanting a tree on open ground further out; stumps already block building/roads (footprint and paving only act on grass/dirt)
+- Animals: wildlife (deer, boar, rabbit) spawns at map edges and wanders, fleeing from nearby hunters
+- Hunter job (population 8+): chases the nearest wild animal and either hunts it for food (boars always) or tames it (deer/rabbit) once a pasture exists and the herd has room
+- Pasture (3x3 fenced pen, communal project after the church): tamed livestock graze near it and slowly add food to the village stock
+- Clicking an animal inspects its kind, status (wild/tamed), health, and position
 - Dev aid: in dev builds the GameApp is exposed as window.__genesis for inspection
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI
@@ -211,7 +215,7 @@ Every 5 seconds berries spread to adjacent grass (cap 140) and trees regrow slow
 
 The player only spawns residents. Everything else — houses, roads, food, population growth — must emerge from resident behavior. Do not add player tools (road drawing, building placement). The basics follow RimWorld: per-tile movement costs, A* pathfinding, working from adjacent tiles.
 
-The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. Remaining: animals (wild spawn, hunting for food, taming into livestock) — next priority; then M5 industry (power, factory, trains).
+The full content roadmap (era system, multi-tile buildings, day/night, needs, jobs, produc­tion chains, industry) lives in `docs/DESIGN.md`. M1-M3 plus extras are done: game time/speed, day/night, sleep, save/load, multi-tile houses, eras 0-3, farming, warehouse, kitchen/cooking, jobs, paving, marriage/family, lifecycle/death, inspection, church + worship, plaza with decorations, stump transplanting. Remaining: M5 industry (power plants, electric lighting, factories, trains, vehicles); plus polish — sprites/seasons, family info in the UI, fishing job.
 
 ## Next Recommended Work
 

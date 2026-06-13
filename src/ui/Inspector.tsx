@@ -1,5 +1,6 @@
 import type {
   Agent,
+  Animal,
   Building,
   GameLogEntry,
   InspectionTarget,
@@ -10,6 +11,7 @@ type InspectorProps = {
   selection: InspectionTarget;
   agents: Agent[];
   buildings: Building[];
+  animals: Animal[];
   episodes: GameLogEntry[];
   tileType?: TileType;
   tileTraffic?: number;
@@ -20,6 +22,7 @@ export function Inspector({
   selection,
   agents,
   buildings,
+  animals,
   episodes,
   tileType,
   tileTraffic,
@@ -45,6 +48,9 @@ export function Inspector({
           building={buildings.find((building) => building.id === selection.buildingId)}
           agents={agents}
         />
+      )}
+      {selection.kind === "animal" && (
+        <AnimalInfo animal={animals.find((animal) => animal.id === selection.animalId)} />
       )}
       {selection.kind === "tile" && (
         <TileInfo
@@ -158,6 +164,27 @@ function BuildingInfo({ building, agents }: { building?: Building; agents: Agent
         <dt>Size</dt>
         <dd>
           {building.width}x{building.height} at ({building.x}, {building.y})
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+function AnimalInfo({ animal }: { animal?: Animal }) {
+  if (!animal) {
+    return <p className="muted">This animal has moved on.</p>;
+  }
+  return (
+    <div className="inspector-body">
+      <strong>{animal.kind}</strong>
+      <dl>
+        <dt>Status</dt>
+        <dd>{animal.state === "tamed" ? "tamed livestock" : "wild"}</dd>
+        <dt>Health</dt>
+        <dd>{animal.health}</dd>
+        <dt>Position</dt>
+        <dd>
+          ({Math.round(animal.position.x)}, {Math.round(animal.position.y)})
         </dd>
       </dl>
     </div>

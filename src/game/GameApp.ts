@@ -64,6 +64,19 @@ export class GameApp {
       return { kind: "agent", agentId: nearest.id };
     }
 
+    let nearestAnimal: { id: string } | undefined;
+    let nearestAnimalDistance = 1.1;
+    for (const animal of this.simulation.animals) {
+      const d = Math.hypot(animal.position.x - position.x, animal.position.y - position.y);
+      if (d < nearestAnimalDistance) {
+        nearestAnimalDistance = d;
+        nearestAnimal = animal;
+      }
+    }
+    if (nearestAnimal) {
+      return { kind: "animal", animalId: nearestAnimal.id };
+    }
+
     const building = this.simulation.buildings.find(
       (candidate) =>
         position.x >= candidate.x &&
@@ -92,6 +105,7 @@ export class GameApp {
       this.placementMode,
       this.simulation.getDarkness(),
       this.simulation.buildings,
+      this.simulation.animals,
     );
   }
 }

@@ -16,8 +16,12 @@ const HOUSE_WOOD_COST = 8;
 const WAREHOUSE_WOOD_COST = 10;
 const KITCHEN_WOOD_COST = 8;
 const CHURCH_WOOD_COST = 14;
+const PASTURE_WOOD_COST = 12;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
+const HUNT_DURATION_SECONDS = 1.2;
+const TAME_DURATION_SECONDS = 2.5;
+const PASTURE_HERD_CAP = 6;
 const WOOD_STOCKPILE_CAP = 10;
 const WOODCUTTER_STOCKPILE_CAP = 14;
 const COOK_DURATION_SECONDS = 3;
@@ -139,6 +143,18 @@ export class AgentBrain {
         break;
       case "Plant":
         this.plantTree(agent, simulation);
+        break;
+      case "MoveToHunt":
+        this.approachQuarry(agent, simulation, deltaSeconds, "Hunt");
+        break;
+      case "Hunt":
+        this.hunt(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToTame":
+        this.approachQuarry(agent, simulation, deltaSeconds, "Tame");
+        break;
+      case "Tame":
+        this.tame(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -282,7 +298,7 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "gather" | "none" {
-    let kind: "warehouse" | "kitchen" | "church" | undefined;
+    let kind: "warehouse" | "kitchen" | "church" | "pasture" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (
@@ -297,6 +313,12 @@ export class AgentBrain {
       simulation.getKitchen()
     ) {
       kind = "church";
+    } else if (
+      simulation.era >= 2 &&
+      !simulation.hasAnyPasture() &&
+      simulation.getChurch()
+    ) {
+      kind = "pasture";
     }
     if (!kind) {
       return "none";
@@ -323,6 +345,8 @@ export class AgentBrain {
       case "woodcutter":
         // Reforest by relocating an in-the-way stump, otherwise gather wood below.
         return this.findTransplantWork(agent, simulation);
+      case "hunter":
+        return this.findHuntWork(agent, simulation);
       default:
         return this.findFarmWork(agent, simulation);
     }
@@ -397,10 +421,10 @@ export class AgentBrain {
   private startCommunalBuilding(
     agent: Agent,
     simulation: Simulation,
-    kind: "warehouse" | "kitchen" | "church",
+    kind: "warehouse" | "kitchen" | "church" | "pasture",
   ): boolean {
-    const width = kind === "warehouse" ? 3 : kind === "church" ? 3 : 2;
-    const height = kind === "church" ? 3 : 2;
+    const width = kind === "warehouse" || kind === "church" || kind === "pasture" ? 3 : 2;
+    const height = kind === "church" || kind === "pasture" ? 3 : 2;
     const site = simulation.world.findBuildingSite(agent.position, width, height, (position) =>
       simulation.isTileClaimed(position),
     );
@@ -764,6 +788,141 @@ export class AgentBrain {
         }
       }
     }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  private findHuntWork(agent: Agent, simulation: Simulation): boolean {
+    // Prefer taming peaceful animals when a pasture has room; otherwise hunt.
+    const wantTame =
+      Boolean(simulation.getPasture()) && simulation.tamedHerdSize() < PASTURE_HERD_CAP;
+
+    let best: { id: string; pos: Vec2 } | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const animal of simulation.animals) {
+      if (animal.state === "tamed") {
+        continue;
+      }
+      const d = squaredDistance(agent.position, animal.position);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { id: animal.id, pos: { ...animal.position } };
+      }
+    }
+    if (!best) {
+      return false;
+    }
+
+    const path = findPath(simulation.world, {
+      start: agent.position,
+      goal: best.pos,
+      stopAdjacent: true,
+    });
+    if (!path) {
+      return false;
+    }
+
+    const animal = simulation.getAnimal(best.id);
+    const willTame = wantTame && animal !== undefined && simulation.isTameable(animal.kind);
+    agent.huntTargetId = best.id;
+    agent.target = best.pos;
+    agent.path = path;
+    this.setState(agent, simulation, willTame ? "MoveToTame" : "MoveToHunt");
+    return true;
+  }
+
+  /** Re-paths toward a moving animal; transitions to the action when adjacent. */
+  private approachQuarry(
+    agent: Agent,
+    simulation: Simulation,
+    deltaSeconds: number,
+    action: AgentState,
+  ) {
+    const animal = agent.huntTargetId ? simulation.getAnimal(agent.huntTargetId) : undefined;
+    if (!animal) {
+      agent.huntTargetId = undefined;
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+
+    if (distance(agent.position, animal.position) <= 1.5) {
+      agent.path = undefined;
+      this.setState(agent, simulation, action);
+      return;
+    }
+
+    // Keep chasing: refresh the path toward the animal's current tile.
+    if (!agent.path || agent.path.length === 0) {
+      const path = findPath(simulation.world, {
+        start: agent.position,
+        goal: animal.position,
+        stopAdjacent: true,
+      });
+      if (!path) {
+        agent.huntTargetId = undefined;
+        this.backOff(agent, simulation);
+        return;
+      }
+      agent.target = { ...animal.position };
+      agent.path = path;
+    }
+    this.moveAlongPath(agent, simulation, deltaSeconds, action);
+  }
+
+  private hunt(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const animal = agent.huntTargetId ? simulation.getAnimal(agent.huntTargetId) : undefined;
+    if (!animal) {
+      agent.huntTargetId = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    if (distance(agent.position, animal.position) > 1.6) {
+      this.setState(agent, simulation, "MoveToHunt");
+      return;
+    }
+
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < HUNT_DURATION_SECONDS) {
+      return;
+    }
+    agent.actionTimer = 0;
+
+    const kind = animal.kind;
+    const felled = simulation.strikeAnimal(animal);
+    if (felled) {
+      simulation.log(`${agent.name} hunted a ${kind}. +${simulation.animalFoodValue(kind)} food 🏹`, [
+        agent,
+      ]);
+      agent.huntTargetId = undefined;
+      agent.target = undefined;
+      this.setState(agent, simulation, "Idle");
+    }
+  }
+
+  private tame(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const animal = agent.huntTargetId ? simulation.getAnimal(agent.huntTargetId) : undefined;
+    if (!animal) {
+      agent.huntTargetId = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    if (distance(agent.position, animal.position) > 1.6) {
+      this.setState(agent, simulation, "MoveToTame");
+      return;
+    }
+
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < TAME_DURATION_SECONDS) {
+      return;
+    }
+
+    if (simulation.tameAnimal(animal)) {
+      simulation.log(`${agent.name} tamed a ${animal.kind} for the pasture. 🐾`, [agent]);
+    }
+    agent.huntTargetId = undefined;
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -1251,6 +1410,9 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "church") {
     return CHURCH_WOOD_COST;
+  }
+  if (kind === "pasture") {
+    return PASTURE_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }
