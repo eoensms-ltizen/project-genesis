@@ -186,4 +186,6 @@ export type SimulationSnapshot = {
   animals: Animal[];
   trains: Vec2[];
   poweredBuildingIds: string[];
+  // The soft cap on residents the village can currently support (housing ∩ era).
+  supportedPopulation: number;
 };

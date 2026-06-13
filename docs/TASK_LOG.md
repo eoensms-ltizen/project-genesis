@@ -21,6 +21,11 @@
   low, driven by crowding rather than distant empty land; builders perform the
   rebuild as work; tower visual + inspector tier/level. Capacity redefined as
   residents.
+- Settled the scale direction (attachment-first; city-at-scale is a later LOD
+  tier) and shipped the organic-growth population engine (Increment 1): removed
+  the flat population cap; births now require supported population (housing ∩
+  per-era ceiling), housing headroom, and high mean wellbeing. HUD shows
+  population / supported. Verified the housing/era → population loop in-browser.
 
 ## 2026-06-12
 

@@ -30,7 +30,13 @@ const BERRY_CAP = 140;
 const TREE_CAP = 320;
 
 const BIRTH_COOLDOWN_SECONDS = 12;
-const POPULATION_CAP = 30;
+// Attachment-first scale ladder: population is kept small and earned. The
+// village only supports more residents as it advances through the eras, and
+// even then only up to what its housing can shelter (see supportedPopulation).
+const ERA_POP_CEILING = [8, 14, 22, 30, 40];
+// Couples only have children when the village is, on average, content — so
+// growth follows happiness, and an overstretched settlement naturally pauses.
+const BIRTH_WELLBEING = 55;
 
 // One in-game day passes in five real minutes; the clock starts at 08:00.
 const DAY_LENGTH_SECONDS = 300;
@@ -513,6 +519,7 @@ export class Simulation {
       })),
       trains: this.getTrainPositions(),
       poweredBuildingIds: this.getPoweredBuildingIds(),
+      supportedPopulation: this.supportedPopulation(),
     };
   }
 
@@ -923,10 +930,16 @@ export class Simulation {
 
   /** Babies are born to married couples with a shared home and enough food. */
   private tryBirth() {
-    if (this.agents.length >= POPULATION_CAP) {
+    // Growth is gated by what the village can shelter and support, not a flat
+    // cap — build and redevelop housing, advance an era, and keep residents
+    // content, and only then does the population earn another member.
+    if (this.agents.length >= this.supportedPopulation()) {
       return;
     }
     if (this.elapsedSeconds - this.lastBirthAt < BIRTH_COOLDOWN_SECONDS) {
+      return;
+    }
+    if (this.meanWellbeing() < BIRTH_WELLBEING) {
       return;
     }
 
@@ -1301,33 +1314,72 @@ export class Simulation {
     return HOUSE_CAPACITY_BY_LEVEL[this.houseLevel(building)] ?? 1;
   }
 
-  /** Spare household slots across all built houses near the centre. */
-  housingHeadroom(): number {
+  /** Total residents the built houses can shelter. */
+  housingCapacity(): number {
     let capacity = 0;
-    let occupied = 0;
     for (const building of this.buildings) {
       if (building.kind === "house" && building.stage === "built") {
         capacity += this.houseCapacity(building);
+      }
+    }
+    return capacity;
+  }
+
+  /**
+   * How many residents the village can currently support: never more than its
+   * housing can shelter, and never past the era's ceiling. This is the soft cap
+   * that keeps the settlement small and makes each new birth feel earned.
+   */
+  supportedPopulation(): number {
+    const eraCeiling = ERA_POP_CEILING[this.era] ?? ERA_POP_CEILING[ERA_POP_CEILING.length - 1];
+    return Math.min(this.housingCapacity(), eraCeiling);
+  }
+
+  /** Average contentment of working-age residents, 0..100. Gates births. */
+  meanWellbeing(): number {
+    let sum = 0;
+    let count = 0;
+    const churchOpen = Boolean(this.getChurch());
+    for (const agent of this.agents) {
+      if (agent.age < ADULT_AGE || agent.age >= ELDER_AGE) {
+        continue;
+      }
+      const parts = [
+        100 - agent.health.hunger,
+        agent.health.stamina,
+        agent.needs.social,
+        agent.needs.purpose,
+        agent.needs.leisure,
+      ];
+      if (churchOpen) {
+        parts.push(agent.needs.faith);
+      }
+      sum += parts.reduce((a, b) => a + b, 0) / parts.length;
+      count += 1;
+    }
+    return count === 0 ? 100 : sum / count;
+  }
+
+  /** Residents currently living in a built house. */
+  private housedCount(): number {
+    let occupied = 0;
+    for (const building of this.buildings) {
+      if (building.kind === "house" && building.stage === "built") {
         occupied += this.occupantsOf(building.id);
       }
     }
-    return capacity - occupied;
+    return occupied;
+  }
+
+  /** Spare resident slots across all built houses. */
+  housingHeadroom(): number {
+    return this.housingCapacity() - this.housedCount();
   }
 
   /** 0 = roomy, 1 = full. Surfaced in the inspector as housing pressure. */
   housingPressure(): number {
-    let capacity = 0;
-    let occupied = 0;
-    for (const building of this.buildings) {
-      if (building.kind === "house" && building.stage === "built") {
-        capacity += this.houseCapacity(building);
-        occupied += this.occupantsOf(building.id);
-      }
-    }
-    if (capacity === 0) {
-      return 0;
-    }
-    return Math.min(1, occupied / capacity);
+    const capacity = this.housingCapacity();
+    return capacity === 0 ? 0 : Math.min(1, this.housedCount() / capacity);
   }
 
   /**

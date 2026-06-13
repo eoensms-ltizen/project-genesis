@@ -25,6 +25,7 @@ export default function App() {
   const [logs, setLogs] = useState<GameLogEntry[]>([]);
   const [clock, setClock] = useState<GameClock | null>(null);
   const [era, setEra] = useState(0);
+  const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
@@ -52,6 +53,7 @@ export default function App() {
         setLogs(snapshot.logs);
         setClock(snapshot.clock);
         setEra(snapshot.era);
+        setSupportedPop(snapshot.supportedPopulation);
         setFoodStock(snapshot.foodStock);
         setMeals(snapshot.meals);
         setBuildings(snapshot.buildings);
@@ -145,7 +147,8 @@ export default function App() {
                   {clock.isNight ? "🌙" : "☀️"}
                 </span>
                 <span className="hud-stats">
-                  {ERA_NAMES[era] ?? "?"} · 👥{agents.length} · 🌾{foodStock} · 🍲{meals}
+                  {ERA_NAMES[era] ?? "?"} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
+                  {meals}
                 </span>
               </>
             ) : (
