@@ -562,9 +562,30 @@ function drawBuilding(graphics: Graphics, building: Building) {
   }
 
   const capacity = building.capacity ?? 1;
+  const level =
+    building.level ?? (capacity >= 24 ? 4 : capacity >= 12 ? 3 : capacity >= 6 ? 2 : 1);
   const doorCenterX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
 
-  if (capacity >= 4) {
+  if (level >= 4) {
+    // Residential tower: full-footprint slab, dense window grid, rooftop mast.
+    graphics.rect(px + 1, py + 1, w - 2, h - 2);
+    graphics.fill(0x7c7d86);
+    graphics.rect(px + 1, py + 1, w - 2, 3);
+    graphics.fill(0x4f5058);
+    for (let wy = py + 5; wy < py + h - 4; wy += 5) {
+      for (let wx = px + 3; wx < px + w - 4; wx += 5) {
+        graphics.rect(wx, wy, 3, 3);
+        graphics.fill(0xbcd2e6);
+      }
+    }
+    graphics.rect(doorCenterX - 0.75, py - 3, 1.5, 5);
+    graphics.fill(0x9aa0aa);
+    graphics.rect(doorCenterX - 3, py + h - 7, 6, 5);
+    graphics.fill(0x241c14);
+    return;
+  }
+
+  if (level >= 3) {
     // Apartment block: tall body, flat roof, grid of lit windows.
     graphics.rect(px + 2, py + 2, w - 4, h - 4);
     graphics.fill(0x6f6552);
@@ -581,7 +602,7 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
-  if (capacity >= 2) {
+  if (level >= 2) {
     // Villa: two-storey house with extra windows.
     graphics.rect(px + 3, py + 6, w - 6, h - 8);
     graphics.fill(0x8a6a44);

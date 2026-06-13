@@ -81,7 +81,16 @@ const FOOD_CAP = 400;
 // Land pressure: when the nearest open plot to the village centre is farther
 // than this, residents densify existing housing instead of sprawling.
 const SPRAWL_LIMIT = 9;
-const HOUSE_MAX_CAPACITY = 4;
+// Houses redevelop in place up the tier ladder, packing more residents into the
+// same footprint: cottage -> villa -> apartment -> tower. Capacity counts
+// individual residents (a family shares a home), so it can be compared directly
+// against how many people actually live there.
+const HOUSE_MAX_LEVEL = 4;
+const HOUSE_CAPACITY_BY_LEVEL = [0, 3, 6, 12, 24];
+export const REDEVELOP_WOOD_COST = 12;
+// Builders proactively rebuild taller once the village has at most this many
+// spare beds — crowding, not distant empty land, is what drives growing upward.
+const REDEVELOP_HEADROOM = 2;
 // Roads/paths with no recent traffic weather back toward nature.
 const DECAY_CHANCE = 0.05;
 const ABANDON_DECAY_PER_TICK = 6;
@@ -167,6 +176,11 @@ export class Simulation {
         this.animals.push({ ...animal, path: undefined });
       }
       for (const building of saved.buildings) {
+        // Older saves predate the tier ladder; recover the level from capacity.
+        if (building.kind === "house" && building.stage === "built" && !building.level) {
+          building.level = this.houseLevel(building);
+          building.capacity = this.houseCapacity(building);
+        }
         this.buildings.push(building);
         if (building.stage !== "built") {
           this.claimBuildingFootprint(building);
@@ -306,6 +320,10 @@ export class Simulation {
         (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
       );
       building.durability = 100;
+      if (building.kind === "house" && !building.level) {
+        building.level = 1;
+        building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
+      }
     }
     const tileType: TileType =
       stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
@@ -1270,8 +1288,77 @@ export class Simulation {
     return this.agents.filter((agent) => agent.homeBuildingId === buildingId).length;
   }
 
+  houseLevel(building: Building): number {
+    if (building.level) {
+      return building.level;
+    }
+    // Older saves stored only capacity; recover the tier from it.
+    const cap = building.capacity ?? 1;
+    return cap >= 24 ? 4 : cap >= 12 ? 3 : cap >= 6 ? 2 : 1;
+  }
+
   houseCapacity(building: Building): number {
-    return building.capacity ?? 1;
+    return HOUSE_CAPACITY_BY_LEVEL[this.houseLevel(building)] ?? 1;
+  }
+
+  /** Spare household slots across all built houses near the centre. */
+  housingHeadroom(): number {
+    let capacity = 0;
+    let occupied = 0;
+    for (const building of this.buildings) {
+      if (building.kind === "house" && building.stage === "built") {
+        capacity += this.houseCapacity(building);
+        occupied += this.occupantsOf(building.id);
+      }
+    }
+    return capacity - occupied;
+  }
+
+  /** 0 = roomy, 1 = full. Surfaced in the inspector as housing pressure. */
+  housingPressure(): number {
+    let capacity = 0;
+    let occupied = 0;
+    for (const building of this.buildings) {
+      if (building.kind === "house" && building.stage === "built") {
+        capacity += this.houseCapacity(building);
+        occupied += this.occupantsOf(building.id);
+      }
+    }
+    if (capacity === 0) {
+      return 0;
+    }
+    return Math.min(1, occupied / capacity);
+  }
+
+  /**
+   * The driving force: when land is tight and housing is nearly full, the
+   * village should grow upward (redevelop) rather than sprawl outward.
+   */
+  shouldRedevelopHousing(): boolean {
+    return this.housingHeadroom() <= REDEVELOP_HEADROOM;
+  }
+
+  /** A central, upgradeable house no one is already rebuilding. */
+  findRedevelopableHouse(): Building | undefined {
+    const inProgress = new Set(
+      this.agents
+        .filter((a) => a.state === "MoveToRedevelop" || a.state === "Redevelop")
+        .map((a) => a.projectBuildingId),
+    );
+    const center = this.villageCenter();
+    return this.buildings
+      .filter(
+        (b) =>
+          b.kind === "house" &&
+          b.stage === "built" &&
+          this.houseLevel(b) < HOUSE_MAX_LEVEL &&
+          !inProgress.has(b.id),
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - center.x, a.y - center.y) -
+          Math.hypot(b.x - center.x, b.y - center.y),
+      )[0];
   }
 
   /** Is there an open building plot near the village centre? */
@@ -1312,7 +1399,7 @@ export class Simulation {
         (b) =>
           b.kind === "house" &&
           b.stage === "built" &&
-          this.houseCapacity(b) < HOUSE_MAX_CAPACITY,
+          this.houseLevel(b) < HOUSE_MAX_LEVEL,
       )
       .sort(
         (a, b) =>
@@ -1321,16 +1408,20 @@ export class Simulation {
       )[0];
   }
 
-  densifyHouse(building: Building) {
-    const current = this.houseCapacity(building);
-    building.capacity = current < 2 ? 2 : HOUSE_MAX_CAPACITY;
+  /** Redevelop a house one tier taller, packing more households per tile. */
+  levelUpHouse(building: Building) {
+    const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
+    building.level = next;
+    building.capacity = HOUSE_CAPACITY_BY_LEVEL[next];
     building.durability = 100;
     this.world.setTile(building.door, "House");
-    this.log(
-      building.capacity >= HOUSE_MAX_CAPACITY
-        ? "A house grew into an apartment block. 🏢"
-        : "A house was extended into a villa. 🏘️",
-    );
+    const label =
+      next >= 4
+        ? "A block was rebuilt into a residential tower. 🗼"
+        : next === 3
+          ? "A house grew into an apartment block. 🏢"
+          : "A house was extended into a villa. 🏘️";
+    this.log(label);
     this.notifyChanged();
   }
 

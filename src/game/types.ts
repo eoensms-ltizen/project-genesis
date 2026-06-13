@@ -54,6 +54,8 @@ export type AgentState =
   | "Hunt"
   | "MoveToTame"
   | "Tame"
+  | "MoveToRedevelop"
+  | "Redevelop"
   | "Wander"
   | "Rest";
 
@@ -83,8 +85,12 @@ export type Building = {
   ownerId?: string;
   builtAtDay?: number;
   durability?: number;
-  // Household capacity for houses: 1 = house, 2 = villa, 4+ = apartment.
+  // Household capacity for houses: 1 = house, 2 = villa, 4 = apartment, 8 = tower.
+  // Derived from `level` — kept in sync so the renderer can key off it directly.
   capacity?: number;
+  // Redevelopment tier (1+). Higher levels pack more output/capacity into the
+  // same footprint; builders raise it in place when land pressure is high.
+  level?: number;
 };
 
 export type AnimalKind = "deer" | "boar" | "rabbit";

@@ -64,6 +64,13 @@ export function Inspector({
   );
 }
 
+function houseTier(level: number): string {
+  if (level >= 4) return "tower";
+  if (level >= 3) return "apartment";
+  if (level >= 2) return "villa";
+  return "house";
+}
+
 function lifeStage(age: number): string {
   if (age < 4) return "Baby";
   if (age < 12) return "Child";
@@ -198,12 +205,8 @@ function BuildingInfo({ building, agents }: { building?: Building; agents: Agent
           <>
             <dt>Type</dt>
             <dd>
-              {(building.capacity ?? 1) >= 4
-                ? "apartment"
-                : (building.capacity ?? 1) >= 2
-                  ? "villa"
-                  : "house"}{" "}
-              · {building.capacity ?? 1} households
+              {houseTier(building.level ?? 1)} · L{building.level ?? 1} ·{" "}
+              {building.capacity ?? 1} residents
             </dd>
           </>
         )}

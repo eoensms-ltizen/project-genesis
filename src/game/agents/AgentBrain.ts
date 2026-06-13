@@ -1,6 +1,6 @@
 import type { Agent, AgentState, Building, BuildingKind, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
-import { ADULT_AGE, ELDER_AGE } from "../Simulation";
+import { ADULT_AGE, ELDER_AGE, REDEVELOP_WOOD_COST } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
 
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
@@ -96,6 +96,8 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "Hunt",
   "MoveToTame",
   "Tame",
+  "MoveToRedevelop",
+  "Redevelop",
 ]);
 
 export class AgentBrain {
@@ -198,6 +200,12 @@ export class AgentBrain {
         break;
       case "Tame":
         this.tame(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToRedevelop":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Redevelop");
+        break;
+      case "Redevelop":
+        this.redevelop(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -392,6 +400,11 @@ export class AgentBrain {
         this.setState(agent, simulation, "FindTree");
         return true;
       }
+      // Growing upward (redevelopment) outranks routine job work, the same way
+      // communal building does — it is how the village answers land pressure.
+      if (this.tryRedevelop(agent, simulation)) {
+        return true;
+      }
       if (this.doJobWork(agent, simulation)) {
         return true;
       }
@@ -408,6 +421,68 @@ export class AgentBrain {
     }
 
     return false;
+  }
+
+  /**
+   * Land pressure made actionable: when housing is nearly full and there is no
+   * room to sprawl, a worker rebuilds a central house one tier taller. Gathers
+   * wood first if short, like a communal project.
+   */
+  private tryRedevelop(agent: Agent, simulation: Simulation): boolean {
+    if (!simulation.shouldRedevelopHousing()) {
+      return false;
+    }
+    const house = simulation.findRedevelopableHouse();
+    if (!house) {
+      return false;
+    }
+    if (agent.inventory.wood < REDEVELOP_WOOD_COST) {
+      this.setState(agent, simulation, "FindTree");
+      return true;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: house.door });
+    if (!path) {
+      return false;
+    }
+    agent.projectBuildingId = house.id;
+    agent.target = { ...house.door };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToRedevelop");
+    return true;
+  }
+
+  private redevelop(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const house = agent.projectBuildingId
+      ? simulation.getBuilding(agent.projectBuildingId)
+      : undefined;
+    // The target may have been claimed, levelled, or removed while en route.
+    if (
+      !house ||
+      house.kind !== "house" ||
+      house.stage !== "built" ||
+      simulation.houseLevel(house) >= 4
+    ) {
+      agent.projectBuildingId = undefined;
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+
+    if (agent.actionTimer === 0) {
+      simulation.log(`${agent.name} began redeveloping a house.`, [agent]);
+    }
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < BUILD_DURATION_SECONDS) {
+      return;
+    }
+
+    agent.inventory.wood = Math.max(0, agent.inventory.wood - REDEVELOP_WOOD_COST);
+    simulation.levelUpHouse(house);
+    agent.projectBuildingId = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
   }
 
   /** Lifestage idle for children and elders: company if lonely, else a stroll. */
@@ -1409,7 +1484,7 @@ export class AgentBrain {
       return true;
     }
     agent.inventory.wood -= HOUSE_WOOD_COST;
-    simulation.densifyHouse(house);
+    simulation.levelUpHouse(house);
     this.moveInto(agent, simulation, house, "joined a denser household");
     return true;
   }

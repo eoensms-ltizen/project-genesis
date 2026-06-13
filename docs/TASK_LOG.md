@@ -16,6 +16,11 @@
   six soft needs (social, purpose, faith, leisure + hunger, energy) that drain
   by personality and refill through activity; inspector need bars + motivation;
   needs persisted (save v10).
+- Spatial-efficiency growth, Phase A: buildings gained a `level`; houses
+  redevelop in place (cottage→villa→apartment→tower) when housing headroom is
+  low, driven by crowding rather than distant empty land; builders perform the
+  rebuild as work; tower visual + inspector tier/level. Capacity redefined as
+  residents.
 
 ## 2026-06-12
 
