@@ -68,6 +68,12 @@
   wanted 4 → lowered to 3) and redevelopment starvation (housing upgrades sat
   behind communal builds → reordered so a full town redevelops housing first).
   Verified a 40-resident town holds unrest ~19 with one officer and a station.
+- Natural founding: homeless residents now join a household that is merely
+  planned/under construction (not only built) before staking a fresh plot, so a
+  group of founders settle into a few shared homes (7 → 3) instead of each
+  grabbing a plot at once. A house still costs 8 wood plus the labour to gather
+  and build it. Verified 7 founders form 3 homes with no cancelled sites and
+  normal long-run growth (era 4, 0 homeless).
 
 ## 2026-06-12
 

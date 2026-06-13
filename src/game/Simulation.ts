@@ -1888,6 +1888,26 @@ export class Simulation {
       )[0];
   }
 
+  /**
+   * A household with room that a homeless founder can join *before* staking a
+   * fresh plot — includes homes still being planned or built, so a handful of
+   * founders share a few homes instead of one each. Built homes preferred.
+   */
+  findJoinableHousehold(): Building | undefined {
+    const center = this.villageCenter();
+    return this.buildings
+      .filter((b) => b.kind === "house" && this.occupantsOf(b.id) < this.houseCapacity(b))
+      .sort((a, b) => {
+        const builtFirst = Number(b.stage === "built") - Number(a.stage === "built");
+        if (builtFirst !== 0) {
+          return builtFirst;
+        }
+        return (
+          Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y)
+        );
+      })[0];
+  }
+
   /** A built house that can still be upgraded to a denser tier. */
   findDensifiableHouse(): Building | undefined {
     const center = this.villageCenter();
