@@ -589,6 +589,20 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  if (building.kind === "police") {
+    // Stone station with a blue lamp and a shield over the door.
+    graphics.rect(px + 2, py + 6, w - 4, h - 8);
+    graphics.fill(0x8a8f99);
+    graphics.rect(px + 1, py + 2, w - 2, 6);
+    graphics.fill(0x3a5a8a);
+    const pDoorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
+    graphics.rect(pDoorX - 3, py + h - 11, 6, 9);
+    graphics.fill(0x26303f);
+    graphics.circle(pDoorX, py + 5, 1.8);
+    graphics.fill(0x8fd0ff);
+    return;
+  }
+
   if (building.kind === "cemetery") {
     // Quiet walled graveyard with rows of headstones.
     graphics.rect(px + 2, py + 2, w - 4, h - 4);

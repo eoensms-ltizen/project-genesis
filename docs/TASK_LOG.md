@@ -60,6 +60,14 @@
   so cleaning preempts hunting/building when workers are scarce — the cost of the
   need. HUD shows litter. Verified (litter 16→6 under cleaners; cleaners scale
   0↔2 with litter).
+- Safety loop (unrest + police): crowding and discontent build unrest (an eased
+  meter, no runaway); a restless town builds a police station (amenity) and takes
+  on police officers, who patrol and break up quarrels — unpoliced quarrels dent
+  comfort instead. HUD shows unrest. While integrating it, found and fixed two
+  growth-blockers: an era-0 deadlock (Pioneer cap of 8 fit in 3 houses but era 1
+  wanted 4 → lowered to 3) and redevelopment starvation (housing upgrades sat
+  behind communal builds → reordered so a full town redevelops housing first).
+  Verified a 40-resident town holds unrest ~19 with one officer and a station.
 
 ## 2026-06-12
 

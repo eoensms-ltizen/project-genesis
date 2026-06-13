@@ -22,6 +22,7 @@ const FACTORY_WOOD_COST = 16;
 const STATION_WOOD_COST = 14;
 const CEMETERY_WOOD_COST = 10;
 const PARK_WOOD_COST = 8;
+const POLICE_WOOD_COST = 12;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -116,6 +117,7 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "Redevelop",
   "MoveToClean",
   "Clean",
+  "Patrol",
 ]);
 
 export class AgentBrain {
@@ -236,6 +238,9 @@ export class AgentBrain {
         break;
       case "Clean":
         this.clean(agent, simulation, deltaSeconds);
+        break;
+      case "Patrol":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -471,6 +476,13 @@ export class AgentBrain {
 
   private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
     if (simulation.era >= 1) {
+      // Shelter before extras: when the town is full, growing housing upward
+      // takes priority over new communal amenities — otherwise housing capacity
+      // (and so the population) never grows past whatever it started at. Only one
+      // house redevelops at a time, so other workers fall through to the rest.
+      if (this.tryRedevelop(agent, simulation)) {
+        return true;
+      }
       // Communal buildings outrank field work: gather wood for them first.
       const communal = this.communalProject(agent, simulation);
       if (communal === "started") {
@@ -478,11 +490,6 @@ export class AgentBrain {
       }
       if (communal === "gather") {
         this.setState(agent, simulation, "FindTree");
-        return true;
-      }
-      // Growing upward (redevelopment) outranks routine job work, the same way
-      // communal building does — it is how the village answers land pressure.
-      if (this.tryRedevelop(agent, simulation)) {
         return true;
       }
       if (this.doJobWork(agent, simulation)) {
@@ -674,6 +681,7 @@ export class AgentBrain {
       | "station"
       | "cemetery"
       | "park"
+      | "police"
       | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
@@ -683,6 +691,9 @@ export class AgentBrain {
     } else if (simulation.needsPark()) {
       // A cramped town lays out green space near where people live.
       kind = "park";
+    } else if (simulation.needsPoliceStation()) {
+      // A restless town builds a police station to keep the peace.
+      kind = "police";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
@@ -745,9 +756,37 @@ export class AgentBrain {
         return this.findHuntWork(agent, simulation);
       case "cleaner":
         return this.findCleanWork(agent, simulation) || this.findFarmWork(agent, simulation);
+      case "police":
+        return this.patrol(agent, simulation);
       default:
         return this.findFarmWork(agent, simulation);
     }
+  }
+
+  /** Officers walk a beat around where people gather; their presence calms unrest. */
+  private patrol(agent: Agent, simulation: Simulation): boolean {
+    const hub =
+      simulation.getWarehouse() ?? simulation.getChurch() ?? simulation.getKitchen();
+    const center = hub
+      ? { x: Math.round(hub.x + hub.width / 2), y: Math.round(hub.y + hub.height / 2) }
+      : roundVec(simulation.villageCenter());
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = {
+        x: center.x + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+        y: center.y + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+      };
+      if (!simulation.world.isWalkable(candidate)) {
+        continue;
+      }
+      const path = findPath(simulation.world, { start: agent.position, goal: candidate });
+      if (path) {
+        agent.target = candidate;
+        agent.path = path;
+        this.setState(agent, simulation, "Patrol");
+        return true;
+      }
+    }
+    return false;
   }
 
   private findCleanWork(agent: Agent, simulation: Simulation): boolean {
@@ -1951,6 +1990,9 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "park") {
     return PARK_WOOD_COST;
+  }
+  if (kind === "police") {
+    return POLICE_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }

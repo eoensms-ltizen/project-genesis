@@ -28,6 +28,7 @@ export default function App() {
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
   const [litter, setLitter] = useState(0);
+  const [unrest, setUnrest] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -58,6 +59,7 @@ export default function App() {
         setFoodStock(snapshot.foodStock);
         setMeals(snapshot.meals);
         setLitter(snapshot.litter);
+        setUnrest(snapshot.unrest);
         setBuildings(snapshot.buildings);
         setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
@@ -152,6 +154,7 @@ export default function App() {
                   {ERA_NAMES[era] ?? "?"} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
                   {meals}
                   {litter > 0 ? ` · 🗑️${litter}` : ""}
+                  {unrest >= 20 ? ` · 😠${unrest}` : ""}
                 </span>
               </>
             ) : (

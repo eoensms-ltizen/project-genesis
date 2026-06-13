@@ -119,6 +119,7 @@ const AMBIANCE_RADIUS = 7;
 const BUILDING_AMBIANCE: Partial<Record<BuildingKind, number>> = {
   park: 6,
   church: 5,
+  police: 4,
   station: 1,
   powerplant: -8,
   factory: -7,
@@ -157,6 +158,14 @@ const LITTERABLE: ReadonlySet<TileType> = new Set([
   "Stump",
 ]);
 
+// Public order: crowding and discontent breed friction; police and a station
+// keep it in check. Unrest is a 0..100 meter that drives the police job and
+// occasionally erupts into a quarrel that dents the participants' comfort.
+const UNREST_THRESHOLD = 30; // a quarrel can erupt above this
+const POLICE_ON_THRESHOLD = 10; // keep officers on duty above this (hysteresis vs the quarrel line)
+const POLICE_STATION_THRESHOLD = 15; // build a station once friction recurs
+const QUARREL_COMFORT_HIT = 16;
+
 type SavedAgent = Omit<
   Agent,
   "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
@@ -189,6 +198,7 @@ export class Simulation {
   readonly buildings: Building[] = [];
   readonly animals: Animal[] = [];
   readonly litter: Vec2[] = [];
+  unrest = 0;
   era = 0;
   foodStock = 0;
   meals = 0;
@@ -313,6 +323,7 @@ export class Simulation {
       this.recomputeAmbiance();
       this.relocateMisplacedWork();
       this.spawnLitter();
+      this.updateUnrest();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -603,6 +614,7 @@ export class Simulation {
       poweredBuildingIds: this.getPoweredBuildingIds(),
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
+      unrest: Math.round(this.unrest),
     };
   }
 
@@ -697,7 +709,9 @@ export class Simulation {
       const builtHouses = this.buildings.filter(
         (building) => building.kind === "house" && building.stage === "built",
       ).length;
-      if (this.agents.length >= 6 && builtHouses >= 4) {
+      // Three homes shelter the eight-resident Pioneer cap, so requiring four
+      // would deadlock: the population can never grow enough to build a fourth.
+      if (this.agents.length >= 6 && builtHouses >= 3) {
         this.era = 1;
         this.log("The village entered the Settlement era! Fields and a warehouse are now possible.");
       }
@@ -981,6 +995,64 @@ export class Simulation {
     return this.litter.length >= LITTER_THRESHOLD;
   }
 
+  policeCount(): number {
+    return this.agents.filter((a) => a.job === "police").length;
+  }
+
+  hasPoliceStation(): boolean {
+    return this.buildings.some((b) => b.kind === "police" && b.stage === "built");
+  }
+
+  /** Police are wanted on duty while there is meaningful friction. */
+  get unrestIsHigh(): boolean {
+    return this.unrest >= POLICE_ON_THRESHOLD;
+  }
+
+  needsPoliceStation(): boolean {
+    return this.unrest >= POLICE_STATION_THRESHOLD && !this.hasPoliceStation();
+  }
+
+  /**
+   * Unrest eases toward a target set by friction (crowding + discontent) minus
+   * the order that police and a station can keep — so it settles at an
+   * equilibrium instead of running away. High unrest occasionally erupts into a
+   * quarrel; officers break it up, otherwise comfort takes the hit.
+   */
+  private updateUnrest() {
+    const friction =
+      Math.max(0, this.agents.length - 10) * 0.3 + Math.max(0, 60 - this.meanWellbeing()) * 0.2;
+    const order = this.policeCount() * 15 + (this.hasPoliceStation() ? 20 : 0);
+    const target = Math.max(0, Math.min(100, friction * 6 - order));
+    this.unrest += (target - this.unrest) * 0.3;
+    if (this.unrest < 0.5) {
+      this.unrest = 0;
+    }
+
+    if (this.unrest >= UNREST_THRESHOLD && Math.random() < this.unrest / 280) {
+      this.stirQuarrel();
+    }
+  }
+
+  private stirQuarrel() {
+    const adults = this.agents.filter((a) => a.age >= ADULT_AGE);
+    if (adults.length < 2) {
+      return;
+    }
+    const a = adults[Math.floor(Math.random() * adults.length)];
+    let b = a;
+    while (b === a) {
+      b = adults[Math.floor(Math.random() * adults.length)];
+    }
+    if (this.policeCount() > 0) {
+      this.unrest = Math.max(0, this.unrest - 12);
+      this.logPathEvent(`An officer broke up a quarrel between ${a.name} and ${b.name}. 👮`);
+    } else {
+      a.needs.comfort = Math.max(0, a.needs.comfort - QUARREL_COMFORT_HIT);
+      b.needs.comfort = Math.max(0, b.needs.comfort - QUARREL_COMFORT_HIT);
+      this.log(`${a.name} and ${b.name} quarreled — the village needs some order. 😠`);
+    }
+  }
+
   /** Tear a building down, returning its footprint to open ground. */
   private removeBuilding(building: Building) {
     this.releaseBuildingFootprint(building);
@@ -1254,6 +1326,7 @@ export class Simulation {
       ["cook", this.hasAnyKitchen() ? 1 : 0],
       ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
       ["cleaner", this.litterIsHigh ? Math.min(2, Math.ceil(this.litter.length / 10)) : 0],
+      ["police", this.unrestIsHigh ? Math.min(2, 1 + Math.floor(this.unrest / 40)) : 0],
       ["hunter", population >= 8 ? Math.min(2, Math.floor(population / 8)) : 0],
       ["builder", this.era >= 2 ? 1 : 0],
     ];

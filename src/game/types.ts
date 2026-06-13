@@ -60,6 +60,7 @@ export type AgentState =
   | "Relax"
   | "MoveToClean"
   | "Clean"
+  | "Patrol"
   | "Wander"
   | "Rest";
 
@@ -71,7 +72,8 @@ export type AgentJob =
   | "woodcutter"
   | "cook"
   | "hunter"
-  | "cleaner";
+  | "cleaner"
+  | "police";
 
 export type BuildingKind =
   | "house"
@@ -83,7 +85,8 @@ export type BuildingKind =
   | "factory"
   | "station"
   | "cemetery"
-  | "park";
+  | "park"
+  | "police";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -205,4 +208,6 @@ export type SimulationSnapshot = {
   supportedPopulation: number;
   // Pieces of uncollected litter — the hygiene pressure that calls for cleaners.
   litter: number;
+  // Public-order pressure (0..100) — rising friction that calls for police.
+  unrest: number;
 };
