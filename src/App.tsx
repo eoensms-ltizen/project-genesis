@@ -27,6 +27,7 @@ export default function App() {
   const [era, setEra] = useState(0);
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
+  const [litter, setLitter] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -56,6 +57,7 @@ export default function App() {
         setSupportedPop(snapshot.supportedPopulation);
         setFoodStock(snapshot.foodStock);
         setMeals(snapshot.meals);
+        setLitter(snapshot.litter);
         setBuildings(snapshot.buildings);
         setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
@@ -149,6 +151,7 @@ export default function App() {
                 <span className="hud-stats">
                   {ERA_NAMES[era] ?? "?"} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
                   {meals}
+                  {litter > 0 ? ` · 🗑️${litter}` : ""}
                 </span>
               </>
             ) : (

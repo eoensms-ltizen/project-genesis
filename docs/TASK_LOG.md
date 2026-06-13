@@ -53,6 +53,13 @@
   concentrates and wears desire paths into a growing road network. Verified
   (door cost 1.2 vs impassable interior; road tiles grew 17→63 by 40 residents,
   no deadlock).
+- Hygiene loop (litter + cleaner): busy activity drops litter (scaling with
+  population), which is negative ambiance until collected; a littered town takes
+  on cleaners (1–2 by litter level) who walk to and clear the nearest litter.
+  Reworked assignJobs to allocate roles by priority within the adult workforce,
+  so cleaning preempts hunting/building when workers are scarce — the cost of the
+  need. HUD shows litter. Verified (litter 16→6 under cleaners; cleaners scale
+  0↔2 with litter).
 
 ## 2026-06-12
 

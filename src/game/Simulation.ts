@@ -142,6 +142,21 @@ const FIELD_RELOCATE_RADIUS = 4;
 const FIELD_RELOCATE_PER_TICK = 3;
 const WORKSHOP_RELOCATE_RADIUS = 6;
 
+// Litter: daily life leaves refuse, more of it the busier the town. It is an
+// eyesore (negative ambiance) until a cleaner clears it — a need with a cost.
+const LITTER_AMBIANCE = -1.5;
+const LITTER_AMBIANCE_RADIUS = 3;
+const LITTER_SPAWN_CHANCE_PER_CAPITA = 0.01;
+const LITTER_THRESHOLD = 6;
+const LITTERABLE: ReadonlySet<TileType> = new Set([
+  "Grass",
+  "Road",
+  "Dirt",
+  "Plaza",
+  "Lamp",
+  "Stump",
+]);
+
 type SavedAgent = Omit<
   Agent,
   "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
@@ -173,6 +188,7 @@ export class Simulation {
   readonly agents: Agent[] = [];
   readonly buildings: Building[] = [];
   readonly animals: Animal[] = [];
+  readonly litter: Vec2[] = [];
   era = 0;
   foodStock = 0;
   meals = 0;
@@ -296,6 +312,7 @@ export class Simulation {
       this.decayInfrastructure();
       this.recomputeAmbiance();
       this.relocateMisplacedWork();
+      this.spawnLitter();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -585,6 +602,7 @@ export class Simulation {
       trains: this.getTrainPositions(),
       poweredBuildingIds: this.getPoweredBuildingIds(),
       supportedPopulation: this.supportedPopulation(),
+      litter: this.litter.length,
     };
   }
 
@@ -857,6 +875,9 @@ export class Simulation {
         scatter(tile.x + 0.5, tile.y + 0.5, weight, TILE_AMBIANCE_RADIUS);
       }
     }
+    for (const spot of this.litter) {
+      scatter(spot.x + 0.5, spot.y + 0.5, LITTER_AMBIANCE, LITTER_AMBIANCE_RADIUS);
+    }
   }
 
   /** True if a built house centre lies within `radius` tiles of a point. */
@@ -905,6 +926,59 @@ export class Simulation {
       this.removeBuilding(misplaced);
       this.log(`The ${kind} was too close to the homes — it will be rebuilt on the outskirts. 🏗️`);
     }
+  }
+
+  /** Busy daily life drops refuse near residents; the busier the town, the more. */
+  private spawnLitter() {
+    const cap = Math.min(40, 4 + this.agents.length);
+    if (this.litter.length >= cap) {
+      return;
+    }
+    if (Math.random() > LITTER_SPAWN_CHANCE_PER_CAPITA * this.agents.length) {
+      return;
+    }
+    const adults = this.agents.filter((a) => a.age >= ADULT_AGE);
+    if (adults.length === 0) {
+      return;
+    }
+    const source = adults[Math.floor(Math.random() * adults.length)];
+    const spot = { x: Math.round(source.position.x), y: Math.round(source.position.y) };
+    const tile = this.world.getTile(spot);
+    if (tile && LITTERABLE.has(tile.type) && !this.litter.some((l) => l.x === spot.x && l.y === spot.y)) {
+      this.litter.push(spot);
+    }
+  }
+
+  /** Nearest piece of litter to a point, for a cleaner to collect. */
+  nearestLitter(position: Vec2): Vec2 | undefined {
+    let best: Vec2 | undefined;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const spot of this.litter) {
+      const d = Math.hypot(position.x - spot.x, position.y - spot.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = spot;
+      }
+    }
+    return best;
+  }
+
+  /** Remove the litter at a tile once a cleaner has collected it. */
+  clearLitterAt(position: Vec2) {
+    const index = this.litter.findIndex((l) => l.x === position.x && l.y === position.y);
+    if (index >= 0) {
+      this.litter.splice(index, 1);
+      this.notifyChanged();
+    }
+  }
+
+  litterCount(): number {
+    return this.litter.length;
+  }
+
+  /** Litter past this level warrants assigning cleaners. */
+  get litterIsHigh(): boolean {
+    return this.litter.length >= LITTER_THRESHOLD;
   }
 
   /** Tear a building down, returning its footprint to open ground. */
@@ -1172,30 +1246,54 @@ export class Simulation {
     }
 
     const population = this.agents.length;
+    // Order is priority: when workers are scarce, earlier jobs are filled first.
+    // Food and wood come first, then cleaning a dirty town (the need drives the
+    // job), then hunting and building.
     const quotas: [AgentJob, number][] = [
       ["farmer", Math.min(3, Math.max(1, Math.floor(population / 4)))],
-      ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
       ["cook", this.hasAnyKitchen() ? 1 : 0],
-      ["builder", this.era >= 2 ? 1 : 0],
+      ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
+      ["cleaner", this.litterIsHigh ? Math.min(2, Math.ceil(this.litter.length / 10)) : 0],
       ["hunter", population >= 8 ? Math.min(2, Math.floor(population / 8)) : 0],
+      ["builder", this.era >= 2 ? 1 : 0],
     ];
 
+    const adults = this.agents.filter(
+      (agent) => agent.age >= ADULT_AGE && agent.age < ELDER_AGE,
+    );
+
+    // Allocate slots to jobs in priority order, capped by how many adults exist,
+    // so a scarce workforce fills the most important roles first (and cleaning a
+    // dirty town outranks hunting/building).
+    const target = new Map<AgentJob, number>();
+    let supply = adults.length;
     for (const [job, quota] of quotas) {
-      const holders = this.agents.filter((agent) => agent.job === job);
-      for (let i = holders.length; i > quota; i -= 1) {
-        const released = holders[i - 1];
-        released.job = "none";
+      const n = Math.min(quota, supply);
+      target.set(job, n);
+      supply -= n;
+    }
+
+    // Keep adults in a role that still has a slot; release the rest to refill.
+    for (const agent of adults) {
+      const left = target.get(agent.job) ?? 0;
+      if (agent.job !== "none" && left > 0) {
+        target.set(agent.job, left - 1);
+      } else {
+        agent.job = "none";
       }
-      let missing = quota - Math.min(holders.length, quota);
-      for (const agent of this.agents) {
-        if (missing <= 0) {
-          break;
-        }
-        if (agent.job === "none" && agent.age >= ADULT_AGE && agent.age < ELDER_AGE) {
-          agent.job = job;
-          missing -= 1;
-          this.log(`${agent.name} became a ${job}.`, [agent]);
-        }
+    }
+
+    // Fill the remaining slots from freed adults, in priority order.
+    const free = adults.filter((agent) => agent.job === "none");
+    let next = 0;
+    for (const [job] of quotas) {
+      let need = target.get(job) ?? 0;
+      while (need > 0 && next < free.length) {
+        const agent = free[next];
+        next += 1;
+        agent.job = job;
+        need -= 1;
+        this.log(`${agent.name} became a ${job}.`, [agent]);
       }
     }
   }

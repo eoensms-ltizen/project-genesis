@@ -203,6 +203,7 @@ export class PixiRenderer {
     animals: Animal[] = [],
     trains: Vec2[] = [],
     poweredBuildingIds: string[] = [],
+    litter: Vec2[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -246,6 +247,16 @@ export class PixiRenderer {
     if (placementMode) {
       this.overlayGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
       this.overlayGraphics.stroke({ color: 0xd7b65f, width: 3, alpha: 0.9 });
+    }
+    for (const spot of litter) {
+      const lx = spot.x * TILE_SIZE;
+      const ly = spot.y * TILE_SIZE;
+      this.overlayGraphics.circle(lx + 4, ly + 8, 1.4);
+      this.overlayGraphics.fill({ color: 0x6b5a3a, alpha: 0.9 });
+      this.overlayGraphics.circle(lx + 9, ly + 5, 1.2);
+      this.overlayGraphics.fill({ color: 0x7c6a48, alpha: 0.85 });
+      this.overlayGraphics.rect(lx + 6, ly + 10, 2.4, 1.4);
+      this.overlayGraphics.fill({ color: 0x554631, alpha: 0.85 });
     }
 
     this.nightGraphics.clear();

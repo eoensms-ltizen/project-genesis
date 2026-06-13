@@ -58,10 +58,20 @@ export type AgentState =
   | "Redevelop"
   | "MoveToPark"
   | "Relax"
+  | "MoveToClean"
+  | "Clean"
   | "Wander"
   | "Rest";
 
-export type AgentJob = "none" | "builder" | "farmer" | "fisher" | "woodcutter" | "cook" | "hunter";
+export type AgentJob =
+  | "none"
+  | "builder"
+  | "farmer"
+  | "fisher"
+  | "woodcutter"
+  | "cook"
+  | "hunter"
+  | "cleaner";
 
 export type BuildingKind =
   | "house"
@@ -193,4 +203,6 @@ export type SimulationSnapshot = {
   poweredBuildingIds: string[];
   // The soft cap on residents the village can currently support (housing ∩ era).
   supportedPopulation: number;
+  // Pieces of uncollected litter — the hygiene pressure that calls for cleaners.
+  litter: number;
 };

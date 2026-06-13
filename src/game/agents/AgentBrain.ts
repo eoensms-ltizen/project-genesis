@@ -33,6 +33,7 @@ const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
 const FARM_WORK_DURATION_SECONDS = 2;
+const CLEAN_DURATION_SECONDS = 1.5;
 const PAVE_DURATION_SECONDS = 1.5;
 const MAX_FIELD_TILES = 12;
 // New fields are never tilled within this many tiles of a home, so farmland
@@ -113,6 +114,8 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "Tame",
   "MoveToRedevelop",
   "Redevelop",
+  "MoveToClean",
+  "Clean",
 ]);
 
 export class AgentBrain {
@@ -227,6 +230,12 @@ export class AgentBrain {
         break;
       case "Relax":
         this.relax(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToClean":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Clean");
+        break;
+      case "Clean":
+        this.clean(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -734,9 +743,39 @@ export class AgentBrain {
         return this.findTransplantWork(agent, simulation);
       case "hunter":
         return this.findHuntWork(agent, simulation);
+      case "cleaner":
+        return this.findCleanWork(agent, simulation) || this.findFarmWork(agent, simulation);
       default:
         return this.findFarmWork(agent, simulation);
     }
+  }
+
+  private findCleanWork(agent: Agent, simulation: Simulation): boolean {
+    const spot = simulation.nearestLitter(agent.position);
+    if (!spot) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: spot });
+    if (!path) {
+      return false;
+    }
+    agent.target = { ...spot };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToClean");
+    return true;
+  }
+
+  private clean(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < CLEAN_DURATION_SECONDS) {
+      return;
+    }
+    if (agent.target) {
+      simulation.clearLitterAt(roundVec(agent.target));
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
   }
 
   private findTree(agent: Agent, simulation: Simulation) {

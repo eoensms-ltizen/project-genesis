@@ -112,6 +112,7 @@ export class GameApp {
       this.simulation.animals,
       this.simulation.getTrainPositions(),
       this.simulation.getPoweredBuildingIds(),
+      this.simulation.litter,
     );
   }
 }
