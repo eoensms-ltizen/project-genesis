@@ -26,6 +26,11 @@
   the flat population cap; births now require supported population (housing ∩
   per-era ceiling), housing headroom, and high mean wellbeing. HUD shows
   population / supported. Verified the housing/era → population loop in-browser.
+- Spread-out city, Slice 1: added the cemetery — a nuisance building sited on
+  the outskirts once residents die, with homes avoiding its radius so the town
+  spreads away from it; steepened redevelopment cost by tier so stacking is no
+  longer the cheap default; cut road decay so infrastructure persists. Verified
+  in-browser (cemetery sited apart, no homes in its shadow, costs escalate).
 
 ## 2026-06-12
 

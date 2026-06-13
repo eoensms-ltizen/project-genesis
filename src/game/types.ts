@@ -69,7 +69,8 @@ export type BuildingKind =
   | "pasture"
   | "powerplant"
   | "factory"
-  | "station";
+  | "station"
+  | "cemetery";
 
 export type BuildingStage = "site" | "foundation" | "built";
 

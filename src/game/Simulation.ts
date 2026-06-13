@@ -93,13 +93,23 @@ const SPRAWL_LIMIT = 9;
 // against how many people actually live there.
 const HOUSE_MAX_LEVEL = 4;
 const HOUSE_CAPACITY_BY_LEVEL = [0, 3, 6, 12, 24];
-export const REDEVELOP_WOOD_COST = 12;
+// Building taller is a steeply escalating investment, so stacking is never the
+// cheap default — the village is nudged to spread outward instead. Indexed by
+// the target level (the level being upgraded TO).
+const REDEVELOP_COST_BY_LEVEL = [0, 0, 16, 30, 50];
 // Builders proactively rebuild taller once the village has at most this many
 // spare beds — crowding, not distant empty land, is what drives growing upward.
 const REDEVELOP_HEADROOM = 2;
-// Roads/paths with no recent traffic weather back toward nature.
-const DECAY_CHANCE = 0.05;
+// Roads/paths with no recent traffic weather back toward nature — kept very
+// slow for now so infrastructure (e.g. the road out to the cemetery) persists
+// and decay is barely noticeable.
+const DECAY_CHANCE = 0.004;
 const ABANDON_DECAY_PER_TICK = 6;
+
+// The cemetery is a nuisance: sited far from the village centre, and homes avoid
+// settling within its shadow — one of the reasons the town spreads out.
+const CEMETERY_MIN_DISTANCE = 16;
+const CEMETERY_NUISANCE_RADIUS = 9;
 
 type SavedAgent = Omit<
   Agent,
@@ -135,6 +145,7 @@ export class Simulation {
   era = 0;
   foodStock = 0;
   meals = 0;
+  deaths = 0;
 
   private nextBuildingId = 1;
   private nextAnimalId = 1;
@@ -664,6 +675,36 @@ export class Simulation {
     return this.buildings.some((building) => building.kind === "factory");
   }
 
+  hasAnyCemetery(): boolean {
+    return this.buildings.some((building) => building.kind === "cemetery");
+  }
+
+  /** Once residents have died, the village needs a place to lay them to rest. */
+  needsCemetery(): boolean {
+    return this.deaths > 0 && !this.hasAnyCemetery();
+  }
+
+  /** Wood needed to redevelop a house to its next tier (escalates by level). */
+  redevelopCost(building: Building): number {
+    const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
+    return REDEVELOP_COST_BY_LEVEL[next] ?? REDEVELOP_COST_BY_LEVEL[HOUSE_MAX_LEVEL];
+  }
+
+  /** True if the position sits within the shadow of a cemetery (a nuisance). */
+  isNearNuisance(position: Vec2): boolean {
+    for (const building of this.buildings) {
+      if (building.kind !== "cemetery") {
+        continue;
+      }
+      const cx = building.x + building.width / 2;
+      const cy = building.y + building.height / 2;
+      if (Math.hypot(position.x - cx, position.y - cy) < CEMETERY_NUISANCE_RADIUS) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   hasAnyStation(): boolean {
     return this.buildings.some((building) => building.kind === "station");
   }
@@ -1027,6 +1068,7 @@ export class Simulation {
   }
 
   private passAway(agent: Agent) {
+    this.deaths += 1;
     this.log(`${agent.name} passed away peacefully at ${agent.age}. 🕯️`);
 
     // Release whatever the agent was holding onto.

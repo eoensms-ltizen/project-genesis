@@ -162,8 +162,11 @@ export class WorldMap {
     width: number,
     height: number,
     isBlocked?: (position: Vec2) => boolean,
+    options?: { far?: boolean; minDistance?: number },
   ): Vec2 | undefined {
     const houseTiles: Vec2[] = this.tiles.filter((tile) => tile.type === "House");
+    const far = options?.far ?? false;
+    const minDistance = options?.minDistance ?? 0;
 
     let best: Vec2 | undefined;
     let bestScore = Number.NEGATIVE_INFINITY;
@@ -186,11 +189,21 @@ export class WorldMap {
 
         const cx = x + width / 2;
         const cy = y + height / 2;
-        let score = -(Math.abs(cx - origin.x) + Math.abs(cy - origin.y));
-        if (ring.touchesPath) {
-          score += 14;
+        const distance = Math.abs(cx - origin.x) + Math.abs(cy - origin.y);
+        let score: number;
+        if (far) {
+          // Want it set apart on the outskirts: just beyond the comfort radius
+          // (not the far map corner) and clear of housing — a nuisance plot.
+          if (distance < minDistance) {
+            continue;
+          }
+          score = -distance - houseProximityBonus(houseTiles, cx, cy);
+        } else {
+          score = -distance + houseProximityBonus(houseTiles, cx, cy);
+          if (ring.touchesPath) {
+            score += 14;
+          }
         }
-        score += houseProximityBonus(houseTiles, cx, cy);
 
         if (score > bestScore) {
           bestScore = score;

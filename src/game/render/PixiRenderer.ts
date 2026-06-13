@@ -561,6 +561,23 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  if (building.kind === "cemetery") {
+    // Quiet walled graveyard with rows of headstones.
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.fill(0x44503a);
+    graphics.rect(px + 2, py + 2, w - 4, h - 4);
+    graphics.stroke({ color: 0x6f6552, width: 2 });
+    for (let gy = py + 7; gy < py + h - 4; gy += 9) {
+      for (let gx = px + 6; gx < px + w - 5; gx += 9) {
+        graphics.rect(gx - 1, gy, 2, 5);
+        graphics.fill(0xb9bcc2);
+        graphics.rect(gx - 2.5, gy + 1, 5, 1.5);
+        graphics.fill(0xb9bcc2);
+      }
+    }
+    return;
+  }
+
   const capacity = building.capacity ?? 1;
   const level =
     building.level ?? (capacity >= 24 ? 4 : capacity >= 12 ? 3 : capacity >= 6 ? 2 : 1);

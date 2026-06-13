@@ -1,6 +1,6 @@
 import type { Agent, AgentState, Building, BuildingKind, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
-import { ADULT_AGE, ELDER_AGE, REDEVELOP_WOOD_COST } from "../Simulation";
+import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
 
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
@@ -20,6 +20,7 @@ const PASTURE_WOOD_COST = 12;
 const POWERPLANT_WOOD_COST = 16;
 const FACTORY_WOOD_COST = 16;
 const STATION_WOOD_COST = 14;
+const CEMETERY_WOOD_COST = 10;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -436,7 +437,7 @@ export class AgentBrain {
     if (!house) {
       return false;
     }
-    if (agent.inventory.wood < REDEVELOP_WOOD_COST) {
+    if (agent.inventory.wood < simulation.redevelopCost(house)) {
       this.setState(agent, simulation, "FindTree");
       return true;
     }
@@ -477,7 +478,7 @@ export class AgentBrain {
       return;
     }
 
-    agent.inventory.wood = Math.max(0, agent.inventory.wood - REDEVELOP_WOOD_COST);
+    agent.inventory.wood = Math.max(0, agent.inventory.wood - simulation.redevelopCost(house));
     simulation.levelUpHouse(house);
     agent.projectBuildingId = undefined;
     agent.target = undefined;
@@ -576,9 +577,13 @@ export class AgentBrain {
       | "powerplant"
       | "factory"
       | "station"
+      | "cemetery"
       | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
+    } else if (simulation.needsCemetery()) {
+      // The dead must be laid to rest — built far from where people live.
+      kind = "cemetery";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
@@ -678,8 +683,12 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
-    const site = simulation.world.findBuildingSite(agent.position, 2, 2, (position) =>
-      simulation.isTileClaimed(position),
+    // Homes shun the cemetery's shadow, so the town spreads away from it.
+    const site = simulation.world.findBuildingSite(
+      agent.position,
+      2,
+      2,
+      (position) => simulation.isTileClaimed(position) || simulation.isNearNuisance(position),
     );
     const door = site ? { x: site.x, y: site.y + 1 } : undefined;
     const path = door
@@ -722,13 +731,24 @@ export class AgentBrain {
       "powerplant",
       "factory",
       "station",
+      "cemetery",
     ]);
-    const threeTall = new Set(["church", "pasture", "powerplant", "factory"]);
+    const threeTall = new Set(["church", "pasture", "powerplant", "factory", "cemetery"]);
     const width = threeWide.has(kind) ? 3 : 2;
     const height = threeTall.has(kind) ? 3 : 2;
-    const site = simulation.world.findBuildingSite(agent.position, width, height, (position) =>
-      simulation.isTileClaimed(position),
-    );
+    // The cemetery is sited remotely (away from the village centre and housing);
+    // everything else slots in near the builder, close to the village.
+    const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
+    const site =
+      kind === "cemetery"
+        ? simulation.world.findBuildingSite(
+            roundVec(simulation.villageCenter()),
+            width,
+            height,
+            isClaimed,
+            { far: true, minDistance: 16 },
+          )
+        : simulation.world.findBuildingSite(agent.position, width, height, isClaimed);
     if (!site) {
       return false;
     }
@@ -1479,11 +1499,12 @@ export class AgentBrain {
     if (!house) {
       return false; // nothing left to densify — allow distant sprawl.
     }
-    if (agent.inventory.wood < HOUSE_WOOD_COST) {
+    const cost = simulation.redevelopCost(house);
+    if (agent.inventory.wood < cost) {
       this.setState(agent, simulation, "FindTree");
       return true;
     }
-    agent.inventory.wood -= HOUSE_WOOD_COST;
+    agent.inventory.wood -= cost;
     simulation.levelUpHouse(house);
     this.moveInto(agent, simulation, house, "joined a denser household");
     return true;
@@ -1779,6 +1800,9 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "station") {
     return STATION_WOOD_COST;
+  }
+  if (kind === "cemetery") {
+    return CEMETERY_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }
