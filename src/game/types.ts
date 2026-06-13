@@ -15,7 +15,8 @@ export type TileType =
   | "Berry"
   | "FieldEmpty"
   | "FieldGrowing"
-  | "FieldRipe";
+  | "FieldRipe"
+  | "Stump";
 
 export type AgentState =
   | "Idle"
@@ -57,7 +58,14 @@ export type Building = {
   door: Vec2;
   stage: BuildingStage;
   ownerId?: string;
+  builtAtDay?: number;
+  durability?: number;
 };
+
+export type InspectionTarget =
+  | { kind: "agent"; agentId: string }
+  | { kind: "building"; buildingId: string }
+  | { kind: "tile"; position: Vec2 };
 
 export type Agent = {
   id: string;
@@ -86,6 +94,8 @@ export type Agent = {
   homeSite?: Vec2;
   homeBuildingId?: string;
   spouseId?: string;
+  lifespan: number;
+  lastChildAt?: number;
   actionTimer: number;
   projectBuildingId?: string;
   socialCooldown?: number;
@@ -114,4 +124,5 @@ export type SimulationSnapshot = {
   era: number;
   foodStock: number;
   meals: number;
+  buildings: Building[];
 };

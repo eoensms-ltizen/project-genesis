@@ -27,7 +27,7 @@ const NATURE_TICK_SECONDS = 5;
 const BERRY_CAP = 140;
 const TREE_CAP = 320;
 
-const BIRTH_COOLDOWN_SECONDS = 45;
+const BIRTH_COOLDOWN_SECONDS = 12;
 const POPULATION_CAP = 30;
 
 // One in-game day passes in five real minutes; the clock starts at 08:00.
@@ -38,10 +38,16 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 
-// Residents age one year per in-game day; children come of age at 12.
+// Residents age one year per in-game day; children come of age at 12,
+// retire at 60, and pass away when they outlive their personal lifespan.
 export const ADULT_AGE = 12;
+export const ELDER_AGE = 60;
+const COUPLE_BIRTH_COOLDOWN_SECONDS = 90;
+const STUMP_REGROW_CHANCE = 0.03;
+const DURABILITY_DECAY_PER_TICK = 0.012;
+const EPISODE_CAP = 15;
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -81,6 +87,7 @@ export class Simulation {
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
   private readonly claimedTiles = new Set<string>();
+  private readonly episodes = new Map<string, GameLogEntry[]>();
   private traffic = new Map<number, number>();
   private elapsedSeconds = 0;
   private natureTimer = 0;
@@ -136,7 +143,7 @@ export class Simulation {
     const spawn = this.findSpawnPosition(position);
     const agent = createRandomAgent(spawn, this.takenNames());
     this.agents.push(agent);
-    this.log(`${agent.name} spawned.`);
+    this.log(`${agent.name} spawned.`, [agent]);
     this.notifyChanged();
   }
 
@@ -231,6 +238,12 @@ export class Simulation {
 
   setBuildingStage(building: Building, stage: BuildingStage) {
     building.stage = stage;
+    if (stage === "built") {
+      building.builtAtDay = Math.floor(
+        (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
+      );
+      building.durability = 100;
+    }
     const tileType: TileType =
       stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
     for (const position of footprintTiles(building)) {
@@ -282,6 +295,11 @@ export class Simulation {
           home: agent.home ? { ...agent.home } : undefined,
           homeSite: agent.homeSite ? { ...agent.homeSite } : undefined,
           homeBuildingId: agent.homeBuildingId,
+          spouseId: agent.spouseId,
+          lifespan: agent.lifespan,
+          lastChildAt: agent.lastChildAt,
+          projectBuildingId: agent.projectBuildingId,
+          eatPlan: undefined,
         })),
         buildings: this.buildings.map((building) => ({
           ...building,
@@ -330,18 +348,42 @@ export class Simulation {
     }
   }
 
-  log(message: string) {
-    this.logs.push({
+  log(message: string, participants?: { id: string }[]) {
+    const entry: GameLogEntry = {
       id: `log-${this.nextLogId++}`,
       time: this.elapsedSeconds,
       message,
-    });
+    };
+    this.logs.push(entry);
 
     while (this.logs.length > 80) {
       this.logs.shift();
     }
 
+    if (participants) {
+      for (const participant of participants) {
+        const history = this.episodes.get(participant.id) ?? [];
+        history.push(entry);
+        while (history.length > EPISODE_CAP) {
+          history.shift();
+        }
+        this.episodes.set(participant.id, history);
+      }
+    }
+
     this.notifyChanged();
+  }
+
+  getEpisodes(agentId: string): GameLogEntry[] {
+    return [...(this.episodes.get(agentId) ?? [])];
+  }
+
+  getTrafficAt(position: Vec2): number {
+    const tile = this.world.getTile(position);
+    if (!tile) {
+      return 0;
+    }
+    return this.traffic.get(tile.y * this.world.width + tile.x) ?? 0;
   }
 
   notifyChanged() {
@@ -366,6 +408,10 @@ export class Simulation {
       era: this.era,
       foodStock: this.foodStock,
       meals: this.meals,
+      buildings: this.buildings.map((building) => ({
+        ...building,
+        door: { ...building.door },
+      })),
     };
   }
 
@@ -388,6 +434,21 @@ export class Simulation {
       }
     }
 
+    for (const tile of this.world.tiles) {
+      if (tile.type === "Stump" && Math.random() < STUMP_REGROW_CHANCE) {
+        if (!this.isTileClaimed(tile)) {
+          this.world.setTile(tile, "Tree");
+        }
+      }
+    }
+
+    // Buildings weather slowly over time.
+    for (const building of this.buildings) {
+      if (building.stage === "built" && building.durability !== undefined) {
+        building.durability = Math.max(0, building.durability - DURABILITY_DECAY_PER_TICK);
+      }
+    }
+
     if (berries.length === 0) {
       this.world.seedBerryCluster();
       this.log("Wild berries sprouted in the valley.");
@@ -404,7 +465,7 @@ export class Simulation {
 
     if (trees.length > 0 && trees.length < TREE_CAP) {
       for (const tree of trees) {
-        if (Math.random() < 0.012) {
+        if (Math.random() < 0.008) {
           this.spreadTile(tree, "Tree");
         }
       }
@@ -519,10 +580,10 @@ export class Simulation {
         if (missing <= 0) {
           break;
         }
-        if (agent.job === "none" && agent.age >= ADULT_AGE) {
+        if (agent.job === "none" && agent.age >= ADULT_AGE && agent.age < ELDER_AGE) {
           agent.job = job;
           missing -= 1;
-          this.log(`${agent.name} became a ${job}.`);
+          this.log(`${agent.name} became a ${job}.`, [agent]);
         }
       }
     }
@@ -543,9 +604,17 @@ export class Simulation {
         continue;
       }
       const spouse = this.agents.find((other) => other.id === agent.spouseId);
-      if (spouse) {
-        couples.push([agent, spouse]);
+      if (!spouse) {
+        continue;
       }
+      if (agent.age >= ELDER_AGE || spouse.age >= ELDER_AGE) {
+        continue;
+      }
+      const lastChildAt = Math.max(agent.lastChildAt ?? -Infinity, spouse.lastChildAt ?? -Infinity);
+      if (this.elapsedSeconds - lastChildAt < COUPLE_BIRTH_COOLDOWN_SECONDS) {
+        continue;
+      }
+      couples.push([agent, spouse]);
     }
     if (couples.length === 0) {
       return;
@@ -569,9 +638,15 @@ export class Simulation {
     baby.age = 0;
     baby.home = { ...home };
     baby.homeBuildingId = parentA.homeBuildingId;
+    parentA.lastChildAt = this.elapsedSeconds;
+    parentB.lastChildAt = this.elapsedSeconds;
     this.agents.push(baby);
     this.lastBirthAt = this.elapsedSeconds;
-    this.log(`${parentA.name} and ${parentB.name} had a baby: ${baby.name}! 👶`);
+    this.log(`${parentA.name} and ${parentB.name} had a baby: ${baby.name}! 👶`, [
+      parentA,
+      parentB,
+      baby,
+    ]);
     this.notifyChanged();
   }
 
@@ -587,13 +662,58 @@ export class Simulation {
     }
     this.lastAgedDayIndex = dayIndex;
 
+    const deceased: Agent[] = [];
     for (const agent of this.agents) {
       agent.age += 1;
       if (agent.age === ADULT_AGE) {
-        this.log(`${agent.name} came of age. 🎓`);
+        this.log(`${agent.name} came of age. 🎓`, [agent]);
+      } else if (agent.age === ELDER_AGE) {
+        agent.job = "none";
+        this.log(`${agent.name} retired as an elder. 🦳`, [agent]);
+      }
+      if (agent.age > agent.lifespan) {
+        deceased.push(agent);
       }
     }
+    for (const agent of deceased) {
+      this.passAway(agent);
+    }
     this.notifyChanged();
+  }
+
+  private passAway(agent: Agent) {
+    this.log(`${agent.name} passed away peacefully at ${agent.age}. 🕯️`);
+
+    // Release whatever the agent was holding onto.
+    if (agent.target) {
+      this.releaseClaim(agent.target);
+    }
+    if (agent.projectBuildingId) {
+      const pending = this.getBuilding(agent.projectBuildingId);
+      if (pending && pending.stage !== "built") {
+        this.cancelBuilding(pending);
+      }
+    }
+
+    // The spouse is widowed; their shared house passes to them.
+    const spouse = agent.spouseId
+      ? this.agents.find((other) => other.id === agent.spouseId)
+      : undefined;
+    if (spouse) {
+      spouse.spouseId = undefined;
+    }
+    for (const building of this.buildings) {
+      if (building.ownerId === agent.id) {
+        building.ownerId =
+          spouse && spouse.homeBuildingId === building.id ? spouse.id : undefined;
+      }
+    }
+
+    this.episodes.delete(agent.id);
+    const index = this.agents.indexOf(agent);
+    if (index >= 0) {
+      this.agents.splice(index, 1);
+    }
   }
 
   /** Removes an unbuilt building and reverts its tiles (used when plans are abandoned). */

@@ -17,6 +17,7 @@ const MOVE_COSTS: Record<TileType, number> = {
   FieldEmpty: 1.3,
   FieldGrowing: 1.3,
   FieldRipe: 1.3,
+  Stump: 1.15,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
 };
@@ -37,6 +38,7 @@ const TILE_CODES: Record<TileType, string> = {
   FieldEmpty: "e",
   FieldGrowing: "c",
   FieldRipe: "p",
+  Stump: "u",
 };
 
 const CODE_TILES: Record<string, TileType> = Object.fromEntries(

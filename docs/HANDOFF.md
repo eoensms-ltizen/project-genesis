@@ -106,7 +106,12 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Social chats: free residents who pass within 1.6 tiles stop for a 2.5s chat (speech bubble, log, 40s cooldown), then resume what they were doing
 - Marriage: single adults of opposite gender who chat may marry (40%) when at least one has a house; the couple shares one home (a pending house plan of the mover is cancelled)
 - Family births: babies are born to married couples at their home (replaces random spawning); children wander near home, do not work, and render smaller
-- Aging: residents age one year per in-game day; children come of age at 12 (logged)
+- Aging and lifecycle: one year per in-game day; stages Baby/Child/Youth/Adult/Elder; elders (60+) retire and stroll; residents die when they outlive their personal lifespan (65-90), widowing their spouse and passing the house on (or leaving it empty)
+- Homeless adults move into empty houses left by the deceased before building new ones
+- Click inspection: clicking the map selects a resident (life stage, age/lifespan, job, condition, family, personal episode history), a building (owner, built date, durability, size), or a tile (type, foot traffic)
+- Per-agent episodes: major life events (spawn, marriage, babies, milestones, buildings, jobs) are kept per resident (cap 15) via log() participants
+- Chopped trees leave stumps that regrow into trees over time; buildings weather slowly (durability display only)
+- Per-couple birth cooldown (90s) replaces the single global pacing
 - Time controls: pause / 1x / 2x / 4x speed buttons in the panel
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI

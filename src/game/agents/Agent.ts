@@ -55,6 +55,7 @@ export function createRandomAgent(position: Vec2, takenNames?: Set<string>): Age
       stamina: 100,
       hunger: 15,
     },
+    lifespan: 65 + Math.floor(Math.random() * 26),
     position: { ...position },
     inventory: {
       wood: 0,

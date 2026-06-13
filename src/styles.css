@@ -120,6 +120,59 @@ button[data-active="true"] {
   color: #f3eadb;
 }
 
+.inspector {
+  border: 1px solid #3a4434;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(20, 26, 18, 0.6);
+}
+
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-head button {
+  padding: 2px 8px;
+}
+
+.inspector-body strong {
+  color: #f3eadb;
+  text-transform: capitalize;
+}
+
+.inspector-body dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+
+.inspector-body dt {
+  color: #8fa183;
+}
+
+.inspector-body dd {
+  margin: 0;
+  color: #d6dccf;
+}
+
+.inspector-body h3 {
+  margin: 6px 0 4px;
+  font-size: 13px;
+  color: #d6dccf;
+}
+
+.episode-list {
+  display: grid;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
 .panel-section {
   display: grid;
   gap: 10px;

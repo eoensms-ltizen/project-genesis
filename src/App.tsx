@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
 import { ERA_NAMES, SAVE_KEY } from "./game/Simulation";
-import type { Agent, GameClock, GameLogEntry, Vec2 } from "./game/types";
+import type {
+  Agent,
+  Building,
+  GameClock,
+  GameLogEntry,
+  InspectionTarget,
+  Vec2,
+} from "./game/types";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
 import { GameLog } from "./ui/GameLog";
+import { Inspector } from "./ui/Inspector";
 
 const TICK_MS = 160;
 
@@ -21,6 +29,8 @@ export default function App() {
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
   const speedRef = useRef(1);
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [selection, setSelection] = useState<InspectionTarget | null>(null);
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
@@ -41,15 +51,20 @@ export default function App() {
         setEra(snapshot.era);
         setFoodStock(snapshot.foodStock);
         setMeals(snapshot.meals);
+        setBuildings(snapshot.buildings);
         forceFrame((value) => value + 1);
       },
       onTileClick: (position) => {
-        if (!gameRef.current?.isPlacementMode()) {
+        if (!gameRef.current) {
           return;
         }
-        gameRef.current.addRandomAgent(position);
-        gameRef.current.setPlacementMode(false);
-        setPendingPlacement(false);
+        if (gameRef.current.isPlacementMode()) {
+          gameRef.current.addRandomAgent(position);
+          gameRef.current.setPlacementMode(false);
+          setPendingPlacement(false);
+          return;
+        }
+        setSelection(gameRef.current.inspectAt(position));
       },
     });
 
@@ -123,6 +138,29 @@ export default function App() {
           <span>{agents.length} residents</span>
         </header>
         {clockLabel && <p className="clock-line">{clockLabel}</p>}
+        {selection && (
+          <Inspector
+            selection={selection}
+            agents={agents}
+            buildings={buildings}
+            episodes={
+              selection.kind === "agent"
+                ? (gameRef.current?.simulation.getEpisodes(selection.agentId) ?? [])
+                : []
+            }
+            tileType={
+              selection.kind === "tile"
+                ? gameRef.current?.simulation.world.getTile(selection.position)?.type
+                : undefined
+            }
+            tileTraffic={
+              selection.kind === "tile"
+                ? gameRef.current?.simulation.getTrafficAt(selection.position)
+                : undefined
+            }
+            onClose={() => setSelection(null)}
+          />
+        )}
         <ControlPanel
           onAddRandom={addRandomAgent}
           onPlaceAgent={enablePlacement}

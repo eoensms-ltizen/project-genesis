@@ -190,6 +190,13 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     }
   }
 
+  if (type === "Stump") {
+    graphics.circle(px + 8, py + 8, 3.4);
+    graphics.fill(0x6d4b2d);
+    graphics.circle(px + 8, py + 8, 1.6);
+    graphics.fill(0x8f6a40);
+  }
+
   if (type === "Berry") {
     graphics.circle(px + 5, py + 6, 1.6);
     graphics.fill(0xc0394b);
@@ -362,5 +369,7 @@ function tileColor(type: TileType): number {
       return 0x4d3c26;
     case "FieldRipe":
       return 0x554427;
+    case "Stump":
+      return 0x243c24;
   }
 }

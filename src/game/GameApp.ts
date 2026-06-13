@@ -1,6 +1,6 @@
 import { PixiRenderer } from "./render/PixiRenderer";
 import { Simulation } from "./Simulation";
-import type { SimulationSnapshot, Vec2 } from "./types";
+import type { InspectionTarget, SimulationSnapshot, Vec2 } from "./types";
 
 type GameAppOptions = {
   onChange: (snapshot: SimulationSnapshot) => void;
@@ -47,6 +47,35 @@ export class GameApp {
 
   isPlacementMode(): boolean {
     return this.placementMode;
+  }
+
+  /** What lives at the clicked tile: a resident, a building, or the terrain. */
+  inspectAt(position: Vec2): InspectionTarget {
+    let nearest: { id: string } | undefined;
+    let nearestDistance = 1.1;
+    for (const agent of this.simulation.agents) {
+      const d = Math.hypot(agent.position.x - position.x, agent.position.y - position.y);
+      if (d < nearestDistance) {
+        nearestDistance = d;
+        nearest = agent;
+      }
+    }
+    if (nearest) {
+      return { kind: "agent", agentId: nearest.id };
+    }
+
+    const building = this.simulation.buildings.find(
+      (candidate) =>
+        position.x >= candidate.x &&
+        position.x < candidate.x + candidate.width &&
+        position.y >= candidate.y &&
+        position.y < candidate.y + candidate.height,
+    );
+    if (building) {
+      return { kind: "building", buildingId: building.id };
+    }
+
+    return { kind: "tile", position: { ...position } };
   }
 
   destroy() {

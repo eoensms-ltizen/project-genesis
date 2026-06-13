@@ -1,6 +1,6 @@
 import type { Agent, AgentState, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
-import { ADULT_AGE } from "../Simulation";
+import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
 
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
@@ -165,13 +165,16 @@ export class AgentBrain {
       return;
     }
 
-    // Children play near home instead of working.
-    if (agent.age < ADULT_AGE) {
+    // Children play near home; elders are retired and stroll the village.
+    if (agent.age < ADULT_AGE || agent.age >= ELDER_AGE) {
       this.wanderNearHome(agent, simulation);
       return;
     }
 
     if (!agent.home) {
+      if (this.tryClaimEmptyHouse(agent, simulation)) {
+        return;
+      }
       if (!agent.homeSite) {
         this.setState(agent, simulation, "FindHouseSite");
         return;
@@ -309,7 +312,7 @@ export class AgentBrain {
     }
 
     if (agent.target) {
-      simulation.world.setTile(agent.target, "Grass");
+      simulation.world.setTile(agent.target, "Stump");
       simulation.releaseClaim(agent.target);
     }
     agent.inventory.wood += 1;
@@ -518,9 +521,9 @@ export class AgentBrain {
     if (building.kind === "house") {
       agent.home = { ...building.door };
       agent.homeSite = undefined;
-      simulation.log(`${agent.name} finished their house.`);
+      simulation.log(`${agent.name} finished their house.`, [agent]);
     } else {
-      simulation.log(`${agent.name} built the village ${building.kind}!`);
+      simulation.log(`${agent.name} built the village ${building.kind}!`, [agent]);
     }
     agent.projectBuildingId = undefined;
     agent.target = undefined;
@@ -770,6 +773,12 @@ export class AgentBrain {
     const mover = homeOwner === a ? b : a;
 
     // The mover gives up any house of their own and any pending house plan.
+    if (mover.homeBuildingId && mover.homeBuildingId !== homeOwner.homeBuildingId) {
+      const oldHouse = simulation.getBuilding(mover.homeBuildingId);
+      if (oldHouse && oldHouse.ownerId === mover.id) {
+        oldHouse.ownerId = undefined;
+      }
+    }
     if (mover.projectBuildingId) {
       const pending = simulation.getBuilding(mover.projectBuildingId);
       if (pending && pending.stage !== "built" && pending.kind === "house") {
@@ -783,7 +792,27 @@ export class AgentBrain {
 
     a.spouseId = b.id;
     b.spouseId = a.id;
-    simulation.log(`${a.name} and ${b.name} got married! 💍`);
+    simulation.log(`${a.name} and ${b.name} got married! 💍`, [a, b]);
+  }
+
+  /** Homeless adults move into a built house whose owner has passed away. */
+  private tryClaimEmptyHouse(agent: Agent, simulation: Simulation): boolean {
+    const empty = simulation.buildings.find(
+      (building) =>
+        building.kind === "house" &&
+        building.stage === "built" &&
+        (!building.ownerId ||
+          !simulation.agents.some((other) => other.id === building.ownerId)),
+    );
+    if (!empty) {
+      return false;
+    }
+
+    empty.ownerId = agent.id;
+    agent.home = { ...empty.door };
+    agent.homeBuildingId = empty.id;
+    simulation.log(`${agent.name} moved into an empty house.`, [agent]);
+    return true;
   }
 
   private wanderNearHome(agent: Agent, simulation: Simulation) {
