@@ -6,21 +6,23 @@ const WATER_CLUSTER_COUNT = 4;
 const BERRY_CLUSTER_COUNT = 7;
 
 // RimWorld-style per-tile movement cost. Lower is faster; Infinity is impassable.
+// Roads are far quicker than open ground, so a road network is worth building —
+// off-road travel works but is slow, which is what drives roads to grow.
 const MOVE_COSTS: Record<TileType, number> = {
   Road: 0.6,
-  Dirt: 0.75,
-  Grass: 1,
-  HouseSite: 1,
-  House: 2.5,
-  HouseFoundation: 2,
-  Berry: 1.25,
-  FieldEmpty: 1.3,
-  FieldGrowing: 1.3,
-  FieldRipe: 1.3,
-  Stump: 1.15,
   Plaza: 0.55,
   Lamp: 0.6,
+  Dirt: 0.9,
   Rail: 1.4,
+  Grass: 2,
+  HouseSite: 1.5,
+  HouseFoundation: 2,
+  House: 1.2, // applies to the door tile only; other house tiles are impassable
+  Berry: 2,
+  FieldEmpty: 2.2,
+  FieldGrowing: 2.2,
+  FieldRipe: 2.2,
+  Stump: 2.2,
   Tree: Number.POSITIVE_INFINITY,
   Water: Number.POSITIVE_INFINITY,
   Fountain: Number.POSITIVE_INFINITY,
@@ -62,6 +64,9 @@ export class WorldMap {
 
   // Bumped on every tile change so the renderer can skip redrawing an unchanged world.
   private changeVersion = 0;
+  // Built buildings are solid except their door tile, so residents enter only
+  // through the doorway. Maintained by the simulation as buildings come and go.
+  private doorTiles = new Set<number>();
 
   constructor(width = 64, height = 64) {
     this.width = width;
@@ -129,7 +134,19 @@ export class WorldMap {
 
   moveCost(position: Vec2): number {
     const tile = this.getTile(position);
-    return tile ? MOVE_COSTS[tile.type] : Number.POSITIVE_INFINITY;
+    if (!tile) {
+      return Number.POSITIVE_INFINITY;
+    }
+    // A built house is solid; only its door tile can be walked through.
+    if (tile.type === "House" && !this.doorTiles.has(position.y * this.width + position.x)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    return MOVE_COSTS[tile.type];
+  }
+
+  /** Register which House tiles are passable doorways. */
+  setDoors(positions: Vec2[]) {
+    this.doorTiles = new Set(positions.map((p) => p.y * this.width + p.x));
   }
 
   findNearestType(origin: Vec2, type: TileType): Vec2 | undefined {

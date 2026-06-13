@@ -47,6 +47,12 @@
   power plant/factory within 6 tiles of homes is decommissioned and rebuilt on
   the outskirts. Verified (8 injected near-home fields cleared to 0; a forced
   near-home power plant was relocated outward).
+- Roads as a movement driver: built houses are now solid except their door tile
+  (WorldMap tracks door tiles; residents enter only through the doorway), and
+  off-road travel is much slower (grass 1→2, roads ~3× faster). Foot traffic
+  concentrates and wears desire paths into a growing road network. Verified
+  (door cost 1.2 vs impassable interior; road tiles grew 17→63 by 40 residents,
+  no deadlock).
 
 ## 2026-06-12
 

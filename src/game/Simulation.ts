@@ -260,6 +260,7 @@ export class Simulation {
       this.world = WorldMap.createRandom();
       this.log("A new valley is ready.");
     }
+    this.refreshDoors();
     this.recomputeAmbiance();
   }
 
@@ -391,7 +392,19 @@ export class Simulation {
     if (stage === "built" && building.kind === "station") {
       this.layStationRail(building);
     }
+    this.refreshDoors();
     this.notifyChanged();
+  }
+
+  /** A built building is solid except its door; tell the world which tiles those are. */
+  private refreshDoors() {
+    const doors: Vec2[] = [];
+    for (const building of this.buildings) {
+      if (building.stage === "built") {
+        doors.push(building.door);
+      }
+    }
+    this.world.setDoors(doors);
   }
 
   claimBuildingFootprint(building: Building) {
@@ -904,6 +917,7 @@ export class Simulation {
     if (index >= 0) {
       this.buildings.splice(index, 1);
     }
+    this.refreshDoors();
     this.notifyChanged();
   }
 
@@ -1793,6 +1807,7 @@ export class Simulation {
     if (index >= 0) {
       this.buildings.splice(index, 1);
     }
+    this.refreshDoors();
     this.log("An abandoned house crumbled back into the land. 🍂");
     this.notifyChanged();
   }
