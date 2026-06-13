@@ -48,9 +48,72 @@ button[data-active="true"] {
 }
 
 .game-surface {
+  position: relative;
   min-width: 0;
   background: #101310;
   overflow: hidden;
+}
+
+.hud-bar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.hud-clock {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(16, 19, 16, 0.72);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+
+.hud-date {
+  color: #f3eadb;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hud-stats {
+  color: #c7d0bd;
+  font-size: 12px;
+}
+
+.hud-actions {
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.hud-speed {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  background: rgba(16, 19, 16, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.inspector-overlay {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: min(320px, calc(100% - 16px));
+  max-height: 70%;
+  overflow: auto;
+  border-radius: 10px;
+  background: rgba(16, 19, 16, 0.92);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
 }
 
 .canvas-host {
@@ -72,7 +135,56 @@ button[data-active="true"] {
   gap: 14px;
   min-width: 0;
   overflow: hidden;
-  padding: 18px;
+  padding: 14px;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.panel-tabs button {
+  flex: 1;
+  min-height: 40px;
+  font-weight: 600;
+}
+
+.tab-count {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 11px;
+}
+
+.panel-grow {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-list-full {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+}
+
+.agent-row-click {
+  cursor: pointer;
+}
+
+.agent-row-click:hover {
+  border-color: #4a5a44;
+  background: #283028;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .panel-header {
@@ -247,19 +359,28 @@ button[data-active="true"] {
 
 @media (max-width: 900px) {
   body {
-    overflow: auto;
+    overflow: hidden;
   }
 
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 62vh auto;
-    height: auto;
-    min-height: 100vh;
+    grid-template-rows: 1fr 42vh;
+    height: 100vh;
+    min-height: 0;
   }
 
   .side-panel {
     border-left: 0;
     border-top: 1px solid #30382f;
-    min-height: 38vh;
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .hud-bar {
+    top: max(8px, env(safe-area-inset-top));
+  }
+
+  .panel-tabs button {
+    min-height: 44px;
   }
 }

@@ -91,6 +91,10 @@ export class GameApp {
     return { kind: "tile", position: { ...position } };
   }
 
+  resetCamera() {
+    this.renderer.resetCamera();
+  }
+
   destroy() {
     this.renderer.destroy();
   }

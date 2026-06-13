@@ -121,6 +121,8 @@ Note: The repository was changed to `PUBLIC` because the current GitHub plan did
 - Hunter job (population 8+): chases the nearest wild animal and either hunts it for food (boars always) or tames it (deer/rabbit) once a pasture exists and the herd has room
 - Pasture (3x3 fenced pen, communal project after the church): tamed livestock graze near it and slowly add food to the village stock
 - Clicking an animal inspects its kind, status (wild/tamed), health, and position
+- Camera: drag to pan, pinch or mouse-wheel to zoom (1x-6x), tap/click to inspect (tap-vs-drag discriminated by a 6px slop); ⌖ button recenters
+- Mobile layout: map fills the screen with a floating HUD bar (clock/era/food + speed + recenter) and a tabbed bottom panel (World / People / Log); tapping a resident row in People opens the inspector overlay
 - Dev aid: in dev builds the GameApp is exposed as window.__genesis for inspection
 - Unique resident names (24-name pool, generation suffix when exhausted)
 - Game clock (1 day = 5 real minutes, 20 days = 1 year) with date/time UI

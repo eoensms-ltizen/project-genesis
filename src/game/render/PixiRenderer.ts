@@ -24,6 +24,19 @@ export class PixiRenderer {
   private lastWorldVersion = -1;
   private initialized = false;
 
+  // User-controlled camera on top of the fit-to-screen base transform.
+  private userZoom = 1;
+  private panX = 0;
+  private panY = 0;
+  private baseScale = 1;
+  private baseLeft = 0;
+  private baseTop = 0;
+  private readonly activePointers = new Map<number, { x: number; y: number }>();
+  private dragStart: { x: number; y: number; panX: number; panY: number } | null = null;
+  private dragMoved = false;
+  private pinchStartDist = 0;
+  private pinchStartZoom = 1;
+
   constructor(host: HTMLElement, options: RendererOptions) {
     this.host = host;
     this.options = options;
@@ -47,15 +60,136 @@ export class PixiRenderer {
     this.nightLayer.eventMode = "none";
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
-    this.app.stage.on("pointerdown", (event) => {
-      const local = this.worldLayer.toLocal(event.global);
-      this.options.onTileClick({
-        x: Math.floor(local.x / TILE_SIZE),
-        y: Math.floor(local.y / TILE_SIZE),
-      });
-    });
+
+    this.attachCameraControls();
 
     this.initialized = true;
+  }
+
+  /** Pointer drag pans, wheel/pinch zooms, and a clean tap inspects a tile. */
+  private attachCameraControls() {
+    const canvas = this.app.canvas;
+    canvas.style.touchAction = "none";
+
+    const TAP_SLOP = 6;
+
+    canvas.addEventListener("pointerdown", (event) => {
+      canvas.setPointerCapture?.(event.pointerId);
+      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (this.activePointers.size === 1) {
+        this.dragStart = { x: event.clientX, y: event.clientY, panX: this.panX, panY: this.panY };
+        this.dragMoved = false;
+      } else if (this.activePointers.size === 2) {
+        const [a, b] = [...this.activePointers.values()];
+        this.pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        this.pinchStartZoom = this.userZoom;
+        this.dragStart = null;
+      }
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (!this.activePointers.has(event.pointerId)) {
+        return;
+      }
+      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (this.activePointers.size === 2 && this.pinchStartDist > 0) {
+        const [a, b] = [...this.activePointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        this.setZoomAround((this.pinchStartZoom * dist) / this.pinchStartDist, mid);
+        return;
+      }
+
+      if (this.dragStart) {
+        const dx = event.clientX - this.dragStart.x;
+        const dy = event.clientY - this.dragStart.y;
+        if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) {
+          this.dragMoved = true;
+        }
+        this.panX = this.dragStart.panX + dx;
+        this.panY = this.dragStart.panY + dy;
+        this.clampPan();
+      }
+    });
+
+    const endPointer = (event: PointerEvent) => {
+      const wasSingle = this.activePointers.size === 1;
+      this.activePointers.delete(event.pointerId);
+      if (wasSingle && this.dragStart && !this.dragMoved) {
+        const rect = canvas.getBoundingClientRect();
+        const local = this.worldLayer.toLocal({
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        });
+        this.options.onTileClick({
+          x: Math.floor(local.x / TILE_SIZE),
+          y: Math.floor(local.y / TILE_SIZE),
+        });
+      }
+      if (this.activePointers.size < 2) {
+        this.pinchStartDist = 0;
+      }
+      if (this.activePointers.size === 0) {
+        this.dragStart = null;
+      }
+    };
+    canvas.addEventListener("pointerup", endPointer);
+    canvas.addEventListener("pointercancel", endPointer);
+
+    canvas.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+        this.setZoomAround(this.userZoom * factor, {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        });
+      },
+      { passive: false },
+    );
+  }
+
+  /** Zoom toward a screen point so the world under it stays put. */
+  private setZoomAround(nextZoom: number, screenPoint: { x: number; y: number }) {
+    const clamped = Math.max(1, Math.min(6, nextZoom));
+    const prevScale = this.baseScale * this.userZoom;
+    const nextScale = this.baseScale * clamped;
+    if (nextScale === prevScale) {
+      return;
+    }
+    // worldX = (screen - (baseLeft + pan)) / scale must be invariant.
+    const originX = this.baseLeft + this.panX;
+    const originY = this.baseTop + this.panY;
+    const worldX = (screenPoint.x - originX) / prevScale;
+    const worldY = (screenPoint.y - originY) / prevScale;
+    this.userZoom = clamped;
+    this.panX = screenPoint.x - this.baseLeft - worldX * nextScale;
+    this.panY = screenPoint.y - this.baseTop - worldY * nextScale;
+    this.clampPan();
+  }
+
+  private clampPan() {
+    const scale = this.baseScale * this.userZoom;
+    const worldW = 64 * TILE_SIZE * scale;
+    const worldH = 64 * TILE_SIZE * scale;
+    const viewW = this.app.screen.width;
+    const viewH = this.app.screen.height;
+    // Keep at least part of the world on screen.
+    const minX = Math.min(0, viewW - this.baseLeft - worldW);
+    const maxX = Math.max(0, -this.baseLeft);
+    const minY = Math.min(0, viewH - this.baseTop - worldH);
+    const maxY = Math.max(0, -this.baseTop);
+    this.panX = Math.max(minX, Math.min(maxX, this.panX));
+    this.panY = Math.max(minY, Math.min(maxY, this.panY));
+  }
+
+  resetCamera() {
+    this.userZoom = 1;
+    this.panX = 0;
+    this.panY = 0;
   }
 
   render(
@@ -145,19 +279,21 @@ export class PixiRenderer {
   private layoutWorld(world: WorldMap) {
     const worldPixelWidth = world.width * TILE_SIZE;
     const worldPixelHeight = world.height * TILE_SIZE;
-    const scale = Math.max(
+    this.baseScale = Math.max(
       0.6,
       Math.min(this.app.screen.width / worldPixelWidth, this.app.screen.height / worldPixelHeight),
     );
-    const left = Math.max(0, (this.app.screen.width - worldPixelWidth * scale) / 2);
-    const top = Math.max(0, (this.app.screen.height - worldPixelHeight * scale) / 2);
+    this.baseLeft = Math.max(0, (this.app.screen.width - worldPixelWidth * this.baseScale) / 2);
+    this.baseTop = Math.max(0, (this.app.screen.height - worldPixelHeight * this.baseScale) / 2);
 
-    this.worldLayer.scale.set(scale);
-    this.agentLayer.scale.set(scale);
-    this.nightLayer.scale.set(scale);
-    this.worldLayer.position.set(left, top);
-    this.agentLayer.position.set(left, top);
-    this.nightLayer.position.set(left, top);
+    const scale = this.baseScale * this.userZoom;
+    const left = this.baseLeft + this.panX;
+    const top = this.baseTop + this.panY;
+
+    for (const layer of [this.worldLayer, this.agentLayer, this.nightLayer]) {
+      layer.scale.set(scale);
+      layer.position.set(left, top);
+    }
   }
 }
 

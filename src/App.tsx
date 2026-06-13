@@ -33,6 +33,7 @@ export default function App() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [selection, setSelection] = useState<InspectionTarget | null>(null);
+  const [tab, setTab] = useState<"world" | "people" | "log">("world");
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
@@ -125,83 +126,135 @@ export default function App() {
     window.location.reload();
   };
 
-  const clockLabel = clock
-    ? `Year ${clock.year} · Day ${clock.day} · ${String(clock.hour).padStart(2, "0")}:${String(
-        clock.minute,
-      ).padStart(2, "0")} ${clock.isNight ? "🌙" : "☀️"} · ${
-        ERA_NAMES[era] ?? "Unknown"
-      } Era · 🌾 ${foodStock} · 🍲 ${meals}`
-    : "";
+  const recenter = () => gameRef.current?.resetCamera();
+
+  const speedOptions = [0, 1, 2, 4] as const;
 
   return (
     <main className="app-shell">
       <section className="game-surface" aria-label="Project Genesis map">
         <div ref={canvasHostRef} className="canvas-host" />
-      </section>
-      <aside className="side-panel">
-        <header className="panel-header">
-          <h1>Project Genesis</h1>
-          <span>{agents.length} residents</span>
-        </header>
-        {clockLabel && <p className="clock-line">{clockLabel}</p>}
-        {selection && (
-          <Inspector
-            selection={selection}
-            agents={agents}
-            buildings={buildings}
-            animals={animals}
-            episodes={
-              selection.kind === "agent"
-                ? (gameRef.current?.simulation.getEpisodes(selection.agentId) ?? [])
-                : []
-            }
-            tileType={
-              selection.kind === "tile"
-                ? gameRef.current?.simulation.world.getTile(selection.position)?.type
-                : undefined
-            }
-            tileTraffic={
-              selection.kind === "tile"
-                ? gameRef.current?.simulation.getTrafficAt(selection.position)
-                : undefined
-            }
-            onClose={() => setSelection(null)}
-          />
-        )}
-        <ControlPanel
-          onAddRandom={addRandomAgent}
-          onPlaceAgent={enablePlacement}
-          onReset={resetWorld}
-          onSpeedChange={changeSpeed}
-          placementActive={pendingPlacement}
-          speed={speed}
-        />
-        <AgentCreator onCreate={addRandomAgent} />
-        <section className="panel-section">
-          <h2>Residents</h2>
-          <div className="agent-list">
-            {agents.length === 0 ? (
-              <p className="muted">Add a resident to start the simulation.</p>
+
+        <div className="hud-bar">
+          <div className="hud-clock">
+            {clock ? (
+              <>
+                <span className="hud-date">
+                  Y{clock.year} · D{clock.day} ·{" "}
+                  {String(clock.hour).padStart(2, "0")}:{String(clock.minute).padStart(2, "0")}{" "}
+                  {clock.isNight ? "🌙" : "☀️"}
+                </span>
+                <span className="hud-stats">
+                  {ERA_NAMES[era] ?? "?"} · 👥{agents.length} · 🌾{foodStock} · 🍲{meals}
+                </span>
+              </>
             ) : (
-              agents.map((agent) => (
-                <article className="agent-row" key={agent.id}>
-                  <div>
-                    <strong>{agent.name}</strong>
-                    <span>
-                      {agent.job !== "none" ? `${agent.job} · ` : ""}
-                      {agent.state}
-                    </span>
-                  </div>
-                  <div>
-                    <span>Wood {agent.inventory.wood}</span>
-                    <span>Stamina {Math.round(agent.health.stamina)}</span>
-                  </div>
-                </article>
-              ))
+              <span className="hud-date">Loading…</span>
             )}
           </div>
-        </section>
-        <GameLog entries={logs} />
+          <div className="hud-actions">
+            {speedOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="hud-speed"
+                onClick={() => changeSpeed(option)}
+                data-active={speed === option}
+              >
+                {option === 0 ? "⏸" : `${option}×`}
+              </button>
+            ))}
+            <button type="button" className="hud-speed" onClick={recenter} title="Recenter">
+              ⌖
+            </button>
+          </div>
+        </div>
+
+        {selection && (
+          <div className="inspector-overlay">
+            <Inspector
+              selection={selection}
+              agents={agents}
+              buildings={buildings}
+              animals={animals}
+              episodes={
+                selection.kind === "agent"
+                  ? (gameRef.current?.simulation.getEpisodes(selection.agentId) ?? [])
+                  : []
+              }
+              tileType={
+                selection.kind === "tile"
+                  ? gameRef.current?.simulation.world.getTile(selection.position)?.type
+                  : undefined
+              }
+              tileTraffic={
+                selection.kind === "tile"
+                  ? gameRef.current?.simulation.getTrafficAt(selection.position)
+                  : undefined
+              }
+              onClose={() => setSelection(null)}
+            />
+          </div>
+        )}
+      </section>
+
+      <aside className="side-panel">
+        <nav className="panel-tabs">
+          <button type="button" data-active={tab === "world"} onClick={() => setTab("world")}>
+            World
+          </button>
+          <button type="button" data-active={tab === "people"} onClick={() => setTab("people")}>
+            People <span className="tab-count">{agents.length}</span>
+          </button>
+          <button type="button" data-active={tab === "log"} onClick={() => setTab("log")}>
+            Log
+          </button>
+        </nav>
+
+        {tab === "world" && (
+          <>
+            <ControlPanel
+              onAddRandom={addRandomAgent}
+              onPlaceAgent={enablePlacement}
+              onReset={resetWorld}
+              placementActive={pendingPlacement}
+            />
+            <AgentCreator onCreate={addRandomAgent} />
+          </>
+        )}
+
+        {tab === "people" && (
+          <section className="panel-section panel-grow">
+            <h2>Residents</h2>
+            <div className="agent-list agent-list-full">
+              {agents.length === 0 ? (
+                <p className="muted">Add a resident to start the simulation.</p>
+              ) : (
+                agents.map((agent) => (
+                  <article
+                    className="agent-row agent-row-click"
+                    key={agent.id}
+                    onClick={() => setSelection({ kind: "agent", agentId: agent.id })}
+                  >
+                    <div>
+                      <strong>{agent.name}</strong>
+                      <span>
+                        {agent.job !== "none" ? `${agent.job} · ` : ""}
+                        {agent.state}
+                      </span>
+                    </div>
+                    <div>
+                      <span>{agent.age}y</span>
+                      <span>Stamina {Math.round(agent.health.stamina)}</span>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        )}
+
+        {tab === "log" && <GameLog entries={logs} />}
       </aside>
     </main>
   );
