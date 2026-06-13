@@ -124,6 +124,16 @@ export type Agent = {
     stamina: number;
     hunger: number;
   };
+  // Soft needs that drive behaviour. 0 = desperate, 100 = fully satisfied.
+  // They drift down over time (personality sets the rate) and refill while the
+  // resident is doing the matching activity. The most urgent need picks the
+  // next action, which is what makes daily life emergent rather than scripted.
+  needs: {
+    social: number; // company, conversation
+    purpose: number; // contributing through work
+    faith: number; // worship at the church
+    leisure: number; // strolling, taking in the village
+  };
   position: Vec2;
   inventory: {
     wood: number;

@@ -60,6 +60,44 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "Wander",
 ]);
 
+// --- Needs (0..100 satisfaction) ----------------------------------------
+// Each soft need drains every second and refills while the resident performs
+// the matching activity. Personality scales both how fast a need drains and how
+// loudly it calls, so two residents in the same situation choose differently.
+const NEED_DECAY = { social: 0.09, purpose: 0.05, faith: 0.045, leisure: 0.06 };
+const NEED_FILL = { social: 22, purpose: 3, faith: 6, leisure: 8 };
+const PRAY_DURATION_SECONDS = 8;
+// A soft need must reach this urgency to pull an adult away from work.
+const NEED_ACT_THRESHOLD = 55;
+// Work is the baseline drive, so it always carries at least this much pull.
+const WORK_BASELINE_URGENCY = 18;
+
+// While in one of these states the resident is contributing, which feeds the
+// sense-of-purpose need; everything else lets it drain.
+const WORKING_STATES: ReadonlySet<AgentState> = new Set([
+  "FindTree",
+  "MoveToTree",
+  "ChopTree",
+  "FindHouseSite",
+  "MoveToHouseSite",
+  "PlanHouse",
+  "BuildHouse",
+  "MoveToFarm",
+  "FarmWork",
+  "MoveToPave",
+  "Pave",
+  "MoveToKitchen",
+  "Cook",
+  "MoveToStump",
+  "Transplant",
+  "MoveToPlant",
+  "Plant",
+  "MoveToHunt",
+  "Hunt",
+  "MoveToTame",
+  "Tame",
+]);
+
 export class AgentBrain {
   update(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     const hungerRate = agent.state === "Sleep" ? 0.12 : 0.35;
@@ -75,6 +113,8 @@ export class AgentBrain {
     if (agent.socialCooldown === 0 && CHATTABLE_STATES.has(agent.state)) {
       this.tryStartChat(agent, simulation);
     }
+
+    this.updateNeeds(agent, simulation, deltaSeconds);
 
     switch (agent.state) {
       case "Idle":
@@ -193,27 +233,30 @@ export class AgentBrain {
   }
 
   private decideNextAction(agent: Agent, simulation: Simulation) {
+    // Night and acute survival are structural: they override every soft need,
+    // including the drive to build a first home.
     if (simulation.isNight()) {
       this.goSleep(agent, simulation);
       return;
     }
-
     if (agent.health.hunger >= HUNGER_SEEK_THRESHOLD) {
       this.setState(agent, simulation, "FindFood");
       return;
     }
-
     if (agent.health.stamina < STAMINA_EXHAUSTED) {
       this.goRest(agent, simulation);
       return;
     }
 
-    // Children play near home; elders are retired and stroll the village.
+    // Children and elders are outside working life; they live by company and
+    // leisure, whichever pulls harder.
     if (agent.age < ADULT_AGE || agent.age >= ELDER_AGE) {
-      this.wanderNearHome(agent, simulation);
+      this.liveByLeisure(agent, simulation);
       return;
     }
 
+    // A homeless adult must establish a home before joining the village's
+    // need-driven daily life.
     if (!agent.home) {
       if (this.tryClaimEmptyHouse(agent, simulation)) {
         return;
@@ -233,23 +276,6 @@ export class AgentBrain {
       return;
     }
 
-    if (agent.health.stamina < STAMINA_TIRED) {
-      this.goRest(agent, simulation);
-      return;
-    }
-
-    if (agent.health.hunger >= HUNGER_SNACK_THRESHOLD) {
-      this.setState(agent, simulation, "FindFood");
-      return;
-    }
-
-    // Morning worship gathering at the church.
-    if (simulation.isWorshipMorning() && simulation.getChurch()) {
-      if (this.goWorship(agent, simulation)) {
-        return;
-      }
-    }
-
     // Resume an unfinished construction project (e.g., after loading a save).
     if (agent.projectBuildingId) {
       const building = simulation.getBuilding(agent.projectBuildingId);
@@ -264,35 +290,198 @@ export class AgentBrain {
       agent.projectBuildingId = undefined;
     }
 
+    // The dominant need chooses the next action.
+    this.actOnDominantNeed(agent, simulation);
+  }
+
+  /**
+   * Utility arbitration: score every drive by how urgent it is right now,
+   * weighted by personality, then act on the strongest. Survival drives are
+   * scored on a steeper curve so they win whenever they matter; work is the
+   * baseline, so a resident only breaks from it when a soft need outgrows it.
+   */
+  private actOnDominantNeed(agent: Agent, simulation: Simulation) {
+    const p = agent.personality;
+    const n = agent.needs;
+    const churchOpen = Boolean(simulation.getChurch());
+
+    type Drive = { kind: "eat" | "rest" | "social" | "faith" | "leisure" | "work"; urgency: number };
+    const drives: Drive[] = [];
+
+    // Mild hunger/tiredness compete as ordinary drives (the acute cases were
+    // already handled structurally above).
+    if (agent.health.hunger >= HUNGER_SNACK_THRESHOLD) {
+      drives.push({ kind: "eat", urgency: agent.health.hunger });
+    }
+    if (agent.health.stamina < STAMINA_TIRED) {
+      drives.push({ kind: "rest", urgency: 100 - agent.health.stamina });
+    }
+
+    const social = (100 - n.social) * (0.6 + p.sociability);
+    if (social >= NEED_ACT_THRESHOLD) {
+      drives.push({ kind: "social", urgency: social });
+    }
+    const leisure = (100 - n.leisure) * (0.5 + p.curiosity);
+    if (leisure >= NEED_ACT_THRESHOLD) {
+      drives.push({ kind: "leisure", urgency: leisure });
+    }
+    if (churchOpen) {
+      const faith = (100 - n.faith) * 0.9;
+      // The morning service is a standing call regardless of how topped-up faith is.
+      if (faith >= NEED_ACT_THRESHOLD || simulation.isWorshipMorning()) {
+        drives.push({ kind: "faith", urgency: Math.max(faith, simulation.isWorshipMorning() ? 80 : 0) });
+      }
+    }
+
+    // Work is always on the table as the fallback drive.
+    const work = Math.max((100 - n.purpose) * (0.5 + p.diligence), WORK_BASELINE_URGENCY);
+    drives.push({ kind: "work", urgency: work });
+
+    drives.sort((a, b) => b.urgency - a.urgency);
+
+    for (const drive of drives) {
+      if (this.pursue(agent, simulation, drive.kind)) {
+        return;
+      }
+    }
+
+    // Nothing actionable: head home and loiter, like a villager would.
+    if (!samePos(roundVec(agent.position), agent.home ?? roundVec(agent.position))) {
+      this.goRest(agent, simulation);
+    }
+  }
+
+  /** Executes a chosen drive; returns false if it could not be acted on. */
+  private pursue(
+    agent: Agent,
+    simulation: Simulation,
+    kind: "eat" | "rest" | "social" | "faith" | "leisure" | "work",
+  ): boolean {
+    switch (kind) {
+      case "eat":
+        this.setState(agent, simulation, "FindFood");
+        return true;
+      case "rest":
+        this.goRest(agent, simulation);
+        return true;
+      case "faith":
+        return this.goWorship(agent, simulation);
+      case "social":
+        if (this.seekCompany(agent, simulation)) {
+          this.maybeLog(simulation, `${agent.name} went looking for company.`);
+          return true;
+        }
+        return false;
+      case "leisure":
+        this.wanderNearHome(agent, simulation);
+        this.maybeLog(simulation, `${agent.name} wandered off to take in the village.`);
+        return true;
+      case "work":
+        return this.doProductiveWork(agent, simulation);
+    }
+  }
+
+  private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
     if (simulation.era >= 1) {
       // Communal buildings outrank field work: gather wood for them first.
       const communal = this.communalProject(agent, simulation);
       if (communal === "started") {
-        return;
+        return true;
       }
       if (communal === "gather") {
         this.setState(agent, simulation, "FindTree");
-        return;
+        return true;
       }
-
       if (this.doJobWork(agent, simulation)) {
-        return;
+        return true;
       }
     }
 
     const woodCap = agent.job === "woodcutter" ? WOODCUTTER_STOCKPILE_CAP : WOOD_STOCKPILE_CAP;
     if (agent.inventory.wood < woodCap) {
       this.setState(agent, simulation, "FindTree");
-      return;
+      return true;
     }
 
     if (simulation.era >= 2 && this.findPaveWork(agent, simulation)) {
-      return;
+      return true;
     }
 
-    // Nothing to do: head home and loiter there, like a villager would.
-    if (!samePos(roundVec(agent.position), agent.home)) {
-      this.goRest(agent, simulation);
+    return false;
+  }
+
+  /** Lifestage idle for children and elders: company if lonely, else a stroll. */
+  private liveByLeisure(agent: Agent, simulation: Simulation) {
+    const social = (100 - agent.needs.social) * (0.6 + agent.personality.sociability);
+    if (social >= NEED_ACT_THRESHOLD && this.seekCompany(agent, simulation)) {
+      return;
+    }
+    this.wanderNearHome(agent, simulation);
+  }
+
+  /**
+   * Walk toward a communal building (or the village centre) so the resident
+   * runs into others; the opportunistic chat in update() does the rest.
+   */
+  private seekCompany(agent: Agent, simulation: Simulation): boolean {
+    const hub =
+      simulation.getWarehouse() ??
+      simulation.getKitchen() ??
+      simulation.getChurch();
+    const center = hub
+      ? { x: Math.round(hub.x + hub.width / 2), y: Math.round(hub.y + hub.height / 2) }
+      : roundVec(agent.position);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = {
+        x: center.x + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+        y: center.y + Math.floor(Math.random() * (WANDER_RADIUS_TILES * 2 + 1)) - WANDER_RADIUS_TILES,
+      };
+      if (!simulation.world.isWalkable(candidate)) {
+        continue;
+      }
+      const path = findPath(simulation.world, { start: agent.position, goal: candidate });
+      if (path) {
+        agent.target = candidate;
+        agent.path = path;
+        this.setState(agent, simulation, "Wander");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Occasional flavour log so the village feels alive without spamming. */
+  private maybeLog(simulation: Simulation, message: string) {
+    if (Math.random() < 0.18) {
+      simulation.log(message);
+    }
+  }
+
+  private updateNeeds(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const p = agent.personality;
+    const n = agent.needs;
+
+    n.social = clampNeed(n.social - deltaSeconds * NEED_DECAY.social * (0.6 + p.sociability));
+    n.leisure = clampNeed(n.leisure - deltaSeconds * NEED_DECAY.leisure * (0.5 + p.curiosity));
+    n.purpose = clampNeed(n.purpose - deltaSeconds * NEED_DECAY.purpose * (0.5 + p.diligence));
+    // Faith only matters once there is a church to give it meaning.
+    if (simulation.getChurch()) {
+      n.faith = clampNeed(n.faith - deltaSeconds * NEED_DECAY.faith);
+    }
+
+    // Refill while engaged in the matching activity.
+    if (agent.state === "Chat") {
+      n.social = clampNeed(n.social + deltaSeconds * NEED_FILL.social);
+    }
+    if (agent.state === "Wander") {
+      n.leisure = clampNeed(n.leisure + deltaSeconds * NEED_FILL.leisure);
+    }
+    if (agent.state === "Worship") {
+      n.faith = clampNeed(n.faith + deltaSeconds * NEED_FILL.faith);
+    }
+    if (WORKING_STATES.has(agent.state)) {
+      n.purpose = clampNeed(n.purpose + deltaSeconds * NEED_FILL.purpose);
     }
   }
 
@@ -998,8 +1187,13 @@ export class AgentBrain {
       simulation.noteWorshipGathering();
     }
     agent.actionTimer += deltaSeconds;
-    // Stand and pray until the morning service ends.
-    if (!simulation.isWorshipMorning() || agent.actionTimer > 40) {
+    // During the morning service, stay for the full gathering; a personal visit
+    // outside the service is a shorter private prayer. Either way faith refills
+    // while in this state (see updateNeeds).
+    const done = simulation.isWorshipMorning()
+      ? agent.actionTimer > 40
+      : agent.actionTimer >= PRAY_DURATION_SECONDS;
+    if (done) {
       agent.target = undefined;
       agent.path = undefined;
       this.setState(agent, simulation, "Idle");
@@ -1483,6 +1677,10 @@ function squaredDistance(a: Vec2, b: Vec2): number {
 
 function samePos(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y;
+}
+
+function clampNeed(value: number): number {
+  return value < 0 ? 0 : value > 100 ? 100 : value;
 }
 
 function buildCost(kind: BuildingKind): number {

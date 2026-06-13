@@ -285,6 +285,41 @@ button[data-active="true"] {
   font-size: 12px;
 }
 
+.need-bars {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.need-bar {
+  display: grid;
+  grid-template-columns: 58px 1fr 24px;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #c4cbbb;
+}
+
+.need-bar-track {
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.need-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.need-bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #9aa291;
+}
+
 .panel-section {
   display: grid;
   gap: 10px;

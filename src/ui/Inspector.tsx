@@ -72,6 +72,38 @@ function lifeStage(age: number): string {
   return "Elder";
 }
 
+// Reads the resident's strongest pull so the player can answer "why are they
+// doing that?" — the same needs the brain arbitrates over.
+function motivation(agent: Agent): string {
+  const pulls: { label: string; urgency: number }[] = [
+    { label: "hungry", urgency: agent.health.hunger },
+    { label: "weary", urgency: 100 - agent.health.stamina },
+    { label: "lonely", urgency: 100 - agent.needs.social },
+    { label: "restless for work", urgency: 100 - agent.needs.purpose },
+    { label: "seeking meaning", urgency: 100 - agent.needs.faith },
+    { label: "bored", urgency: 100 - agent.needs.leisure },
+  ];
+  pulls.sort((a, b) => b.urgency - a.urgency);
+  return pulls[0].urgency < 35 ? "content" : pulls[0].label;
+}
+
+function NeedBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.max(0, Math.min(100, Math.round(value)));
+  const hue = Math.round((pct / 100) * 120); // red (low) -> green (full)
+  return (
+    <div className="need-bar">
+      <span className="need-bar-label">{label}</span>
+      <span className="need-bar-track">
+        <span
+          className="need-bar-fill"
+          style={{ width: `${pct}%`, background: `hsl(${hue} 70% 45%)` }}
+        />
+      </span>
+      <span className="need-bar-value">{pct}</span>
+    </div>
+  );
+}
+
 function AgentInfo({
   agent,
   agents,
@@ -99,15 +131,22 @@ function AgentInfo({
         </dd>
         <dt>Job</dt>
         <dd>{agent.job === "none" ? "villager" : agent.job}</dd>
-        <dt>Condition</dt>
-        <dd>
-          Hunger {Math.round(agent.health.hunger)} · Stamina {Math.round(agent.health.stamina)}
-        </dd>
+        <dt>Motivation</dt>
+        <dd>{motivation(agent)}</dd>
         <dt>Family</dt>
         <dd>{spouse ? `married to ${spouse.name}` : "single"}</dd>
         <dt>Home</dt>
         <dd>{agent.home ? `(${agent.home.x}, ${agent.home.y})` : "homeless"}</dd>
       </dl>
+      <h3>Needs</h3>
+      <div className="need-bars">
+        <NeedBar label="Food" value={100 - agent.health.hunger} />
+        <NeedBar label="Energy" value={agent.health.stamina} />
+        <NeedBar label="Social" value={agent.needs.social} />
+        <NeedBar label="Purpose" value={agent.needs.purpose} />
+        <NeedBar label="Faith" value={agent.needs.faith} />
+        <NeedBar label="Leisure" value={agent.needs.leisure} />
+      </div>
       <h3>Episodes</h3>
       {episodes.length === 0 ? (
         <p className="muted">Nothing memorable yet.</p>

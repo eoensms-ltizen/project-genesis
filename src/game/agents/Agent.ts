@@ -55,6 +55,14 @@ export function createRandomAgent(position: Vec2, takenNames?: Set<string>): Age
       stamina: 100,
       hunger: 15,
     },
+    // Newcomers arrive content, so they settle in and work before any need pulls
+    // them toward socialising or leisure.
+    needs: {
+      social: 70,
+      purpose: 70,
+      faith: 70,
+      leisure: 70,
+    },
     lifespan: 65 + Math.floor(Math.random() * 26),
     position: { ...position },
     inventory: {

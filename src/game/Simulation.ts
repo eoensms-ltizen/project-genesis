@@ -40,7 +40,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
-const SAVE_VERSION = 9;
+const SAVE_VERSION = 10;
 
 // Residents age one year per in-game day; children come of age at 12,
 // retire at 60, and pass away when they outlive their personal lifespan.
@@ -175,6 +175,8 @@ export class Simulation {
       for (const savedAgent of saved.agents) {
         const agent: Agent = {
           ...savedAgent,
+          // Older saves predate soft needs; start such residents content.
+          needs: savedAgent.needs ?? { social: 70, purpose: 70, faith: 70, leisure: 70 },
           state: "Idle",
           actionTimer: 0,
         };
@@ -354,6 +356,7 @@ export class Simulation {
           job: agent.job,
           personality: { ...agent.personality },
           health: { ...agent.health },
+          needs: { ...agent.needs },
           position: { ...agent.position },
           inventory: { ...agent.inventory },
           home: agent.home ? { ...agent.home } : undefined,
