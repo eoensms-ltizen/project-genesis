@@ -158,6 +158,20 @@ const LITTERABLE: ReadonlySet<TileType> = new Set([
   "Stump",
 ]);
 
+// Ground that may be paved into a building's entrance road. Excludes water,
+// trees, decor and other buildings' tiles so paving never destroys anything.
+const ROADABLE: ReadonlySet<TileType> = new Set([
+  "Grass",
+  "Dirt",
+  "Road",
+  "Stump",
+  "FieldEmpty",
+  "FieldGrowing",
+  "FieldRipe",
+  "Plaza",
+  "Lamp",
+]);
+
 // Public order: crowding and discontent breed friction; police and a station
 // keep it in check. Unrest is a 0..100 meter that drives the police job and
 // occasionally erupts into a quarrel that dents the participants' comfort.
@@ -416,6 +430,17 @@ export class Simulation {
       stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
     for (const position of footprintTiles(building)) {
       this.world.setTile(position, tileType);
+    }
+    // The entrance is always a road: the door tile and the tile in front of it
+    // become Road, so a building can never be sealed in by neighbours (other
+    // footprints only take grass) and residents can always get out.
+    const front = { x: building.door.x, y: building.door.y + 1 };
+    const frontTile = this.world.getTile(front);
+    if (frontTile && ROADABLE.has(frontTile.type)) {
+      this.world.setTile(front, "Road");
+    }
+    if (stage === "built") {
+      this.world.setTile(building.door, "Road");
     }
     if (stage === "built" && building.kind === "station") {
       this.layStationRail(building);
@@ -1173,6 +1198,19 @@ export class Simulation {
    * road tiles that touch it. Decorations (fountain, lamps, statue) appear as
    * the plaza grows, giving the town centre its civic landmark.
    */
+  /** A built building's door tile or the tile directly in front of it. */
+  private isEntrance(position: Vec2): boolean {
+    for (const b of this.buildings) {
+      if (b.stage !== "built") {
+        continue;
+      }
+      if (b.door.x === position.x && (b.door.y === position.y || b.door.y + 1 === position.y)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private updatePlaza() {
     const world = this.world;
     let plazaCount = world.countType("Plaza");
@@ -1190,7 +1228,10 @@ export class Simulation {
                 }
               }
             }
-            world.setTile({ x: x + 1, y: y + 1 }, "Fountain");
+            const fountain = { x: x + 1, y: y + 1 };
+            if (!this.isEntrance(fountain)) {
+              world.setTile(fountain, "Fountain");
+            }
             world.setTile({ x, y }, "Lamp");
             world.setTile({ x: x + 2, y: y + 2 }, "Lamp");
             this.log("A village plaza has formed at the town's heart! ⛲");
@@ -1219,7 +1260,7 @@ export class Simulation {
     plazaCount += toPromote.length;
     if (plazaCount >= PLAZA_DECOR_INTERVAL && !world.tiles.some((t) => t.type === "Statue")) {
       const spot = world.tiles.find(
-        (t) => t.type === "Plaza" && this.hasOrthatType(t, "Plaza"),
+        (t) => t.type === "Plaza" && this.hasOrthatType(t, "Plaza") && !this.isEntrance(t),
       );
       if (spot) {
         world.setTile(spot, "Statue");
@@ -1888,26 +1929,6 @@ export class Simulation {
       )[0];
   }
 
-  /**
-   * A household with room that a homeless founder can join *before* staking a
-   * fresh plot — includes homes still being planned or built, so a handful of
-   * founders share a few homes instead of one each. Built homes preferred.
-   */
-  findJoinableHousehold(): Building | undefined {
-    const center = this.villageCenter();
-    return this.buildings
-      .filter((b) => b.kind === "house" && this.occupantsOf(b.id) < this.houseCapacity(b))
-      .sort((a, b) => {
-        const builtFirst = Number(b.stage === "built") - Number(a.stage === "built");
-        if (builtFirst !== 0) {
-          return builtFirst;
-        }
-        return (
-          Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y)
-        );
-      })[0];
-  }
-
   /** A built house that can still be upgraded to a denser tier. */
   findDensifiableHouse(): Building | undefined {
     const center = this.villageCenter();
@@ -1931,7 +1952,8 @@ export class Simulation {
     building.level = next;
     building.capacity = HOUSE_CAPACITY_BY_LEVEL[next];
     building.durability = 100;
-    this.world.setTile(building.door, "House");
+    // Keep the doorway a road so the rebuilt block is never sealed in.
+    this.world.setTile(building.door, "Road");
     const label =
       next >= 4
         ? "A block was rebuilt into a residential tower. 🗼"

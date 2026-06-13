@@ -851,17 +851,6 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
-    // Before staking a fresh plot, join a household with room — including one
-    // still being planned or built. Reached only when the resident has no plot
-    // of their own yet, so this never cancels someone's in-progress home; it
-    // just keeps a group of founders to a few shared homes instead of one each.
-    const spare = simulation.findJoinableHousehold();
-    if (spare && spare.id !== agent.homeBuildingId) {
-      this.moveInto(agent, simulation, spare, "moved into shared housing");
-      this.setState(agent, simulation, "Idle");
-      return;
-    }
-
     // Homes seek pleasant surroundings: drawn to parks/church, away from
     // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
