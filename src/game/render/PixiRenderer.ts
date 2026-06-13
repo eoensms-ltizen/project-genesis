@@ -561,6 +561,23 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
+  if (building.kind === "park") {
+    // Green square with a path, a leafy tree, and a flower bed.
+    graphics.rect(px + 1, py + 1, w - 2, h - 2);
+    graphics.fill(0x3f6b32);
+    graphics.rect(px + Math.floor(w / 2) - 1, py + 1, 2, h - 2);
+    graphics.fill({ color: 0xb6a06a, alpha: 0.7 });
+    graphics.circle(px + 6, py + 6, 4);
+    graphics.fill(0x2f5a26);
+    graphics.rect(px + 5.2, py + 6, 1.6, 4);
+    graphics.fill(0x5a4326);
+    graphics.circle(px + w - 6, py + h - 6, 1.6);
+    graphics.fill(0xd98ab0);
+    graphics.circle(px + w - 9, py + h - 7, 1.4);
+    graphics.fill(0xe8d16f);
+    return;
+  }
+
   if (building.kind === "cemetery") {
     // Quiet walled graveyard with rows of headstones.
     graphics.rect(px + 2, py + 2, w - 4, h - 4);

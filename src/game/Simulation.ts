@@ -206,8 +206,14 @@ export class Simulation {
       for (const savedAgent of saved.agents) {
         const agent: Agent = {
           ...savedAgent,
-          // Older saves predate soft needs; start such residents content.
-          needs: savedAgent.needs ?? { social: 70, purpose: 70, faith: 70, leisure: 70 },
+          // Older saves predate some soft needs; default any missing to content.
+          needs: {
+            social: savedAgent.needs?.social ?? 70,
+            purpose: savedAgent.needs?.purpose ?? 70,
+            faith: savedAgent.needs?.faith ?? 70,
+            leisure: savedAgent.needs?.leisure ?? 70,
+            comfort: savedAgent.needs?.comfort ?? 70,
+          },
           state: "Idle",
           actionTimer: 0,
         };
@@ -688,6 +694,68 @@ export class Simulation {
   redevelopCost(building: Building): number {
     const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
     return REDEVELOP_COST_BY_LEVEL[next] ?? REDEVELOP_COST_BY_LEVEL[HOUSE_MAX_LEVEL];
+  }
+
+  hasAnyPark(): boolean {
+    return this.buildings.some((building) => building.kind === "park");
+  }
+
+  /** Built houses within `radius` tiles of a point — a local crowding measure. */
+  localHouseDensity(position: Vec2, radius: number): number {
+    let count = 0;
+    for (const building of this.buildings) {
+      if (building.kind !== "house" || building.stage !== "built") {
+        continue;
+      }
+      const cx = building.x + building.width / 2;
+      const cy = building.y + building.height / 2;
+      if (Math.hypot(position.x - cx, position.y - cy) <= radius) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /** Nearest built park to a point, for residents seeking some breathing room. */
+  nearestPark(position: Vec2): Building | undefined {
+    let best: Building | undefined;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const building of this.buildings) {
+      if (building.kind !== "park" || building.stage !== "built") {
+        continue;
+      }
+      const d = Math.hypot(position.x - (building.x + building.width / 2), position.y - (building.y + building.height / 2));
+      if (d < bestDist) {
+        bestDist = d;
+        best = building;
+      }
+    }
+    return best;
+  }
+
+  private meanComfort(): number {
+    let sum = 0;
+    let count = 0;
+    for (const agent of this.agents) {
+      if (agent.age < ADULT_AGE) {
+        continue;
+      }
+      sum += agent.needs.comfort;
+      count += 1;
+    }
+    return count === 0 ? 100 : sum / count;
+  }
+
+  /**
+   * A growing town that feels cramped wants green space. One park is warranted
+   * per ~10 residents, and only once people are actually short on comfort.
+   */
+  needsPark(): boolean {
+    if (this.agents.length < 6) {
+      return false;
+    }
+    const parks = this.buildings.filter((b) => b.kind === "park").length;
+    return parks < Math.ceil(this.agents.length / 10) && this.meanComfort() < 60;
   }
 
   /** True if the position sits within the shadow of a cemetery (a nuisance). */
@@ -1392,6 +1460,7 @@ export class Simulation {
         agent.needs.social,
         agent.needs.purpose,
         agent.needs.leisure,
+        agent.needs.comfort,
       ];
       if (churchOpen) {
         parts.push(agent.needs.faith);

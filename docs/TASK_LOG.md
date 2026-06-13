@@ -31,6 +31,11 @@
   spreads away from it; steepened redevelopment cost by tier so stacking is no
   longer the cheap default; cut road decay so infrastructure persists. Verified
   in-browser (cemetery sited apart, no homes in its shadow, costs escalate).
+- Density-needs loop (comfort + parks): added a 7th need, comfort, that drains
+  faster when homes are crowded and refills at a park; builders lay out parks
+  near housing when the town feels cramped (one per ~10 residents). Closes the
+  population→density→amenity→space loop. Verified in-browser (comfort crashed to
+  28 as the town packed in, parks were built, comfort recovered).
 
 ## 2026-06-12
 

@@ -62,6 +62,7 @@ export function createRandomAgent(position: Vec2, takenNames?: Set<string>): Age
       purpose: 70,
       faith: 70,
       leisure: 70,
+      comfort: 70,
     },
     lifespan: 65 + Math.floor(Math.random() * 26),
     position: { ...position },

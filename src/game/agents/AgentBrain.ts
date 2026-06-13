@@ -21,6 +21,7 @@ const POWERPLANT_WOOD_COST = 16;
 const FACTORY_WOOD_COST = 16;
 const STATION_WOOD_COST = 14;
 const CEMETERY_WOOD_COST = 10;
+const PARK_WOOD_COST = 8;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -65,9 +66,15 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
 // Each soft need drains every second and refills while the resident performs
 // the matching activity. Personality scales both how fast a need drains and how
 // loudly it calls, so two residents in the same situation choose differently.
-const NEED_DECAY = { social: 0.09, purpose: 0.05, faith: 0.045, leisure: 0.06 };
-const NEED_FILL = { social: 22, purpose: 3, faith: 6, leisure: 8 };
+const NEED_DECAY = { social: 0.09, purpose: 0.05, faith: 0.045, leisure: 0.06, comfort: 0.04 };
+const NEED_FILL = { social: 22, purpose: 3, faith: 6, leisure: 8, comfort: 12 };
 const PRAY_DURATION_SECONDS = 8;
+const RELAX_DURATION_SECONDS = 6;
+// Crowding: homes packed within this radius drain comfort faster (the first
+// couple of neighbours are fine; beyond that it starts to feel cramped).
+const COMFORT_CROWD_RADIUS = 6;
+const COMFORT_CROWD_TOLERANCE = 2;
+const COMFORT_CROWD_DECAY = 0.02;
 // A soft need must reach this urgency to pull an adult away from work.
 const NEED_ACT_THRESHOLD = 55;
 // Work is the baseline drive, so it always carries at least this much pull.
@@ -208,6 +215,12 @@ export class AgentBrain {
       case "Redevelop":
         this.redevelop(agent, simulation, deltaSeconds);
         break;
+      case "MoveToPark":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Relax");
+        break;
+      case "Relax":
+        this.relax(agent, simulation, deltaSeconds);
+        break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
@@ -314,7 +327,8 @@ export class AgentBrain {
     const n = agent.needs;
     const churchOpen = Boolean(simulation.getChurch());
 
-    type Drive = { kind: "eat" | "rest" | "social" | "faith" | "leisure" | "work"; urgency: number };
+    type DriveKind = "eat" | "rest" | "social" | "faith" | "leisure" | "comfort" | "work";
+    type Drive = { kind: DriveKind; urgency: number };
     const drives: Drive[] = [];
 
     // Mild hunger/tiredness compete as ordinary drives (the acute cases were
@@ -333,6 +347,11 @@ export class AgentBrain {
     const leisure = (100 - n.leisure) * (0.5 + p.curiosity);
     if (leisure >= NEED_ACT_THRESHOLD) {
       drives.push({ kind: "leisure", urgency: leisure });
+    }
+    // Feeling cramped pulls a resident toward a park for some breathing room.
+    const comfort = (100 - n.comfort) * 0.9;
+    if (comfort >= NEED_ACT_THRESHOLD) {
+      drives.push({ kind: "comfort", urgency: comfort });
     }
     if (churchOpen) {
       const faith = (100 - n.faith) * 0.9;
@@ -364,7 +383,7 @@ export class AgentBrain {
   private pursue(
     agent: Agent,
     simulation: Simulation,
-    kind: "eat" | "rest" | "social" | "faith" | "leisure" | "work",
+    kind: "eat" | "rest" | "social" | "faith" | "leisure" | "comfort" | "work",
   ): boolean {
     switch (kind) {
       case "eat":
@@ -385,8 +404,52 @@ export class AgentBrain {
         this.wanderNearHome(agent, simulation);
         this.maybeLog(simulation, `${agent.name} wandered off to take in the village.`);
         return true;
+      case "comfort":
+        // Only actionable if a park exists; otherwise the unmet need shows up as
+        // low wellbeing and prompts builders to lay one out (see communalProject).
+        if (this.goRelax(agent, simulation)) {
+          this.maybeLog(simulation, `${agent.name} went to the park for some air.`);
+          return true;
+        }
+        return false;
       case "work":
         return this.doProductiveWork(agent, simulation);
+    }
+  }
+
+  /** Route to the nearest park and relax there to recover comfort. */
+  private goRelax(agent: Agent, simulation: Simulation): boolean {
+    const park = simulation.nearestPark(agent.position);
+    if (!park) {
+      return false;
+    }
+    const cx = Math.round(park.x + park.width / 2);
+    const cy = Math.round(park.y + park.height / 2);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = {
+        x: cx + Math.floor(Math.random() * 5) - 2,
+        y: cy + Math.floor(Math.random() * 5) - 2,
+      };
+      if (!simulation.world.isWalkable(candidate)) {
+        continue;
+      }
+      const path = findPath(simulation.world, { start: agent.position, goal: candidate });
+      if (path) {
+        agent.target = candidate;
+        agent.path = path;
+        this.setState(agent, simulation, "MoveToPark");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private relax(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer >= RELAX_DURATION_SECONDS) {
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
     }
   }
 
@@ -545,6 +608,15 @@ export class AgentBrain {
     if (simulation.getChurch()) {
       n.faith = clampNeed(n.faith - deltaSeconds * NEED_DECAY.faith);
     }
+    // Comfort drains faster the more crowded the resident's home is.
+    const anchor = agent.home ?? roundVec(agent.position);
+    const crowd = Math.max(
+      0,
+      simulation.localHouseDensity(anchor, COMFORT_CROWD_RADIUS) - COMFORT_CROWD_TOLERANCE,
+    );
+    n.comfort = clampNeed(
+      n.comfort - deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY),
+    );
 
     // Refill while engaged in the matching activity.
     if (agent.state === "Chat") {
@@ -558,6 +630,9 @@ export class AgentBrain {
     }
     if (WORKING_STATES.has(agent.state)) {
       n.purpose = clampNeed(n.purpose + deltaSeconds * NEED_FILL.purpose);
+    }
+    if (agent.state === "Relax") {
+      n.comfort = clampNeed(n.comfort + deltaSeconds * NEED_FILL.comfort);
     }
   }
 
@@ -578,12 +653,16 @@ export class AgentBrain {
       | "factory"
       | "station"
       | "cemetery"
+      | "park"
       | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (simulation.needsCemetery()) {
       // The dead must be laid to rest — built far from where people live.
       kind = "cemetery";
+    } else if (simulation.needsPark()) {
+      // A cramped town lays out green space near where people live.
+      kind = "park";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
@@ -1803,6 +1882,9 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "cemetery") {
     return CEMETERY_WOOD_COST;
+  }
+  if (kind === "park") {
+    return PARK_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }

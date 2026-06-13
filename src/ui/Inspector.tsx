@@ -89,6 +89,7 @@ function motivation(agent: Agent): string {
     { label: "restless for work", urgency: 100 - agent.needs.purpose },
     { label: "seeking meaning", urgency: 100 - agent.needs.faith },
     { label: "bored", urgency: 100 - agent.needs.leisure },
+    { label: "cramped", urgency: 100 - agent.needs.comfort },
   ];
   pulls.sort((a, b) => b.urgency - a.urgency);
   return pulls[0].urgency < 35 ? "content" : pulls[0].label;
@@ -153,6 +154,7 @@ function AgentInfo({
         <NeedBar label="Purpose" value={agent.needs.purpose} />
         <NeedBar label="Faith" value={agent.needs.faith} />
         <NeedBar label="Leisure" value={agent.needs.leisure} />
+        <NeedBar label="Comfort" value={agent.needs.comfort} />
       </div>
       <h3>Episodes</h3>
       {episodes.length === 0 ? (

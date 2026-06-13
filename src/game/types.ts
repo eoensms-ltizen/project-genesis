@@ -56,6 +56,8 @@ export type AgentState =
   | "Tame"
   | "MoveToRedevelop"
   | "Redevelop"
+  | "MoveToPark"
+  | "Relax"
   | "Wander"
   | "Rest";
 
@@ -70,7 +72,8 @@ export type BuildingKind =
   | "powerplant"
   | "factory"
   | "station"
-  | "cemetery";
+  | "cemetery"
+  | "park";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -140,6 +143,7 @@ export type Agent = {
     purpose: number; // contributing through work
     faith: number; // worship at the church
     leisure: number; // strolling, taking in the village
+    comfort: number; // breathing room; drains faster when homes are crowded
   };
   position: Vec2;
   inventory: {
