@@ -195,7 +195,7 @@ export class WorldMap {
           continue;
         }
 
-        const ring = this.ringInfo(x, y, width, height);
+        const ring = this.ringInfo(x, y, width, height, isBlocked);
         if (!ring.clear) {
           continue;
         }
@@ -260,6 +260,7 @@ export class WorldMap {
     y: number,
     width: number,
     height: number,
+    isBlocked?: (position: Vec2) => boolean,
   ): { clear: boolean; touchesPath: boolean } {
     let touchesPath = false;
     for (let ry = y - 1; ry <= y + height; ry += 1) {
@@ -272,11 +273,15 @@ export class WorldMap {
         if (!tile) {
           continue;
         }
+        // A claimed tile is another building's footprint that hasn't been typed
+        // yet (e.g. a site staked the same tick), so treat it as occupied —
+        // otherwise two buildings stake flush and seal each other's doors.
         if (
           tile.type === "Water" ||
           tile.type === "House" ||
           tile.type === "HouseSite" ||
-          tile.type === "HouseFoundation"
+          tile.type === "HouseFoundation" ||
+          isBlocked?.({ x: rx, y: ry })
         ) {
           return { clear: false, touchesPath: false };
         }

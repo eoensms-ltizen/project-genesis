@@ -21,8 +21,10 @@ type SimulationOptions = {
 };
 
 // Crossings needed before grass wears into a footpath, then into a road.
-const PATH_WEAR_THRESHOLD = 6;
-const ROAD_WEAR_THRESHOLD = 16;
+// Kept low so roads are cheap to "install" — the network forms readily from
+// everyday foot traffic.
+const PATH_WEAR_THRESHOLD = 4;
+const ROAD_WEAR_THRESHOLD = 9;
 const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
@@ -1946,14 +1948,91 @@ export class Simulation {
       )[0];
   }
 
+  /** The building whose footprint covers a tile, if any. */
+  private buildingAt(position: Vec2): Building | undefined {
+    return this.buildings.find(
+      (b) =>
+        position.x >= b.x &&
+        position.x < b.x + b.width &&
+        position.y >= b.y &&
+        position.y < b.y + b.height,
+    );
+  }
+
+  /** Tear down a house and turn its residents back out to find new homes. */
+  private demolishHouse(building: Building) {
+    for (const agent of this.agents) {
+      if (agent.homeBuildingId === building.id) {
+        agent.home = undefined;
+        agent.homeBuildingId = undefined;
+        agent.homeSite = undefined;
+      }
+      if (agent.projectBuildingId === building.id) {
+        agent.projectBuildingId = undefined;
+      }
+    }
+    this.removeBuilding(building);
+  }
+
+  /**
+   * Grow a house's footprint upward to 2x3 (apartments need more room than a
+   * cottage). The door stays on the bottom row. Roads, trees and neighbouring
+   * houses on the new row are cleared to make space; critical infrastructure is
+   * left alone, in which case the block stays its current size.
+   */
+  private expandHouseFootprint(building: Building): boolean {
+    const newY = building.y - 1;
+    if (newY < 1) {
+      return false;
+    }
+    const newRow: Vec2[] = [];
+    for (let dx = 0; dx < building.width; dx += 1) {
+      newRow.push({ x: building.x + dx, y: newY });
+    }
+    for (const p of newRow) {
+      if (this.world.getTile(p)?.type === "Water") {
+        return false;
+      }
+      const occ = this.buildingAt(p);
+      if (occ && occ !== building && occ.kind !== "house") {
+        return false; // don't bulldoze the warehouse, church, etc.
+      }
+    }
+    for (const p of newRow) {
+      const occ = this.buildingAt(p);
+      if (occ && occ !== building && occ.kind === "house") {
+        this.demolishHouse(occ);
+        this.log("A house was cleared to make way for an apartment block. 🏗️");
+      }
+      if (this.world.getTile(p)?.type === "Tree") {
+        this.world.setTile(p, "Grass");
+      }
+    }
+    building.y = newY;
+    building.height += 1;
+    return true;
+  }
+
   /** Redevelop a house one tier taller, packing more households per tile. */
   levelUpHouse(building: Building) {
     const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
     building.level = next;
     building.capacity = HOUSE_CAPACITY_BY_LEVEL[next];
     building.durability = 100;
-    // Keep the doorway a road so the rebuilt block is never sealed in.
+    // Apartments and towers need a larger 2x3 footprint than a cottage/villa.
+    if (next >= 3 && building.height < 3) {
+      this.expandHouseFootprint(building);
+    }
+    // Re-tile the (possibly grown) footprint, then keep the doorway a road so
+    // the rebuilt block is never sealed in.
+    for (const position of footprintTiles(building)) {
+      this.world.setTile(position, "House");
+    }
     this.world.setTile(building.door, "Road");
+    const front = { x: building.door.x, y: building.door.y + 1 };
+    if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
+      this.world.setTile(front, "Road");
+    }
     const label =
       next >= 4
         ? "A block was rebuilt into a residential tower. 🗼"
@@ -1961,6 +2040,7 @@ export class Simulation {
           ? "A house grew into an apartment block. 🏢"
           : "A house was extended into a villa. 🏘️";
     this.log(label);
+    this.refreshDoors();
     this.notifyChanged();
   }
 

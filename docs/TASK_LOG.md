@@ -76,6 +76,14 @@
   their own plot again, the preferred behaviour). A house costs 8 wood plus
   gather/build labour. Verified: 0 of 16 built homes sealed; doors are always
   walkable (road/plaza/lamp); long-run growth unaffected (era 4, 0 homeless).
+- Apartments grow their footprint + cheaper roads + sealing fix: apartments and
+  towers (level 3+) now occupy 2×3 (vs a cottage's 2×2), expanding upward on
+  redevelopment and clearing roads/trees/neighbouring houses (rehoming their
+  residents) while sparing critical infrastructure. Lowered the desire-path wear
+  thresholds (6/16 → 4/9) so roads form readily. Fixed the root cause of sealed
+  doorways: ringInfo now treats claimed (in-progress) tiles as occupied, so
+  buildings staked the same tick keep a one-tile gap instead of packing flush.
+  Verified: 7 founders reach era 4 with 0 sealed homes; apartments report 2×3.
 
 ## 2026-06-12
 
