@@ -83,6 +83,8 @@ export type AgentState =
   | "WithdrawWood" // drawing materials out of the warehouse stock
   | "MoveToMine" // walking to a rock/ore tile to mine it
   | "Mine" // breaking rock for stone or ore
+  | "MoveToCraft" // walking to the workshop/warehouse to make tools
+  | "CraftTool" // fashioning a tool (e.g. a pickaxe) from materials
   | "Wander"
   | "Rest";
 

@@ -45,6 +45,10 @@ const MINE_DURATION_SECONDS = 3;
 // Keep at least this much wood on hand before turning idle effort to mining, so
 // construction never starves but stone still gets gathered before wood is maxed.
 const WOOD_RESERVE_FLOOR = 24;
+// A pickaxe: crafted from stored wood + stone, it unlocks hard rock and ore.
+const PICKAXE_WOOD_COST = 6;
+const PICKAXE_STONE_COST = 10;
+const CRAFT_DURATION_SECONDS = 3;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
@@ -147,6 +151,8 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "WithdrawWood",
   "MoveToMine",
   "Mine",
+  "MoveToCraft",
+  "CraftTool",
 ]);
 
 export class AgentBrain {
@@ -294,6 +300,12 @@ export class AgentBrain {
         break;
       case "Mine":
         this.mine(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToCraft":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "CraftTool");
+        break;
+      case "CraftTool":
+        this.craftPickaxe(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -584,6 +596,10 @@ export class AgentBrain {
         // stone reserve, then keep topping wood toward its target.
         if (woodSupply < WOOD_RESERVE_FLOOR && simulation.wantsMoreWood()) {
           this.setState(agent, simulation, "FindTree");
+          return true;
+        }
+        // Make a pickaxe once there's a stone reserve and hard rock to use it on.
+        if (this.tryCraftPickaxe(agent, simulation)) {
           return true;
         }
         if (this.findMineWork(agent, simulation)) {
@@ -1269,6 +1285,65 @@ export class AgentBrain {
     agent.target = undefined;
     agent.path = undefined;
     // Back to Idle: decideNextAction resumes the build now the wood is in hand.
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /**
+   * Once the colony has worked enough soft stone and there's hard rock or ore
+   * around to justify it, a resident fashions a pickaxe from stored wood + stone
+   * at the warehouse — unlocking granite and iron-ore mining. Tools beget access
+   * to tougher materials: the engine of material progress.
+   */
+  private tryCraftPickaxe(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.hasMiningTools || simulation.pickaxeInProgress) {
+      return false;
+    }
+    const warehouse = simulation.getWarehouse();
+    if (!warehouse || !simulation.hasToolGatedRock()) {
+      return false;
+    }
+    if (
+      simulation.stockOf("stone") < PICKAXE_STONE_COST ||
+      simulation.stockOf("wood") < PICKAXE_WOOD_COST
+    ) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+    if (!path) {
+      return false;
+    }
+    simulation.pickaxeInProgress = true;
+    agent.target = { ...warehouse.door };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToCraft");
+    return true;
+  }
+
+  private craftPickaxe(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < CRAFT_DURATION_SECONDS) {
+      return;
+    }
+    simulation.pickaxeInProgress = false;
+    // Re-check the tools weren't already made and the materials are still here.
+    if (
+      !simulation.hasMiningTools &&
+      simulation.stockOf("stone") >= PICKAXE_STONE_COST &&
+      simulation.stockOf("wood") >= PICKAXE_WOOD_COST
+    ) {
+      simulation.withdraw("wood", PICKAXE_WOOD_COST);
+      simulation.withdraw("stone", PICKAXE_STONE_COST);
+      simulation.hasMiningTools = true;
+      simulation.log(
+        tr(
+          `${agent.name} forged a pickaxe — hard rock and iron ore can now be mined. ⛏️`,
+          `${agent.name}이(가) 곡괭이를 만들었다 — 이제 단단한 암석과 철광석을 캘 수 있다. ⛏️`,
+        ),
+        [agent],
+      );
+    }
+    agent.target = undefined;
+    agent.path = undefined;
     this.setState(agent, simulation, "Idle");
   }
 
@@ -2377,6 +2452,10 @@ export class AgentBrain {
     }
     // A carried load is set down where they stand so it isn't lost.
     this.dropCarry(agent, simulation);
+    // If they were mid-craft, let the colony try again.
+    if (agent.state === "MoveToCraft" || agent.state === "CraftTool") {
+      simulation.pickaxeInProgress = false;
+    }
     agent.fetchAmount = undefined;
     agent.target = undefined;
     agent.path = undefined;

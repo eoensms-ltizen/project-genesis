@@ -281,6 +281,8 @@ export class Simulation {
   // floor — the stockpile zone — not as abstract numbers. See stockOf()/store().
   // True once the colony has the tools (a pickaxe) to mine hard rock and ore.
   hasMiningTools = false;
+  // A pickaxe is being fashioned right now, so others don't also start one.
+  pickaxeInProgress = false;
   private notedNeedTools = false;
   readonly items: ItemStack[] = [];
 
@@ -2004,6 +2006,13 @@ export class Simulation {
     }
     // Harder rock gives a little more usable stone.
     return { resource: "stone", amount: type === "RockGranite" ? 3 : 2 };
+  }
+
+  /** Is there hard rock or ore around that a pickaxe would unlock? */
+  hasToolGatedRock(): boolean {
+    return this.world.tiles.some(
+      (tile) => tile.type === "RockGranite" || tile.type === "OreIron",
+    );
   }
 
   /** Note (once) that the colony wants to mine something it lacks tools for. */
