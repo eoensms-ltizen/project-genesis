@@ -95,6 +95,10 @@ export class GameApp {
     this.renderer.resetCamera();
   }
 
+  setFlatBuildings(flat: boolean) {
+    this.renderer.setFlatBuildings(flat);
+  }
+
   destroy() {
     this.renderer.destroy();
   }

@@ -22,6 +22,7 @@ export class PixiRenderer {
   private readonly nightLayer = new Container();
   private readonly nightGraphics = new Graphics();
   private lastWorldVersion = -1;
+  private flatBuildings = false;
   private initialized = false;
   // Cached lamp tile centres, refreshed only when the world changes.
   private lampCenters: { x: number; y: number }[] = [];
@@ -194,6 +195,15 @@ export class PixiRenderer {
     this.panY = 0;
   }
 
+  /** Toggle the 2.5D building "lids" on/off; forces a world redraw. */
+  setFlatBuildings(flat: boolean) {
+    if (this.flatBuildings === flat) {
+      return;
+    }
+    this.flatBuildings = flat;
+    this.lastWorldVersion = -1; // force the world layer to redraw
+  }
+
   render(
     world: WorldMap,
     agents: Agent[],
@@ -227,7 +237,7 @@ export class PixiRenderer {
       // Draw north-to-south so a building's raised body overlaps the one behind
       // it (a simple 2.5D depth order).
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
-        drawBuilding(this.worldGraphics, building);
+        drawBuilding(this.worldGraphics, building, this.flatBuildings);
       }
     }
 
@@ -437,7 +447,7 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
 
 }
 
-function drawBuilding(graphics: Graphics, building: Building) {
+function drawBuilding(graphics: Graphics, building: Building, flat: boolean) {
   const px = building.x * TILE_SIZE;
   const py = building.y * TILE_SIZE;
   const w = building.width * TILE_SIZE;
@@ -536,7 +546,6 @@ function drawBuilding(graphics: Graphics, building: Building) {
     return;
   }
 
-  // --- Everything else is drawn as a 2.5D block rising above its footprint. ---
   const level =
     building.level ??
     ((building.capacity ?? 1) >= 24
@@ -546,8 +555,24 @@ function drawBuilding(graphics: Graphics, building: Building) {
         : (building.capacity ?? 1) >= 6
           ? 2
           : 1);
-  const lift = buildingLift(building.kind, level);
   const palette = buildingPalette(building.kind, level);
+
+  // Flat (top-down) mode: just the footprint, so the layout is easy to read
+  // while the town is being built. No raised "lid" obscuring what's underneath.
+  if (flat) {
+    graphics.rect(px, py, w, h);
+    graphics.fill(palette.roof);
+    graphics.rect(px + 0.5, py + 0.5, w - 1, h - 1);
+    graphics.stroke({ color: palette.wall, width: 1 });
+    for (const door of building.doors ?? [building.door]) {
+      graphics.rect(door.x * TILE_SIZE + 3, door.y * TILE_SIZE + 4, TILE_SIZE - 6, TILE_SIZE - 5);
+      graphics.fill(0x2c2118);
+    }
+    return;
+  }
+
+  // --- Everything else is drawn as a 2.5D block rising above its footprint. ---
+  const lift = buildingLift(building.kind, level);
   const top = py - lift;
   const doorX = building.door.x * TILE_SIZE + TILE_SIZE / 2;
 

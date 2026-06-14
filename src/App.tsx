@@ -38,6 +38,9 @@ export default function App() {
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [selection, setSelection] = useState<InspectionTarget | null>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
+  const [flatBuildings, setFlatBuildings] = useState(
+    () => localStorage.getItem("pg-flat-buildings") === "1",
+  );
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
@@ -81,6 +84,7 @@ export default function App() {
     });
 
     gameRef.current = game;
+    game.setFlatBuildings(localStorage.getItem("pg-flat-buildings") === "1");
     if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
       (window as unknown as { __genesis?: GameApp }).__genesis = game;
     }
@@ -136,6 +140,13 @@ export default function App() {
 
   const recenter = () => gameRef.current?.resetCamera();
 
+  const toggleFlatBuildings = () => {
+    const next = !flatBuildings;
+    setFlatBuildings(next);
+    gameRef.current?.setFlatBuildings(next);
+    localStorage.setItem("pg-flat-buildings", next ? "1" : "0");
+  };
+
   const speedOptions = [0, 1, 2, 4] as const;
 
   return (
@@ -178,6 +189,15 @@ export default function App() {
             ))}
             <button type="button" className="hud-speed" onClick={recenter} title="Recenter">
               ⌖
+            </button>
+            <button
+              type="button"
+              className="hud-speed"
+              onClick={toggleFlatBuildings}
+              data-active={!flatBuildings}
+              title={flatBuildings ? "Flat view (tap for 2.5D)" : "2.5D view (tap for flat)"}
+            >
+              {flatBuildings ? "▦" : "🏙"}
             </button>
           </div>
         </div>

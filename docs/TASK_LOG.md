@@ -144,6 +144,10 @@
   kept walkable; apartment expansion grows on a doorless side so it never seals a
   doorway. Verified: doors face all four directions, 8/14 buildings have multiple
   doors, zero trapped buildings, growth to era 4. (Fire station is next.)
+- 2.5D view toggle: a HUD button switches buildings between the 2.5D "lids" and
+  a flat top-down footprint view, so the layout is easy to read while building
+  the game. The choice persists (localStorage) and forces a world redraw on
+  toggle. Verified both modes in-browser.
 
 ## 2026-06-12
 
