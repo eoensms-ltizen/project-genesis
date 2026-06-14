@@ -17,6 +17,13 @@ export type TileType =
   | "Wall"
   | "Floor"
   | "Door"
+  // Rocky terrain: solid stone (impassable until mined) of various kinds, iron
+  // ore veins embedded in it, and the rough floor left behind once mined.
+  | "RockSandstone"
+  | "RockLimestone"
+  | "RockGranite"
+  | "OreIron"
+  | "RockFloor"
   | "Berry"
   | "FieldEmpty"
   | "FieldGrowing"

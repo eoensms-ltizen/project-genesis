@@ -231,6 +231,8 @@ export class PixiRenderer {
           drawWall(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
         } else if (tile.type === "Door") {
           drawDoor(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
+        } else if (isRockSolid(tile.type)) {
+          drawRock(this.worldGraphics, tile.x, tile.y, tile.type, rockMask(world, tile.x, tile.y));
         } else {
           drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
         }
@@ -476,6 +478,108 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     }
   }
 
+  if (type === "RockFloor") {
+    // Rough hewn-rock floor left after mining: scattered rubble flecks.
+    for (const [sx, sy] of [
+      [4, 5],
+      [11, 7],
+      [7, 12],
+    ]) {
+      graphics.circle(px + sx, py + sy, 1);
+      graphics.fill({ color: 0x33302b, alpha: 0.6 });
+    }
+  }
+
+}
+
+function rockBaseColor(type: TileType): number {
+  switch (type) {
+    case "RockSandstone":
+      return 0x9c8a63;
+    case "RockLimestone":
+      return 0x8f8e84;
+    case "RockGranite":
+      return 0x6f6a70;
+    case "OreIron":
+      return 0x6b6660;
+    default:
+      return 0x6f6a70;
+  }
+}
+
+function isRockSolid(type: TileType | undefined): boolean {
+  return (
+    type === "RockSandstone" ||
+    type === "RockLimestone" ||
+    type === "RockGranite" ||
+    type === "OreIron"
+  );
+}
+
+function rockMask(world: WorldMap, x: number, y: number): number {
+  let mask = 0;
+  if (isRockSolid(world.getTile({ x, y: y - 1 })?.type)) mask |= N;
+  if (isRockSolid(world.getTile({ x: x + 1, y })?.type)) mask |= E;
+  if (isRockSolid(world.getTile({ x, y: y + 1 })?.type)) mask |= S;
+  if (isRockSolid(world.getTile({ x: x - 1, y })?.type)) mask |= W;
+  return mask;
+}
+
+/**
+ * Solid rock cell. Like walls, edge light/shadow is drawn only on faces with no
+ * adjacent rock, so an outcrop reads as one connected mass with a cliff edge.
+ * Iron ore glints with rusty flecks.
+ */
+function drawRock(graphics: Graphics, x: number, y: number, type: TileType, mask: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const S_ = TILE_SIZE;
+  graphics.rect(px, py, S_, S_);
+  graphics.fill(rockBaseColor(type));
+  // Mineral speckle.
+  for (const [sx, sy] of [
+    [4, 5],
+    [11, 4],
+    [7, 11],
+    [13, 12],
+  ]) {
+    graphics.circle(px + sx, py + sy, 1);
+    graphics.fill({ color: 0x000000, alpha: 0.12 });
+  }
+  if (type === "OreIron") {
+    for (const [sx, sy] of [
+      [5, 6],
+      [10, 9],
+      [8, 3],
+    ]) {
+      graphics.circle(px + sx, py + sy, 1.5);
+      graphics.fill(0xb5763e);
+    }
+    for (const [sx, sy] of [
+      [12, 6],
+      [6, 12],
+    ]) {
+      graphics.circle(px + sx, py + sy, 1);
+      graphics.fill(0x8a5a30);
+    }
+  }
+  // Cliff edge shading on exposed faces.
+  if (!(mask & N)) {
+    graphics.rect(px, py, S_, 2.5);
+    graphics.fill({ color: 0xffffff, alpha: 0.12 });
+  }
+  if (!(mask & S)) {
+    graphics.rect(px, py + S_ - 3, S_, 3);
+    graphics.fill({ color: 0x000000, alpha: 0.3 });
+  }
+  if (!(mask & W)) {
+    graphics.rect(px, py, 2.5, S_);
+    graphics.fill({ color: 0x000000, alpha: 0.12 });
+  }
+  if (!(mask & E)) {
+    graphics.rect(px + S_ - 2.5, py, 2.5, S_);
+    graphics.fill({ color: 0x000000, alpha: 0.18 });
+  }
 }
 
 // Wall/door neighbour bits, so walls render as one connected mass (RimWorld-style
@@ -931,6 +1035,16 @@ function tileColor(type: TileType): number {
       return 0x4a3b2a;
     case "Door":
       return 0x4a3b2a;
+    case "RockSandstone":
+      return 0x9c8a63;
+    case "RockLimestone":
+      return 0x8f8e84;
+    case "RockGranite":
+      return 0x6f6a70;
+    case "OreIron":
+      return 0x6b6660;
+    case "RockFloor":
+      return 0x4f4a44;
     case "Berry":
       return 0x2c4a28;
     case "FieldEmpty":

@@ -4,6 +4,7 @@ import type { Tile } from "./Tile";
 const TREE_CLUSTER_COUNT = 22;
 const WATER_CLUSTER_COUNT = 4;
 const BERRY_CLUSTER_COUNT = 7;
+const ROCK_REGION_COUNT = 5;
 
 // RimWorld-style per-tile movement cost. Lower is faster; Infinity is impassable.
 // Roads are far quicker than open ground, so a road network is worth building —
@@ -21,6 +22,13 @@ const MOVE_COSTS: Record<TileType, number> = {
   Wall: Number.POSITIVE_INFINITY,
   Floor: 1, // interior of a room — comfortable walking
   Door: 1.2, // a doorway: passable, with a touch of open/close friction
+  // Solid rock and ore are impassable until mined; the rough floor left behind
+  // walks like packed ground.
+  RockSandstone: Number.POSITIVE_INFINITY,
+  RockLimestone: Number.POSITIVE_INFINITY,
+  RockGranite: Number.POSITIVE_INFINITY,
+  OreIron: Number.POSITIVE_INFINITY,
+  RockFloor: 1,
   Berry: 2,
   FieldEmpty: 2.2,
   FieldGrowing: 2.2,
@@ -47,6 +55,11 @@ const TILE_CODES: Record<TileType, string> = {
   Wall: "#",
   Floor: ".",
   Door: "+",
+  RockSandstone: "a",
+  RockLimestone: "k",
+  RockGranite: "g",
+  OreIron: "i",
+  RockFloor: ",",
   Berry: "B",
   FieldEmpty: "e",
   FieldGrowing: "c",
@@ -99,11 +112,58 @@ export class WorldMap {
       map.paintCluster(center, 2 + Math.floor(Math.random() * 3), "Water", 0.78);
     }
 
+    // Rocky regions: solid outcrops of stone with iron veins inside. Granite and
+    // limestone carry more ore; sandstone is mostly bare soft rock.
+    const rockTypes: { type: TileType; ore: number }[] = [
+      { type: "RockSandstone", ore: 0.02 },
+      { type: "RockLimestone", ore: 0.07 },
+      { type: "RockGranite", ore: 0.11 },
+    ];
+    for (let i = 0; i < ROCK_REGION_COUNT; i += 1) {
+      const rock = rockTypes[i % rockTypes.length];
+      map.seedRockRegion(rock.type, rock.ore);
+    }
+
     for (let i = 0; i < BERRY_CLUSTER_COUNT; i += 1) {
       map.seedBerryCluster();
     }
 
     return map;
+  }
+
+  /**
+   * A solid outcrop of one rock kind, kept away from the map centre (where the
+   * first resident settles), with iron-ore tiles veining through it.
+   */
+  private seedRockRegion(rockType: TileType, oreChance: number) {
+    let center: Vec2 | undefined;
+    for (let tries = 0; tries < 20; tries += 1) {
+      const candidate = this.randomLandPosition();
+      const dx = candidate.x - this.width / 2;
+      const dy = candidate.y - this.height / 2;
+      if (Math.hypot(dx, dy) > Math.min(this.width, this.height) * 0.22) {
+        center = candidate;
+        break;
+      }
+    }
+    if (!center) {
+      return;
+    }
+    const radius = 3 + Math.floor(Math.random() * 4);
+    for (let y = center.y - radius; y <= center.y + radius; y += 1) {
+      for (let x = center.x - radius; x <= center.x + radius; x += 1) {
+        const position = { x, y };
+        const tile = this.getTile(position);
+        // Rock sits on land — never carve into water.
+        if (!tile || tile.type === "Water") {
+          continue;
+        }
+        const distance = Math.hypot(center.x - x, center.y - y);
+        if (distance <= radius && Math.random() < 0.82 - distance * 0.06) {
+          this.setTile(position, Math.random() < oreChance ? "OreIron" : rockType);
+        }
+      }
+    }
   }
 
   getTile(position: Vec2): Tile | undefined {
