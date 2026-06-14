@@ -3,6 +3,7 @@ import { GameApp } from "./game/GameApp";
 import { ERA_NAMES, SAVE_KEY } from "./game/Simulation";
 import type {
   Agent,
+  AgentState,
   Animal,
   Building,
   GameClock,
@@ -10,12 +11,82 @@ import type {
   InspectionTarget,
   Vec2,
 } from "./game/types";
+import { getLang, setLang, tr, type Lang } from "./i18n";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
 import { GameLog } from "./ui/GameLog";
 import { Inspector } from "./ui/Inspector";
 
 const TICK_MS = 160;
+
+const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
+
+function eraName(era: number): string {
+  return tr(ERA_NAMES[era] ?? "?", ERA_LABELS_KO[era] ?? "?");
+}
+
+const STATE_LABELS_KO: Record<AgentState, string> = {
+  Idle: "대기",
+  FindTree: "나무 찾기",
+  MoveToTree: "나무로 이동",
+  ChopTree: "벌목",
+  FindHouseSite: "집터 찾기",
+  MoveToHouseSite: "집터로 이동",
+  PlanHouse: "집 설계",
+  BuildHouse: "집 짓기",
+  FindFood: "음식 찾기",
+  MoveToFood: "음식으로 이동",
+  Eat: "식사",
+  MoveHome: "귀가",
+  Sleep: "수면",
+  Chat: "대화",
+  MoveToFarm: "밭으로 이동",
+  FarmWork: "농사",
+  MoveToPave: "포장지로 이동",
+  Pave: "길 포장",
+  MoveToKitchen: "부엌으로 이동",
+  Cook: "요리",
+  MoveToWorship: "교회로 이동",
+  Worship: "예배",
+  MoveToStump: "그루터기로 이동",
+  Transplant: "옮겨심기",
+  MoveToPlant: "식재지로 이동",
+  Plant: "나무 심기",
+  MoveToHunt: "사냥터로 이동",
+  Hunt: "사냥",
+  MoveToTame: "가축으로 이동",
+  Tame: "길들이기",
+  MoveToRedevelop: "재건축지로 이동",
+  Redevelop: "재건축",
+  MoveToPark: "공원으로 이동",
+  Relax: "휴식",
+  MoveToClean: "청소지로 이동",
+  Clean: "청소",
+  Patrol: "순찰",
+  Wander: "배회",
+  Rest: "쉬기",
+};
+
+function stateName(state: AgentState): string {
+  return tr(state, STATE_LABELS_KO[state] ?? state);
+}
+
+const JOB_LABELS_KO: Record<Agent["job"], string> = {
+  none: "주민",
+  builder: "건축가",
+  farmer: "농부",
+  fisher: "어부",
+  woodcutter: "나무꾼",
+  cook: "요리사",
+  hunter: "사냥꾼",
+  cleaner: "청소부",
+  police: "경찰",
+  mayor: "시장",
+};
+
+function jobName(job: Agent["job"]): string {
+  return tr(job, JOB_LABELS_KO[job] ?? job);
+}
 
 export default function App() {
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
@@ -41,6 +112,7 @@ export default function App() {
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
   );
+  const [lang, setLangState] = useState<Lang>(() => getLang());
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
@@ -129,8 +201,21 @@ export default function App() {
     setSpeed(value);
   };
 
+  const toggleLang = () => {
+    const next: Lang = lang === "ko" ? "en" : "ko";
+    setLang(next);
+    setLangState(next);
+  };
+
   const resetWorld = () => {
-    if (!window.confirm("Start a new world? The current village will be lost.")) {
+    if (
+      !window.confirm(
+        tr(
+          "Start a new world? The current village will be lost.",
+          "새 세계를 시작할까요? 현재 마을은 사라집니다.",
+        ),
+      )
+    ) {
       return;
     }
     gameRef.current?.simulation.disableSaving();
@@ -164,7 +249,7 @@ export default function App() {
                   {clock.isNight ? "🌙" : "☀️"}
                 </span>
                 <span className="hud-stats">
-                  {ERA_NAMES[era] ?? "?"} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
+                  {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
                   {meals}
                   {litter > 0 ? ` · 🗑️${litter}` : ""}
                   {unrest >= 20 ? ` · 😠${unrest}` : ""}
@@ -172,7 +257,7 @@ export default function App() {
                 </span>
               </>
             ) : (
-              <span className="hud-date">Loading…</span>
+              <span className="hud-date">{tr("Loading…", "불러오는 중…")}</span>
             )}
           </div>
           <div className="hud-actions">
@@ -187,7 +272,12 @@ export default function App() {
                 {option === 0 ? "⏸" : `${option}×`}
               </button>
             ))}
-            <button type="button" className="hud-speed" onClick={recenter} title="Recenter">
+            <button
+              type="button"
+              className="hud-speed"
+              onClick={recenter}
+              title={tr("Recenter", "중앙 정렬")}
+            >
               ⌖
             </button>
             <button
@@ -195,9 +285,21 @@ export default function App() {
               className="hud-speed"
               onClick={toggleFlatBuildings}
               data-active={!flatBuildings}
-              title={flatBuildings ? "Flat view (tap for 2.5D)" : "2.5D view (tap for flat)"}
+              title={
+                flatBuildings
+                  ? tr("Flat view (tap for 2.5D)", "평면 보기 (눌러 2.5D)")
+                  : tr("2.5D view (tap for flat)", "2.5D 보기 (눌러 평면)")
+              }
             >
               {flatBuildings ? "▦" : "🏙"}
+            </button>
+            <button
+              type="button"
+              className="hud-speed"
+              onClick={toggleLang}
+              title={tr("Switch to Korean", "Switch to English")}
+            >
+              {lang === "ko" ? "한" : "EN"}
             </button>
           </div>
         </div>
@@ -240,13 +342,13 @@ export default function App() {
       <aside className="side-panel">
         <nav className="panel-tabs">
           <button type="button" data-active={tab === "world"} onClick={() => setTab("world")}>
-            World
+            {tr("World", "세계")}
           </button>
           <button type="button" data-active={tab === "people"} onClick={() => setTab("people")}>
-            People <span className="tab-count">{agents.length}</span>
+            {tr("People", "주민")} <span className="tab-count">{agents.length}</span>
           </button>
           <button type="button" data-active={tab === "log"} onClick={() => setTab("log")}>
-            Log
+            {tr("Log", "기록")}
           </button>
         </nav>
 
@@ -264,10 +366,12 @@ export default function App() {
 
         {tab === "people" && (
           <section className="panel-section panel-grow">
-            <h2>Residents</h2>
+            <h2>{tr("Residents", "주민")}</h2>
             <div className="agent-list agent-list-full">
               {agents.length === 0 ? (
-                <p className="muted">Add a resident to start the simulation.</p>
+                <p className="muted">
+                  {tr("Add a resident to start the simulation.", "주민을 추가해 시뮬레이션을 시작하세요.")}
+                </p>
               ) : (
                 agents.map((agent) => (
                   <article
@@ -278,13 +382,18 @@ export default function App() {
                     <div>
                       <strong>{agent.name}</strong>
                       <span>
-                        {agent.job !== "none" ? `${agent.job} · ` : ""}
-                        {agent.state}
+                        {agent.job !== "none" ? `${jobName(agent.job)} · ` : ""}
+                        {stateName(agent.state)}
                       </span>
                     </div>
                     <div>
-                      <span>{agent.age}y</span>
-                      <span>Stamina {Math.round(agent.health.stamina)}</span>
+                      <span>
+                        {agent.age}
+                        {tr("y", "세")}
+                      </span>
+                      <span>
+                        {tr("Stamina", "체력")} {Math.round(agent.health.stamina)}
+                      </span>
                     </div>
                   </article>
                 ))

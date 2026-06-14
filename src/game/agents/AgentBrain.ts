@@ -2,6 +2,7 @@ import type { Agent, AgentState, Building, BuildingKind, TileType, Vec2 } from "
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
+import { tr } from "../../i18n";
 
 const MOVE_SPEED_TILES_PER_SECOND = 4.5;
 const CHOP_DURATION_SECONDS = 1.8;
@@ -329,7 +330,7 @@ export class AgentBrain {
       agent.home = undefined;
       agent.homeBuildingId = undefined;
       agent.homeSite = undefined;
-      simulation.log(`${agent.name} moved out to find a place of their own. 🧳`, [agent]);
+      simulation.log(tr(`${agent.name} moved out to find a place of their own. 🧳`, `${agent.name}이(가) 자기만의 보금자리를 찾아 독립했다. 🧳`), [agent]);
       return;
     }
 
@@ -431,19 +432,19 @@ export class AgentBrain {
         return this.goWorship(agent, simulation);
       case "social":
         if (this.seekCompany(agent, simulation)) {
-          this.maybeLog(simulation, `${agent.name} went looking for company.`);
+          this.maybeLog(simulation, tr(`${agent.name} went looking for company.`, `${agent.name}이(가) 어울릴 사람을 찾아 나섰다.`));
           return true;
         }
         return false;
       case "leisure":
         this.wanderNearHome(agent, simulation);
-        this.maybeLog(simulation, `${agent.name} wandered off to take in the village.`);
+        this.maybeLog(simulation, tr(`${agent.name} wandered off to take in the village.`, `${agent.name}이(가) 마을을 둘러보러 거닐었다.`));
         return true;
       case "comfort":
         // Only actionable if a park exists; otherwise the unmet need shows up as
         // low wellbeing and prompts builders to lay one out (see communalProject).
         if (this.goRelax(agent, simulation)) {
-          this.maybeLog(simulation, `${agent.name} went to the park for some air.`);
+          this.maybeLog(simulation, tr(`${agent.name} went to the park for some air.`, `${agent.name}이(가) 바람을 쐬러 공원에 갔다.`));
           return true;
         }
         return false;
@@ -571,7 +572,7 @@ export class AgentBrain {
     }
 
     if (agent.actionTimer === 0) {
-      simulation.log(`${agent.name} began redeveloping a house.`, [agent]);
+      simulation.log(tr(`${agent.name} began redeveloping a house.`, `${agent.name}이(가) 집을 재개발하기 시작했다.`), [agent]);
     }
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < BUILD_DURATION_SECONDS) {
@@ -864,7 +865,7 @@ export class AgentBrain {
   private findTree(agent: Agent, simulation: Simulation) {
     const route = this.routeToNearest(agent, simulation, "Tree", true);
     if (!route) {
-      simulation.log(`${agent.name} could not reach a tree.`);
+      simulation.log(tr(`${agent.name} could not reach a tree.`, `${agent.name}이(가) 나무에 닿지 못했다.`));
       this.backOff(agent, simulation);
       return;
     }
@@ -872,7 +873,7 @@ export class AgentBrain {
     simulation.claimTile(route.target);
     agent.target = route.target;
     agent.path = route.path;
-    simulation.log(`${agent.name} found a tree.`);
+    simulation.log(tr(`${agent.name} found a tree.`, `${agent.name}이(가) 나무를 찾았다.`));
     this.setState(agent, simulation, "MoveToTree");
   }
 
@@ -888,7 +889,7 @@ export class AgentBrain {
     }
     agent.inventory.wood += 1;
     agent.health.stamina = Math.max(0, agent.health.stamina - 8);
-    simulation.log(`${agent.name} chopped wood. +1 wood`);
+    simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -909,7 +910,7 @@ export class AgentBrain {
       },
     );
     if (!site) {
-      simulation.log(`${agent.name} could not find a house site.`);
+      simulation.log(tr(`${agent.name} could not find a house site.`, `${agent.name}이(가) 집 지을 자리를 찾지 못했다.`));
       this.backOff(agent, simulation);
       return;
     }
@@ -940,7 +941,7 @@ export class AgentBrain {
     agent.homeSite = { ...door };
     agent.target = { ...door };
     agent.path = path;
-    simulation.log(`${agent.name} chose a house site.`);
+    simulation.log(tr(`${agent.name} chose a house site.`, `${agent.name}이(가) 집 지을 자리를 골랐다.`));
     this.setState(agent, simulation, "MoveToHouseSite");
   }
 
@@ -1020,7 +1021,7 @@ export class AgentBrain {
     agent.projectBuildingId = building.id;
     agent.target = { ...door };
     agent.path = path;
-    simulation.log(`${agent.name} is planning a village ${kind}.`);
+    simulation.log(tr(`${agent.name} is planning a village ${kind}.`, `${agent.name}이(가) 마을 ${kind}을(를) 계획하고 있다.`));
     this.setState(agent, simulation, "MoveToHouseSite");
     return true;
   }
@@ -1058,7 +1059,7 @@ export class AgentBrain {
       simulation.foodStock -= COOK_RAW_COST;
       simulation.meals += COOK_MEAL_YIELD;
       if (Math.random() < 0.4) {
-        simulation.log(`${agent.name} cooked warm meals at the kitchen.`);
+        simulation.log(tr(`${agent.name} cooked warm meals at the kitchen.`, `${agent.name}이(가) 부엌에서 따뜻한 식사를 지었다.`));
       }
       simulation.notifyChanged();
     }
@@ -1070,7 +1071,7 @@ export class AgentBrain {
   private headToProject(agent: Agent, simulation: Simulation, door: Vec2) {
     const path = findPath(simulation.world, { start: agent.position, goal: door });
     if (!path) {
-      simulation.log(`${agent.name} cannot reach the construction site.`);
+      simulation.log(tr(`${agent.name} cannot reach the construction site.`, `${agent.name}이(가) 공사장에 닿지 못한다.`));
       this.backOff(agent, simulation);
       return;
     }
@@ -1087,7 +1088,7 @@ export class AgentBrain {
 
     const path = findPath(simulation.world, { start: agent.position, goal: agent.homeSite });
     if (!path) {
-      simulation.log(`${agent.name} cannot reach their house site.`);
+      simulation.log(tr(`${agent.name} cannot reach their house site.`, `${agent.name}이(가) 자기 집터에 닿지 못한다.`));
       this.backOff(agent, simulation);
       return;
     }
@@ -1110,8 +1111,8 @@ export class AgentBrain {
       simulation.setBuildingStage(building, "site");
       simulation.log(
         building.kind === "house"
-          ? `${agent.name} marked a future home.`
-          : `${agent.name} staked out the ${building.kind}.`,
+          ? tr(`${agent.name} marked a future home.`, `${agent.name}이(가) 미래의 보금자리 자리를 표시했다.`)
+          : tr(`${agent.name} staked out the ${building.kind}.`, `${agent.name}이(가) ${building.kind} 자리를 잡았다.`),
       );
     }
     agent.target = undefined;
@@ -1134,8 +1135,8 @@ export class AgentBrain {
       simulation.setBuildingStage(building, "foundation");
       simulation.log(
         building.kind === "house"
-          ? `${agent.name} started building a house.`
-          : `${agent.name} started building the ${building.kind}.`,
+          ? tr(`${agent.name} started building a house.`, `${agent.name}이(가) 집을 짓기 시작했다.`)
+          : tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${building.kind}을(를) 짓기 시작했다.`),
       );
     }
 
@@ -1150,9 +1151,9 @@ export class AgentBrain {
     if (building.kind === "house") {
       agent.home = { ...building.door };
       agent.homeSite = undefined;
-      simulation.log(`${agent.name} finished their house.`, [agent]);
+      simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
     } else {
-      simulation.log(`${agent.name} built the village ${building.kind}!`, [agent]);
+      simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${building.kind}을(를) 지었다!`), [agent]);
     }
     agent.projectBuildingId = undefined;
     agent.target = undefined;
@@ -1187,7 +1188,7 @@ export class AgentBrain {
 
     const route = this.routeToNearest(agent, simulation, "Berry", false);
     if (!route) {
-      simulation.log(`${agent.name} is hungry but found no food.`);
+      simulation.log(tr(`${agent.name} is hungry but found no food.`, `${agent.name}이(가) 배고프지만 먹을 것을 찾지 못했다.`));
       this.backOff(agent, simulation);
       return;
     }
@@ -1196,7 +1197,7 @@ export class AgentBrain {
     agent.eatPlan = "berry";
     agent.target = route.target;
     agent.path = route.path;
-    simulation.log(`${agent.name} went looking for berries.`);
+    simulation.log(tr(`${agent.name} went looking for berries.`, `${agent.name}이(가) 산딸기를 찾아 나섰다.`));
     this.setState(agent, simulation, "MoveToFood");
   }
 
@@ -1210,13 +1211,13 @@ export class AgentBrain {
       if (simulation.meals > 0) {
         simulation.meals -= 1;
         agent.health.hunger = Math.max(0, agent.health.hunger - 80);
-        simulation.log(`${agent.name} enjoyed a warm meal.`);
+        simulation.log(tr(`${agent.name} enjoyed a warm meal.`, `${agent.name}이(가) 따뜻한 식사를 즐겼다.`));
       }
     } else if (agent.eatPlan === "warehouse") {
       if (simulation.foodStock > 0) {
         simulation.foodStock -= 1;
         agent.health.hunger = Math.max(0, agent.health.hunger - 60);
-        simulation.log(`${agent.name} ate from the warehouse.`);
+        simulation.log(tr(`${agent.name} ate from the warehouse.`, `${agent.name}이(가) 창고에서 끼니를 해결했다.`));
       }
     } else {
       if (agent.target) {
@@ -1224,7 +1225,7 @@ export class AgentBrain {
         simulation.releaseClaim(agent.target);
       }
       agent.health.hunger = Math.max(0, agent.health.hunger - 55);
-      simulation.log(`${agent.name} ate berries.`);
+      simulation.log(tr(`${agent.name} ate berries.`, `${agent.name}이(가) 산딸기를 먹었다.`));
     }
     agent.eatPlan = undefined;
     agent.target = undefined;
@@ -1294,11 +1295,11 @@ export class AgentBrain {
       if (tile?.type === "FieldRipe") {
         simulation.world.setTile(center, "FieldEmpty");
         simulation.foodStock += 2;
-        simulation.log(`${agent.name} harvested crops. +2 food`);
+        simulation.log(tr(`${agent.name} harvested crops. +2 food`, `${agent.name}이(가) 작물을 거뒀다. +식량 2`));
       } else if (tile?.type === "FieldEmpty") {
         simulation.world.setTile(center, "FieldGrowing");
         if (Math.random() < 0.35) {
-          simulation.log(`${agent.name} sowed seeds.`);
+          simulation.log(tr(`${agent.name} sowed seeds.`, `${agent.name}이(가) 씨를 뿌렸다.`));
         }
       } else if (tile?.type === "Grass") {
         for (let dy = -1; dy <= 1; dy += 1) {
@@ -1310,7 +1311,7 @@ export class AgentBrain {
             }
           }
         }
-        simulation.log(`${agent.name} tilled a new field.`);
+        simulation.log(tr(`${agent.name} tilled a new field.`, `${agent.name}이(가) 새 밭을 일궜다.`));
       }
     }
     agent.target = undefined;
@@ -1363,7 +1364,7 @@ export class AgentBrain {
       if (tile?.type === "Dirt") {
         simulation.world.setTile(agent.target, "Road");
         if (Math.random() < 0.3) {
-          simulation.log(`${agent.name} paved a stretch of road.`);
+          simulation.log(tr(`${agent.name} paved a stretch of road.`, `${agent.name}이(가) 길 한 구간을 포장했다.`));
         }
       }
     }
@@ -1472,7 +1473,7 @@ export class AgentBrain {
     const kind = animal.kind;
     const felled = simulation.strikeAnimal(animal);
     if (felled) {
-      simulation.log(`${agent.name} hunted a ${kind}. +${simulation.animalFoodValue(kind)} food 🏹`, [
+      simulation.log(tr(`${agent.name} hunted a ${kind}. +${simulation.animalFoodValue(kind)} food 🏹`, `${agent.name}이(가) ${kind}을(를) 사냥했다. +식량 ${simulation.animalFoodValue(kind)} 🏹`), [
         agent,
       ]);
       agent.huntTargetId = undefined;
@@ -1499,7 +1500,7 @@ export class AgentBrain {
     }
 
     if (simulation.tameAnimal(animal)) {
-      simulation.log(`${agent.name} tamed a ${animal.kind} for the pasture. 🐾`, [agent]);
+      simulation.log(tr(`${agent.name} tamed a ${animal.kind} for the pasture. 🐾`, `${agent.name}이(가) 목장에 둘 ${animal.kind}을(를) 길들였다. 🐾`), [agent]);
     }
     agent.huntTargetId = undefined;
     agent.target = undefined;
@@ -1626,7 +1627,7 @@ export class AgentBrain {
       simulation.releaseClaim(spot);
       if (simulation.world.getTile(spot)?.type === "Grass") {
         simulation.world.setTile(spot, "Tree");
-        simulation.log(`${agent.name} transplanted a sapling to greener ground. 🌱`);
+        simulation.log(tr(`${agent.name} transplanted a sapling to greener ground. 🌱`, `${agent.name}이(가) 묘목을 더 푸른 땅으로 옮겨 심었다. 🌱`));
       }
     }
     agent.target = undefined;
@@ -1695,7 +1696,7 @@ export class AgentBrain {
     if (this.canMarry(agent, partner) && Math.random() < MARRIAGE_CHANCE) {
       this.marry(agent, partner, simulation);
     } else {
-      simulation.log(`${agent.name} and ${partner.name} stopped for a chat.`);
+      simulation.log(tr(`${agent.name} and ${partner.name} stopped for a chat.`, `${agent.name}와(과) ${partner.name}이(가) 멈춰 서서 담소를 나눴다.`));
     }
   }
 
@@ -1734,7 +1735,7 @@ export class AgentBrain {
 
     a.spouseId = b.id;
     b.spouseId = a.id;
-    simulation.log(`${a.name} and ${b.name} got married! 💍`, [a, b]);
+    simulation.log(tr(`${a.name} and ${b.name} got married! 💍`, `${a.name}와(과) ${b.name}이(가) 결혼했다! 💍`), [a, b]);
   }
 
   /**
@@ -1745,7 +1746,7 @@ export class AgentBrain {
   private tryHousing(agent: Agent, simulation: Simulation): boolean {
     const spare = simulation.findHouseWithSpareCapacity();
     if (spare) {
-      this.moveInto(agent, simulation, spare, "moved into shared housing");
+      this.moveInto(agent, simulation, spare, tr("moved into shared housing", "공동 주택에 들어갔다"));
       return true;
     }
 
@@ -1764,7 +1765,7 @@ export class AgentBrain {
     }
     agent.inventory.wood -= cost;
     simulation.levelUpHouse(house);
-    this.moveInto(agent, simulation, house, "joined a denser household");
+    this.moveInto(agent, simulation, house, tr("joined a denser household", "더 북적이는 살림에 합류했다"));
     return true;
   }
 
@@ -1801,7 +1802,7 @@ export class AgentBrain {
     empty.ownerId = agent.id;
     agent.home = { ...empty.door };
     agent.homeBuildingId = empty.id;
-    simulation.log(`${agent.name} moved into an empty house.`, [agent]);
+    simulation.log(tr(`${agent.name} moved into an empty house.`, `${agent.name}이(가) 빈 집으로 이사했다.`), [agent]);
     return true;
   }
 
@@ -1892,7 +1893,9 @@ export class AgentBrain {
       // Instant rests (loitering at home while already rested) stay out of the log.
       if (agent.actionTimer >= 1) {
         simulation.log(
-          atHome ? `${agent.name} rested at home.` : `${agent.name} finished resting.`,
+          atHome
+            ? tr(`${agent.name} rested at home.`, `${agent.name}이(가) 집에서 쉬었다.`)
+            : tr(`${agent.name} finished resting.`, `${agent.name}이(가) 휴식을 마쳤다.`),
         );
       }
       agent.target = undefined;
@@ -1926,7 +1929,7 @@ export class AgentBrain {
         stopAdjacent: nextState === "ChopTree",
       });
       if (!replanned) {
-        simulation.log(`${agent.name} is blocked and gave up.`);
+        simulation.log(tr(`${agent.name} is blocked and gave up.`, `${agent.name}이(가) 길이 막혀 포기했다.`));
         this.abandonTask(agent, simulation);
         this.backOff(agent, simulation);
         return;

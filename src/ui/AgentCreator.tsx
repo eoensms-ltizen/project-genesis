@@ -1,3 +1,5 @@
+import { tr } from "../i18n";
+
 type AgentCreatorProps = {
   onCreate: () => void;
 };
@@ -5,9 +7,9 @@ type AgentCreatorProps = {
 export function AgentCreator({ onCreate }: AgentCreatorProps) {
   return (
     <section className="panel-section">
-      <h2>Agent Creator</h2>
+      <h2>{tr("Agent Creator", "주민 생성")}</h2>
       <button type="button" onClick={onCreate}>
-        Create random agent
+        {tr("Create random agent", "무작위 주민 생성")}
       </button>
     </section>
   );

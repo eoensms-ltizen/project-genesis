@@ -1,4 +1,5 @@
 import type { GameLogEntry } from "../game/types";
+import { tr } from "../i18n";
 
 type GameLogProps = {
   entries: GameLogEntry[];
@@ -7,7 +8,7 @@ type GameLogProps = {
 export function GameLog({ entries }: GameLogProps) {
   return (
     <section className="panel-section log-panel">
-      <h2>Game Log</h2>
+      <h2>{tr("Game Log", "기록")}</h2>
       <div className="log-list">
         {entries.map((entry) => (
           <div className="log-line" key={entry.id}>

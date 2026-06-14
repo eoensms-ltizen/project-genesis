@@ -15,6 +15,7 @@ import type {
   Vec2,
 } from "./types";
 import { WorldMap } from "./world/WorldMap";
+import { tr } from "../i18n";
 
 type SimulationOptions = {
   onChange: (snapshot: SimulationSnapshot) => void;
@@ -322,10 +323,10 @@ export class Simulation {
           bumpAgentIdCounter(idNumber + 1);
         }
       }
-      this.log("The village awakens.");
+      this.log(tr("The village awakens.", "마을이 깨어난다."));
     } else {
       this.world = WorldMap.createRandom();
-      this.log("A new valley is ready.");
+      this.log(tr("A new valley is ready.", "새로운 골짜기가 준비되었다."));
     }
     this.refreshDoors();
     this.recomputeAmbiance();
@@ -335,7 +336,7 @@ export class Simulation {
     const spawn = this.findSpawnPosition(position);
     const agent = createRandomAgent(spawn, this.takenNames());
     this.agents.push(agent);
-    this.log(`${agent.name} spawned.`, [agent]);
+    this.log(tr(`${agent.name} spawned.`, `${agent.name}이(가) 나타났다.`), [agent]);
     this.notifyChanged();
   }
 
@@ -690,11 +691,11 @@ export class Simulation {
     }
     if (tile.type === "Grass" && count >= PATH_WEAR_THRESHOLD) {
       this.world.setTile(tile, "Dirt");
-      this.logPathEvent("A footpath is being worn into the grass.");
+      this.logPathEvent(tr("A footpath is being worn into the grass.", "풀밭에 오솔길이 나기 시작한다."));
     } else if (tile.type === "Dirt" && count >= ROAD_WEAR_THRESHOLD) {
       this.world.setTile(tile, "Road");
       this.traffic.delete(index);
-      this.logPathEvent("A well-trodden path has become a road.");
+      this.logPathEvent(tr("A well-trodden path has become a road.", "잘 다져진 길이 도로가 되었다."));
     }
   }
 
@@ -831,7 +832,7 @@ export class Simulation {
 
     if (berries.length === 0) {
       this.world.seedBerryCluster();
-      this.log("Wild berries sprouted in the valley.");
+      this.log(tr("Wild berries sprouted in the valley.", "골짜기에 산딸기가 돋아났다."));
       return;
     }
 
@@ -897,7 +898,7 @@ export class Simulation {
       // would deadlock: the population can never grow enough to build a fourth.
       if (this.agents.length >= 6 && builtHouses >= 3) {
         this.era = 1;
-        this.log("The village entered the Settlement era! Fields and a warehouse are now possible.");
+        this.log(tr("The village entered the Settlement era! Fields and a warehouse are now possible.", "마을이 정착지 시대에 들어섰다! 이제 밭과 창고를 지을 수 있다."));
       }
       return;
     }
@@ -908,7 +909,7 @@ export class Simulation {
       );
       if (this.agents.length >= 12 && hasWarehouse && this.foodStock >= 20) {
         this.era = 2;
-        this.log("The village entered the Town era! Residents will start paving roads.");
+        this.log(tr("The village entered the Town era! Residents will start paving roads.", "마을이 읍내 시대에 들어섰다! 주민들이 도로를 깔기 시작한다."));
       }
       return;
     }
@@ -916,7 +917,7 @@ export class Simulation {
     if (this.era === 2) {
       if (this.agents.length >= 20 && this.getChurch() && this.getKitchen()) {
         this.era = 3;
-        this.log("The village blossomed into a City! A plaza will grow at its heart.");
+        this.log(tr("The village blossomed into a City! A plaza will grow at its heart.", "마을이 도시로 피어났다! 그 중심에 광장이 자라난다."));
       }
       return;
     }
@@ -924,7 +925,7 @@ export class Simulation {
     if (this.era === 3) {
       if (this.agents.length >= 26 && this.hasAnyPasture()) {
         this.era = 4;
-        this.log("The Industrial age dawns! Power, factories, and railways are coming. ⚙️");
+        this.log(tr("The Industrial age dawns! Power, factories, and railways are coming. ⚙️", "산업 시대가 밝아온다! 전력과 공장, 철도가 찾아온다. ⚙️"));
       }
     }
   }
@@ -1044,7 +1045,7 @@ export class Simulation {
       door: { x: site.x + 1, y: site.y + 2 },
     });
     this.setBuildingStage(park, "built");
-    this.log("The town laid out a new park. 🌳");
+    this.log(tr("The town laid out a new park. 🌳", "마을에 새 공원이 들어섰다. 🌳"));
   }
 
   /**
@@ -1208,7 +1209,7 @@ export class Simulation {
       }
     }
     if (cleared > 0) {
-      this.logPathEvent("Fields crowding the homes were cleared, to be re-sown further out. 🌱");
+      this.logPathEvent(tr("Fields crowding the homes were cleared, to be re-sown further out. 🌱", "집들을 비좁게 하던 밭을 치웠다, 더 바깥에 다시 일굴 것이다. 🌱"));
     }
 
     const misplaced = this.buildings.find(
@@ -1220,7 +1221,7 @@ export class Simulation {
     if (misplaced) {
       const kind = misplaced.kind;
       this.removeBuilding(misplaced);
-      this.log(`The ${kind} was too close to the homes — it will be rebuilt on the outskirts. 🏗️`);
+      this.log(tr(`The ${kind} was too close to the homes — it will be rebuilt on the outskirts. 🏗️`, `${kind}이(가) 집들과 너무 가까웠다 — 변두리에 다시 지을 것이다. 🏗️`));
     }
   }
 
@@ -1425,11 +1426,11 @@ export class Simulation {
     }
     if (this.policeCount() > 0) {
       this.unrest = Math.max(0, this.unrest - 12);
-      this.logPathEvent(`An officer broke up a quarrel between ${a.name} and ${b.name}. 👮`);
+      this.logPathEvent(tr(`An officer broke up a quarrel between ${a.name} and ${b.name}. 👮`, `경관이 ${a.name}와(과) ${b.name}의 다툼을 말렸다. 👮`));
     } else {
       a.needs.comfort = Math.max(0, a.needs.comfort - QUARREL_COMFORT_HIT);
       b.needs.comfort = Math.max(0, b.needs.comfort - QUARREL_COMFORT_HIT);
-      this.log(`${a.name} and ${b.name} quarreled — the village needs some order. 😠`);
+      this.log(tr(`${a.name} and ${b.name} quarreled — the village needs some order. 😠`, `${a.name}와(과) ${b.name}이(가) 다퉜다 — 마을에 질서가 필요하다. 😠`));
     }
   }
 
@@ -1521,7 +1522,7 @@ export class Simulation {
       this.trainX = 0;
       this.trainDir = 1;
     }
-    this.log("A railway now crosses the valley. 🚂");
+    this.log(tr("A railway now crosses the valley. 🚂", "이제 철길이 골짜기를 가로지른다. 🚂"));
   }
 
   private updateTrain(deltaSeconds: number) {
@@ -1538,7 +1539,7 @@ export class Simulation {
     // Deliver goods when the train passes the station.
     if ((prev < stationX && this.trainX >= stationX) || (prev > stationX && this.trainX <= stationX)) {
       this.foodStock = Math.min(FOOD_CAP, this.foodStock + TRAIN_DELIVER_FOOD);
-      this.log("A trade train rolled through the station. 🚃 +" + TRAIN_DELIVER_FOOD + " food");
+      this.log(tr(`A trade train rolled through the station. 🚃 +${TRAIN_DELIVER_FOOD} food`, `교역 열차가 역을 지나갔다. 🚃 +식량 ${TRAIN_DELIVER_FOOD}`));
     }
 
     if (this.trainX > this.world.width + 3) {
@@ -1609,7 +1610,7 @@ export class Simulation {
       world.setTile({ x: hubX, y: hubY - radius }, "Statue");
     }
     if (first && world.countType("Plaza") > 0) {
-      this.log("A village plaza was laid out at the town's heart! ⛲");
+      this.log(tr("A village plaza was laid out at the town's heart! ⛲", "마을 한복판에 광장이 들어섰다! ⛲"));
     }
   }
 
@@ -1655,7 +1656,7 @@ export class Simulation {
       return;
     }
     this.lastWorshipLogDay = day;
-    this.log("The villagers gathered for morning worship. 🙏");
+    this.log(tr("The villagers gathered for morning worship. 🙏", "주민들이 아침 예배를 위해 모였다. 🙏"));
   }
 
   /**
@@ -1719,7 +1720,7 @@ export class Simulation {
         next += 1;
         agent.job = job;
         need -= 1;
-        this.log(`${agent.name} became a ${job}.`, [agent]);
+        this.log(tr(`${agent.name} became a ${job}.`, `${agent.name}이(가) ${job}이(가) 되었다.`), [agent]);
       }
     }
   }
@@ -1738,7 +1739,7 @@ export class Simulation {
     const spawn = this.findSpawnPosition({ x: Math.round(center.x), y: Math.round(center.y) });
     const agent = createRandomAgent(spawn, this.takenNames());
     this.agents.push(agent);
-    this.log(`${agent.name} arrived in town, looking for a home. 🧳`, [agent]);
+    this.log(tr(`${agent.name} arrived in town, looking for a home. 🧳`, `${agent.name}이(가) 살 곳을 찾아 마을에 도착했다. 🧳`), [agent]);
     this.notifyChanged();
   }
 
@@ -1800,7 +1801,7 @@ export class Simulation {
     parentB.lastChildAt = this.elapsedSeconds;
     this.agents.push(baby);
     this.lastBirthAt = this.elapsedSeconds;
-    this.log(`${parentA.name} and ${parentB.name} had a baby: ${baby.name}! 👶`, [
+    this.log(tr(`${parentA.name} and ${parentB.name} had a baby: ${baby.name}! 👶`, `${parentA.name}와(과) ${parentB.name} 사이에 아기 ${baby.name}이(가) 태어났다! 👶`), [
       parentA,
       parentB,
       baby,
@@ -1824,10 +1825,10 @@ export class Simulation {
     for (const agent of this.agents) {
       agent.age += 1;
       if (agent.age === ADULT_AGE) {
-        this.log(`${agent.name} came of age. 🎓`, [agent]);
+        this.log(tr(`${agent.name} came of age. 🎓`, `${agent.name}이(가) 성년이 되었다. 🎓`), [agent]);
       } else if (agent.age === ELDER_AGE) {
         agent.job = "none";
-        this.log(`${agent.name} retired as an elder. 🦳`, [agent]);
+        this.log(tr(`${agent.name} retired as an elder. 🦳`, `${agent.name}이(가) 은퇴하여 어르신이 되었다. 🦳`), [agent]);
       }
       if (agent.age > agent.lifespan) {
         deceased.push(agent);
@@ -1841,7 +1842,7 @@ export class Simulation {
 
   private passAway(agent: Agent) {
     this.deaths += 1;
-    this.log(`${agent.name} passed away peacefully at ${agent.age}. 🕯️`);
+    this.log(tr(`${agent.name} passed away peacefully at ${agent.age}. 🕯️`, `${agent.name}이(가) ${agent.age}세에 평온히 세상을 떠났다. 🕯️`));
 
     // Release whatever the agent was holding onto.
     if (agent.target) {
@@ -2353,7 +2354,7 @@ export class Simulation {
         const occ = this.buildingAt(p);
         if (occ && occ !== building && occ.kind === "house") {
           this.demolishHouse(occ);
-          this.log("A house was cleared to make way for an apartment block. 🏗️");
+          this.log(tr("A house was cleared to make way for an apartment block. 🏗️", "아파트 단지가 들어설 자리를 내주려 집 한 채를 헐었다. 🏗️"));
         }
         if (this.world.getTile(p)?.type === "Tree") {
           this.world.setTile(p, "Grass");
@@ -2389,10 +2390,10 @@ export class Simulation {
     this.reserveEntrance(building);
     const label =
       next >= 4
-        ? "A block was rebuilt into a residential tower. 🗼"
+        ? tr("A block was rebuilt into a residential tower. 🗼", "한 블록이 주거용 타워로 다시 지어졌다. 🗼")
         : next === 3
-          ? "A house grew into an apartment block. 🏢"
-          : "A house was extended into a villa. 🏘️";
+          ? tr("A house grew into an apartment block. 🏢", "집 한 채가 아파트 단지로 자라났다. 🏢")
+          : tr("A house was extended into a villa. 🏘️", "집 한 채가 빌라로 증축되었다. 🏘️");
     this.log(label);
     this.refreshDoors();
     this.notifyChanged();
@@ -2455,7 +2456,7 @@ export class Simulation {
       this.buildings.splice(index, 1);
     }
     this.refreshDoors();
-    this.log("An abandoned house crumbled back into the land. 🍂");
+    this.log(tr("An abandoned house crumbled back into the land. 🍂", "버려진 집이 허물어져 땅으로 돌아갔다. 🍂"));
     this.notifyChanged();
   }
 

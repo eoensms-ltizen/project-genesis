@@ -1,3 +1,5 @@
+import { tr } from "../i18n";
+
 type ControlPanelProps = {
   onAddRandom: () => void;
   onPlaceAgent: () => void;
@@ -13,21 +15,23 @@ export function ControlPanel({
 }: ControlPanelProps) {
   return (
     <section className="panel-section">
-      <h2>Controls</h2>
+      <h2>{tr("Controls", "조작")}</h2>
       <div className="button-grid">
         <button type="button" onClick={onAddRandom}>
-          Random resident
+          {tr("Random resident", "무작위 주민")}
         </button>
         <button type="button" onClick={onPlaceAgent} data-active={placementActive}>
-          Place on map
+          {tr("Place on map", "지도에 배치")}
         </button>
         <button type="button" onClick={onReset}>
-          New world
+          {tr("New world", "새 세계")}
         </button>
       </div>
       <p className="hint muted">
-        Tap a resident, animal, or building on the map to inspect it. Drag to pan, pinch or scroll to
-        zoom, ⌖ to recenter.
+        {tr(
+          "Tap a resident, animal, or building on the map to inspect it. Drag to pan, pinch or scroll to zoom, ⌖ to recenter.",
+          "지도에서 주민·동물·건물을 누르면 정보를 봅니다. 드래그로 이동, 핀치/스크롤로 확대, ⌖로 중앙 정렬.",
+        )}
       </p>
     </section>
   );
