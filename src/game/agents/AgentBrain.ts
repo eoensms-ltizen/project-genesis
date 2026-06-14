@@ -901,10 +901,9 @@ export class AgentBrain {
       agent.position,
       2,
       2,
-      (position) => simulation.isTileClaimed(position) || simulation.isOnAvenue(position),
+      (position) => simulation.isTileClaimed(position),
       {
-        // Homes may cluster into a hamlet, but keep off the avenue grid so they
-        // settle into the blocks between streets; the doorway stays clear too.
+        // Homes may cluster into a hamlet, keeping only their doorway clear.
         cluster: true,
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
       },
@@ -972,9 +971,7 @@ export class AgentBrain {
     const height = threeTall.has(kind) ? 3 : 2;
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
-    // Keep communal buildings off the avenue grid too, so streets stay clear.
-    const isClaimed = (position: Vec2) =>
-      simulation.isTileClaimed(position) || simulation.isOnAvenue(position);
+    const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
     const avoidsHomes = kind === "powerplant" || kind === "factory";
     // A factory must sit near the power plant to be electrified (and so forge
     // steel), so it builds next to it; other industry just shuns housing.
@@ -1946,7 +1943,11 @@ export class AgentBrain {
         agent.position = { x: waypoint.x, y: waypoint.y };
         remaining -= gap;
         agent.path.shift();
-        simulation.recordTraffic(waypoint);
+        // Only working-age adults wear roads in; children's wandering doesn't
+        // carve the street network (and there can be a lot of children).
+        if (agent.age >= ADULT_AGE) {
+          simulation.recordTraffic(waypoint);
+        }
       } else {
         agent.position = stepToward(agent.position, waypoint, remaining);
         remaining = 0;

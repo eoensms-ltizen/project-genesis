@@ -26,11 +26,6 @@ type SimulationOptions = {
 const PATH_WEAR_THRESHOLD = 4;
 const ROAD_WEAR_THRESHOLD = 9;
 
-// Planned street grid: from the Town era a planner paves avenues along a fixed
-// grid (every AVENUE_SPACING tiles), and buildings keep off the grid lines so
-// they settle into the blocks between — giving a deliberate, real-city layout.
-// Blocks are roomy enough to hold several buildings each.
-const AVENUE_SPACING = 8;
 
 // Parks scale with the town: green space area grows with population, but the
 // village prefers enlarging one park (a bigger park reaches farther) over
@@ -48,6 +43,13 @@ const BIRTH_COOLDOWN_SECONDS = 12;
 // village only supports more residents as it advances through the eras, and
 // even then only up to what its housing can shelter (see supportedPopulation).
 const ERA_POP_CEILING = [8, 14, 22, 30, 40];
+
+// Observation mode (temporary): births are paused and growth comes instead from
+// adult newcomers arriving over time, with the cap lifted, so the town's
+// need-driven building can be watched without a glut of children.
+const BIRTHS_ENABLED = false;
+const IMMIGRATION_INTERVAL_SECONDS = 20;
+const EXPERIMENT_POP_CAP = 90; // a safety ceiling for performance, not a design cap
 // Couples only have children when the village is, on average, content — so
 // growth follows happiness, and an overstretched settlement naturally pauses.
 const BIRTH_WELLBEING = 55;
@@ -254,6 +256,7 @@ export class Simulation {
   private autosaveTimer = 0;
   private uiEmitTimer = UI_EMIT_INTERVAL_SECONDS;
   private lastBirthAt = 0;
+  private lastImmigrationAt = 0;
   private lastPathLogAt = -PATH_LOG_COOLDOWN_SECONDS;
   private nextLogId = 1;
   private dirty = true;
@@ -345,7 +348,10 @@ export class Simulation {
       this.natureTimer = 0;
       this.regrowNature();
       this.growCrops();
-      this.tryBirth();
+      if (BIRTHS_ENABLED) {
+        this.tryBirth();
+      }
+      this.immigrate();
       this.checkEraPromotion();
       this.assignJobs();
       this.ageResidents();
@@ -357,7 +363,6 @@ export class Simulation {
       this.relocateMisplacedWork();
       this.spawnLitter();
       this.updateUnrest();
-      this.planRoads();
       this.updateParks();
     }
 
@@ -437,25 +442,36 @@ export class Simulation {
   /**
    * Entrances facing the nearest streets. Each candidate side's door sits on the
    * footprint edge with its approach tile just outside; sides are ranked by how
-   * close they are to a bounding avenue, and only sides whose approach is open
+   * close they are to an actual road, and only sides whose approach is open
    * ground qualify. Big buildings get a second entrance. Falls back to the south
    * side so a building always has at least one door.
    */
   private computeDoors(x: number, y: number, width: number, height: number): Vec2[] {
-    const S = AVENUE_SPACING;
     const cx = x + Math.floor(width / 2);
     const cy = y + Math.floor(height / 2);
     const xl = x;
     const xr = x + width - 1;
     const yt = y;
     const yb = y + height - 1;
+    // Distance from an approach tile to the nearest road, scanning outward.
+    const roadDist = (sx: number, sy: number, dx: number, dy: number): number => {
+      for (let k = 1; k <= 6; k += 1) {
+        const t = this.world.getTile({ x: sx + dx * k, y: sy + dy * k })?.type;
+        if (t === "Road" || t === "Dirt" || t === "Plaza") {
+          return k;
+        }
+        if (t === undefined || t === "Water" || t === "Tree" || t === "House") {
+          break;
+        }
+      }
+      return 99;
+    };
     type Side = { dist: number; door: Vec2; front: Vec2 };
     const candidates: Side[] = [
-      // south, north, east, west — distance to the bounding avenue in that direction
-      { dist: (Math.floor(yb / S) + 1) * S - yb, door: { x: cx, y: yb }, front: { x: cx, y: yb + 1 } },
-      { dist: yt - Math.floor(yt / S) * S, door: { x: cx, y: yt }, front: { x: cx, y: yt - 1 } },
-      { dist: (Math.floor(xr / S) + 1) * S - xr, door: { x: xr, y: cy }, front: { x: xr + 1, y: cy } },
-      { dist: xl - Math.floor(xl / S) * S, door: { x: xl, y: cy }, front: { x: xl - 1, y: cy } },
+      { dist: roadDist(cx, yb, 0, 1), door: { x: cx, y: yb }, front: { x: cx, y: yb + 1 } },
+      { dist: roadDist(cx, yt, 0, -1), door: { x: cx, y: yt }, front: { x: cx, y: yt - 1 } },
+      { dist: roadDist(xr, cy, 1, 0), door: { x: xr, y: cy }, front: { x: xr + 1, y: cy } },
+      { dist: roadDist(xl, cy, -1, 0), door: { x: xl, y: cy }, front: { x: xl - 1, y: cy } },
     ];
     const open = (p: Vec2): boolean => {
       const t = this.world.getTile(p)?.type;
@@ -674,88 +690,6 @@ export class Simulation {
       this.world.setTile(tile, "Road");
       this.traffic.delete(index);
       this.logPathEvent("A well-trodden path has become a road.");
-    }
-  }
-
-  /** True if a tile lies on the planned avenue grid. */
-  isOnAvenue(position: Vec2): boolean {
-    return position.x % AVENUE_SPACING === 0 || position.y % AVENUE_SPACING === 0;
-  }
-
-  /**
-   * Pave the avenue grid through the built-up area: straight roads along the
-   * fixed grid lines, threading between the blocks the buildings occupy.
-   */
-  private planRoads() {
-    if (this.era < 2 || !this.hasMayor()) {
-      return;
-    }
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let count = 0;
-    for (const b of this.buildings) {
-      if (b.stage !== "built" || b.kind === "cemetery") {
-        continue;
-      }
-      minX = Math.min(minX, b.x);
-      minY = Math.min(minY, b.y);
-      maxX = Math.max(maxX, b.x + b.width - 1);
-      maxY = Math.max(maxY, b.y + b.height - 1);
-      count += 1;
-    }
-    if (count < 3) {
-      return;
-    }
-    minX = Math.max(1, minX - 1);
-    minY = Math.max(1, minY - 1);
-    maxX = Math.min(this.world.width - 2, maxX + 1);
-    maxY = Math.min(this.world.height - 2, maxY + 1);
-
-    for (let y = minY; y <= maxY; y += 1) {
-      for (let x = minX; x <= maxX; x += 1) {
-        const onGrid = x % AVENUE_SPACING === 0 || y % AVENUE_SPACING === 0;
-        const tile = this.world.getTile({ x, y });
-        if (!tile) {
-          continue;
-        }
-        if (onGrid) {
-          // A tree or berry bush in the avenue's path is transplanted out so the
-          // street runs straight; then the grid line is paved.
-          if (tile.type === "Tree" || tile.type === "Berry") {
-            this.transplantObstruction({ x, y }, tile.type);
-          }
-          if ((tile.type === "Grass" || tile.type === "Dirt") && !this.isTileClaimed({ x, y })) {
-            this.world.setTile({ x, y }, "Road");
-          }
-        } else if (
-          (tile.type === "Road" || tile.type === "Dirt") &&
-          !this.isTileClaimed({ x, y }) &&
-          !this.adjacentToStructure(tile) &&
-          (this.traffic.get(y * this.world.width + x) ?? 0) === 0
-        ) {
-          // Tidy a stray, off-grid, untrafficked street back to grass — the
-          // planner straightening the town toward the grid.
-          this.world.setTile({ x, y }, "Grass");
-        }
-      }
-    }
-  }
-
-  /** Move a tree/berry off an avenue and replant it on nearby open grass. */
-  private transplantObstruction(position: Vec2, type: TileType) {
-    this.world.setTile(position, "Grass");
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const spot = {
-        x: position.x + Math.floor(Math.random() * 7) - 3,
-        y: position.y + Math.floor(Math.random() * 7) - 3,
-      };
-      const tile = this.world.getTile(spot);
-      if (tile && tile.type === "Grass" && !this.isOnAvenue(spot) && !this.isTileClaimed(spot)) {
-        this.world.setTile(spot, type);
-        return;
-      }
     }
   }
 
@@ -1091,7 +1025,7 @@ export class Simulation {
       { x: Math.round(center.x), y: Math.round(center.y) },
       3,
       3,
-      (p) => this.isTileClaimed(p) || this.isOnAvenue(p),
+      (p) => this.isTileClaimed(p),
     );
     if (!site) {
       return;
@@ -1547,8 +1481,8 @@ export class Simulation {
     }
     const world = this.world;
     const center = this.villageCenter();
-    const hubX = Math.round(center.x / AVENUE_SPACING) * AVENUE_SPACING;
-    const hubY = Math.round(center.y / AVENUE_SPACING) * AVENUE_SPACING;
+    const hubX = Math.round(center.x);
+    const hubY = Math.round(center.y);
     if (hubX < 2 || hubY < 2 || hubX > world.width - 3 || hubY > world.height - 3) {
       return;
     }
@@ -1698,6 +1632,23 @@ export class Simulation {
   }
 
   /** Babies are born to married couples with a shared home and enough food. */
+  /** Observation mode: adult newcomers arrive over time and settle in. */
+  private immigrate() {
+    if (this.agents.length >= EXPERIMENT_POP_CAP) {
+      return;
+    }
+    if (this.elapsedSeconds - this.lastImmigrationAt < IMMIGRATION_INTERVAL_SECONDS) {
+      return;
+    }
+    this.lastImmigrationAt = this.elapsedSeconds;
+    const center = this.villageCenter();
+    const spawn = this.findSpawnPosition({ x: Math.round(center.x), y: Math.round(center.y) });
+    const agent = createRandomAgent(spawn, this.takenNames());
+    this.agents.push(agent);
+    this.log(`${agent.name} arrived in town, looking for a home. 🧳`, [agent]);
+    this.notifyChanged();
+  }
+
   private tryBirth() {
     // Growth is gated by what the village can shelter and support, not a flat
     // cap — build and redevelop housing, advance an era, and keep residents

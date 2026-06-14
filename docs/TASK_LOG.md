@@ -148,6 +148,16 @@
   a flat top-down footprint view, so the layout is easy to read while building
   the game. The choice persists (localStorage) and forces a world redraw on
   toggle. Verified both modes in-browser.
+- Dropped the planned avenue grid; observation mode. The checkerboard grid felt
+  artificial and its nightly "tidy" was erasing roads when traffic stopped, so
+  the grid planner (and its avenue-avoidance, tree transplant and road tidy) is
+  removed — roads are once again purely emergent desire paths. Doors now face the
+  nearest actual road, and the plaza centres on the village centre. Only adults
+  wear roads in (children don't). Temporary observation mode: births are paused
+  and growth comes from adult newcomers arriving every ~20s, with the population
+  cap lifted (safety ceiling 90), to watch need-driven building. Verified: a town
+  grows to ~90 adults with the full need→building chain, organic roads that don't
+  vanish at night.
 
 ## 2026-06-12
 
