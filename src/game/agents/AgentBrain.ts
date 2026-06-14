@@ -1136,8 +1136,8 @@ export class AgentBrain {
     // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
       agent.position,
-      3,
-      3,
+      4,
+      4,
       (position) => simulation.isTileClaimed(position),
       {
         // Homes may cluster into a hamlet, keeping only their doorway clear.
@@ -1151,13 +1151,15 @@ export class AgentBrain {
       return;
     }
 
+    // A starter home: 4x4 footprint, a 2x2 walled interior — just enough to cram
+    // a bed, a little storage and a hearth into one room early on.
     const building = simulation.registerBuilding({
       kind: "house",
       x: site.x,
       y: site.y,
-      width: 3,
-      height: 3,
-      door: { x: site.x + 1, y: site.y + 2 },
+      width: 4,
+      height: 4,
+      door: { x: site.x + 2, y: site.y + 3 },
       ownerId: agent.id,
     });
     // registerBuilding picks road-facing doors; head for the primary one.

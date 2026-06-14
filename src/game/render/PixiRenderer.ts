@@ -227,7 +227,13 @@ export class PixiRenderer {
       this.worldGraphics.clear();
       this.lampCenters = [];
       for (const tile of world.tiles) {
-        drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
+        if (tile.type === "Wall") {
+          drawWall(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
+        } else if (tile.type === "Door") {
+          drawDoor(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
+        } else {
+          drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
+        }
         if (tile.type === "Lamp") {
           this.lampCenters.push({
             x: tile.x * TILE_SIZE + TILE_SIZE / 2,
@@ -470,26 +476,81 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     }
   }
 
-  if (type === "Wall") {
-    // A solid wall block with a top bevel and a base shadow to read as raised.
-    graphics.rect(px, py, TILE_SIZE, 3);
-    graphics.fill({ color: 0x837a6c, alpha: 0.9 });
-    graphics.rect(px, py + TILE_SIZE - 3, TILE_SIZE, 3);
-    graphics.fill({ color: 0x000000, alpha: 0.22 });
-    graphics.rect(px, py, 2.5, TILE_SIZE);
-    graphics.fill({ color: 0x000000, alpha: 0.1 });
-  }
+}
 
-  if (type === "Door") {
-    // A floor threshold with a door slab to one side.
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+// Wall/door neighbour bits, so walls render as one connected mass (RimWorld-style
+// auto-linking) and doors orient along the wall they break.
+const N = 1;
+const E = 2;
+const S = 4;
+const W = 8;
+
+function isStructural(world: WorldMap, x: number, y: number): boolean {
+  const t = world.getTile({ x, y })?.type;
+  return t === "Wall" || t === "Door";
+}
+
+function wallMask(world: WorldMap, x: number, y: number): number {
+  let mask = 0;
+  if (isStructural(world, x, y - 1)) mask |= N;
+  if (isStructural(world, x + 1, y)) mask |= E;
+  if (isStructural(world, x, y + 1)) mask |= S;
+  if (isStructural(world, x - 1, y)) mask |= W;
+  return mask;
+}
+
+/**
+ * A solid stone wall cell. Edge light/shadow is drawn only on sides with no
+ * adjacent wall, so a run of wall cells merges into one shape with a single
+ * outline and corners read as clean Ls — RimWorld's connected-wall look.
+ */
+function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const S_ = TILE_SIZE;
+  graphics.rect(px, py, S_, S_);
+  graphics.fill(0x726a5e);
+  // Mortar courses for texture.
+  graphics.rect(px, py + S_ / 2 - 0.5, S_, 1);
+  graphics.fill({ color: 0x564f45, alpha: 0.45 });
+  const shadow = 0x332e27;
+  if (!(mask & N)) {
+    graphics.rect(px, py, S_, 2);
+    graphics.fill({ color: 0x8e8678, alpha: 0.95 });
+  }
+  if (!(mask & S)) {
+    graphics.rect(px, py + S_ - 2.5, S_, 2.5);
+    graphics.fill({ color: shadow, alpha: 0.55 });
+  }
+  if (!(mask & W)) {
+    graphics.rect(px, py, 2, S_);
+    graphics.fill({ color: shadow, alpha: 0.3 });
+  }
+  if (!(mask & E)) {
+    graphics.rect(px + S_ - 2, py, 2, S_);
+    graphics.fill({ color: shadow, alpha: 0.3 });
+  }
+}
+
+/** A door slab set into the wall it breaks, oriented along the wall's run. */
+function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const S_ = TILE_SIZE;
+  graphics.rect(px, py, S_, S_);
+  graphics.fill(0x4a3b2a);
+  const alongHorizontal = Boolean(mask & E) || Boolean(mask & W);
+  if (alongHorizontal) {
+    graphics.rect(px + 1, py + S_ / 2 - 3.5, S_ - 2, 7);
     graphics.fill(0x7a5a36);
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
-    graphics.circle(px + TILE_SIZE - 5, py + TILE_SIZE / 2, 1, );
-    graphics.fill(0xd8c089);
+    graphics.rect(px + 1, py + S_ / 2 - 3.5, S_ - 2, 7);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+  } else {
+    graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, S_ - 2);
+    graphics.fill(0x7a5a36);
+    graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, S_ - 2);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
   }
-
 }
 
 function drawBuilding(graphics: Graphics, building: Building, flat: boolean) {

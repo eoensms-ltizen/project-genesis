@@ -82,6 +82,14 @@ export class GameApp {
       return { kind: "animal", animalId: nearestAnimal.id };
     }
 
+    // Walls, doors and floors are selectable structures in their own right, even
+    // though they sit inside a house's footprint — clicking a wall inspects the
+    // wall, not the whole building.
+    const structureTile = this.simulation.world.getTile(position)?.type;
+    if (structureTile === "Wall" || structureTile === "Door" || structureTile === "Floor") {
+      return { kind: "tile", position: { ...position } };
+    }
+
     const building = this.simulation.buildings.find(
       (candidate) =>
         position.x >= candidate.x &&
