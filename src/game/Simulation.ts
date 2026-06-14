@@ -25,6 +25,11 @@ type SimulationOptions = {
 // everyday foot traffic.
 const PATH_WEAR_THRESHOLD = 4;
 const ROAD_WEAR_THRESHOLD = 9;
+
+// Planned street grid: from the Town era a planner paves avenues along a fixed
+// grid (every AVENUE_SPACING tiles), and buildings keep off the grid lines so
+// they settle into the blocks between — giving a deliberate, real-city layout.
+const AVENUE_SPACING = 6;
 const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
@@ -347,6 +352,7 @@ export class Simulation {
       this.relocateMisplacedWork();
       this.spawnLitter();
       this.updateUnrest();
+      this.planRoads();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -585,6 +591,55 @@ export class Simulation {
       this.world.setTile(tile, "Road");
       this.traffic.delete(index);
       this.logPathEvent("A well-trodden path has become a road.");
+    }
+  }
+
+  /** True if a tile lies on the planned avenue grid. */
+  isOnAvenue(position: Vec2): boolean {
+    return position.x % AVENUE_SPACING === 0 || position.y % AVENUE_SPACING === 0;
+  }
+
+  /**
+   * Pave the avenue grid through the built-up area: straight roads along the
+   * fixed grid lines, threading between the blocks the buildings occupy.
+   */
+  private planRoads() {
+    if (this.era < 2) {
+      return;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let count = 0;
+    for (const b of this.buildings) {
+      if (b.stage !== "built" || b.kind === "cemetery") {
+        continue;
+      }
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.width - 1);
+      maxY = Math.max(maxY, b.y + b.height - 1);
+      count += 1;
+    }
+    if (count < 3) {
+      return;
+    }
+    minX = Math.max(1, minX - 1);
+    minY = Math.max(1, minY - 1);
+    maxX = Math.min(this.world.width - 2, maxX + 1);
+    maxY = Math.min(this.world.height - 2, maxY + 1);
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        if (x % AVENUE_SPACING !== 0 && y % AVENUE_SPACING !== 0) {
+          continue; // only the grid lines become avenues
+        }
+        const tile = this.world.getTile({ x, y });
+        if (tile && (tile.type === "Grass" || tile.type === "Dirt") && !this.isTileClaimed({ x, y })) {
+          this.world.setTile({ x, y }, "Road");
+        }
+      }
     }
   }
 

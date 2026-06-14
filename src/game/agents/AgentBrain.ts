@@ -897,9 +897,10 @@ export class AgentBrain {
       agent.position,
       2,
       2,
-      (position) => simulation.isTileClaimed(position),
+      (position) => simulation.isTileClaimed(position) || simulation.isOnAvenue(position),
       {
-        // Homes may cluster into a hamlet, only keeping their doorway clear.
+        // Homes may cluster into a hamlet, but keep off the avenue grid so they
+        // settle into the blocks between streets; the doorway stays clear too.
         cluster: true,
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
       },
@@ -963,7 +964,9 @@ export class AgentBrain {
     const height = threeTall.has(kind) ? 3 : 2;
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
-    const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
+    // Keep communal buildings off the avenue grid too, so streets stay clear.
+    const isClaimed = (position: Vec2) =>
+      simulation.isTileClaimed(position) || simulation.isOnAvenue(position);
     const avoidsHomes = kind === "powerplant" || kind === "factory";
     // A factory must sit near the power plant to be electrified (and so forge
     // steel), so it builds next to it; other industry just shuns housing.

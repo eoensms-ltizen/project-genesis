@@ -106,6 +106,12 @@
   2×2 block, keeping streets a single lane (crossroads still allowed). Verified:
   no diagonal roads, zero 2×2 road blocks in a grown town. (Planned grid avenues
   + rectangular plaza are phase 2.)
+- Roads, phase 2 (planned avenue grid): from the Town era a planner paves
+  avenues along a fixed grid (every 6 tiles) through the built-up area, and all
+  buildings now keep off the grid lines so they settle into the blocks between
+  streets. The town reads as a deliberate, real-city layout. Verified: most
+  roads (122/154) lie on the grid, buildings sit in blocks, growth to era 4 with
+  no deadlock.
 
 ## 2026-06-12
 
