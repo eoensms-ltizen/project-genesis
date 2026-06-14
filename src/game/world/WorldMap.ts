@@ -18,6 +18,9 @@ const MOVE_COSTS: Record<TileType, number> = {
   HouseSite: 1.5,
   HouseFoundation: 2,
   House: 1.2, // applies to the door tile only; other house tiles are impassable
+  Wall: Number.POSITIVE_INFINITY,
+  Floor: 1, // interior of a room — comfortable walking
+  Door: 1.2, // a doorway: passable, with a touch of open/close friction
   Berry: 2,
   FieldEmpty: 2.2,
   FieldGrowing: 2.2,
@@ -41,6 +44,9 @@ const TILE_CODES: Record<TileType, string> = {
   HouseSite: "S",
   HouseFoundation: "F",
   House: "H",
+  Wall: "#",
+  Floor: ".",
+  Door: "+",
   Berry: "B",
   FieldEmpty: "e",
   FieldGrowing: "c",

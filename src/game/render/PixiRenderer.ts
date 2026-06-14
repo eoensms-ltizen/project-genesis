@@ -236,8 +236,12 @@ export class PixiRenderer {
         }
       }
       // Draw north-to-south so a building's raised body overlaps the one behind
-      // it (a simple 2.5D depth order).
+      // it (a simple 2.5D depth order). A finished home is drawn from its wall/
+      // floor/door tiles instead of a solid block, so skip it here.
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
+        if (building.kind === "house" && building.stage === "built") {
+          continue;
+        }
         drawBuilding(this.worldGraphics, building, this.flatBuildings);
       }
     }
@@ -456,6 +460,34 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xc0394b);
     graphics.circle(px + 11, py + 5, 1.3);
     graphics.fill(0xa12d3e);
+  }
+
+  if (type === "Floor") {
+    // Interior floorboards.
+    for (const row of [4, 8, 12]) {
+      graphics.rect(px + 1, py + row, TILE_SIZE - 2, 0.8);
+      graphics.fill({ color: 0x33291c, alpha: 0.7 });
+    }
+  }
+
+  if (type === "Wall") {
+    // A solid wall block with a top bevel and a base shadow to read as raised.
+    graphics.rect(px, py, TILE_SIZE, 3);
+    graphics.fill({ color: 0x837a6c, alpha: 0.9 });
+    graphics.rect(px, py + TILE_SIZE - 3, TILE_SIZE, 3);
+    graphics.fill({ color: 0x000000, alpha: 0.22 });
+    graphics.rect(px, py, 2.5, TILE_SIZE);
+    graphics.fill({ color: 0x000000, alpha: 0.1 });
+  }
+
+  if (type === "Door") {
+    // A floor threshold with a door slab to one side.
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.fill(0x7a5a36);
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
+    graphics.circle(px + TILE_SIZE - 5, py + TILE_SIZE / 2, 1, );
+    graphics.fill(0xd8c089);
   }
 
 }
@@ -832,6 +864,12 @@ function tileColor(type: TileType): number {
       return 0x4a4034;
     case "House":
       return 0x55452f;
+    case "Wall":
+      return 0x6b6258;
+    case "Floor":
+      return 0x4a3b2a;
+    case "Door":
+      return 0x4a3b2a;
     case "Berry":
       return 0x2c4a28;
     case "FieldEmpty":

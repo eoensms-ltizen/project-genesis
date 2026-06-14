@@ -1136,8 +1136,8 @@ export class AgentBrain {
     // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
       agent.position,
-      2,
-      2,
+      3,
+      3,
       (position) => simulation.isTileClaimed(position),
       {
         // Homes may cluster into a hamlet, keeping only their doorway clear.
@@ -1155,9 +1155,9 @@ export class AgentBrain {
       kind: "house",
       x: site.x,
       y: site.y,
-      width: 2,
-      height: 2,
-      door: { x: site.x, y: site.y + 1 },
+      width: 3,
+      height: 3,
+      door: { x: site.x + 1, y: site.y + 2 },
       ownerId: agent.id,
     });
     // registerBuilding picks road-facing doors; head for the primary one.
@@ -1385,7 +1385,7 @@ export class AgentBrain {
     simulation.releaseBuildingFootprint(building);
     agent.inventory.wood = Math.max(0, agent.inventory.wood - buildCost(building.kind));
     if (building.kind === "house") {
-      agent.home = { ...building.door };
+      agent.home = simulation.houseInterior(building);
       agent.homeSite = undefined;
       simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
     } else {
@@ -2016,7 +2016,7 @@ export class AgentBrain {
     if (!house.ownerId) {
       house.ownerId = agent.id;
     }
-    agent.home = { ...house.door };
+    agent.home = simulation.houseInterior(house);
     agent.homeBuildingId = house.id;
     agent.homeSite = undefined;
     simulation.log(`${agent.name} ${reason}. 🏠`, [agent]);
@@ -2036,7 +2036,7 @@ export class AgentBrain {
     }
 
     empty.ownerId = agent.id;
-    agent.home = { ...empty.door };
+    agent.home = simulation.houseInterior(empty);
     agent.homeBuildingId = empty.id;
     simulation.log(tr(`${agent.name} moved into an empty house.`, `${agent.name}이(가) 빈 집으로 이사했다.`), [agent]);
     return true;

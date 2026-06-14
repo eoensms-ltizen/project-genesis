@@ -467,7 +467,10 @@ export class Simulation {
     door: Vec2;
     ownerId?: string;
   }): Building {
-    const doors = this.computeDoors(input.x, input.y, input.width, input.height);
+    const computed = this.computeDoors(input.x, input.y, input.width, input.height);
+    // A home is a small walled room with a single doorway; only larger civic
+    // buildings get a second entrance.
+    const doors = input.kind === "house" ? [computed[0]] : computed;
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
@@ -477,6 +480,32 @@ export class Simulation {
     };
     this.buildings.push(building);
     return building;
+  }
+
+  /** The interior tile a resident calls home (centre of a walled room). */
+  houseInterior(building: Building): Vec2 {
+    return {
+      x: building.x + Math.floor(building.width / 2),
+      y: building.y + Math.floor(building.height / 2),
+    };
+  }
+
+  /** Paint a finished home as a walled room: perimeter walls, a doorway, floor. */
+  private paintHouseRoom(building: Building) {
+    const { x, y, width, height } = building;
+    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    for (let fy = 0; fy < height; fy += 1) {
+      for (let fx = 0; fx < width; fx += 1) {
+        const pos = { x: x + fx, y: y + fy };
+        if (doorKeys.has(`${pos.x},${pos.y}`)) {
+          this.world.setTile(pos, "Door");
+        } else if (fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1) {
+          this.world.setTile(pos, "Wall");
+        } else {
+          this.world.setTile(pos, "Floor");
+        }
+      }
+    }
   }
 
   /**
@@ -576,18 +605,26 @@ export class Simulation {
         building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
       }
     }
-    const tileType: TileType =
-      stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
-    for (const position of footprintTiles(building)) {
-      this.world.setTile(position, tileType);
+    // A finished home is a walled room (perimeter walls, interior floor, a single
+    // doorway) rather than a solid block. Civic buildings stay solid for now.
+    if (stage === "built" && building.kind === "house") {
+      this.paintHouseRoom(building);
+    } else {
+      const tileType: TileType =
+        stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
+      for (const position of footprintTiles(building)) {
+        this.world.setTile(position, tileType);
+      }
     }
-    // Every entrance is a road: each door tile and the tile in front of it
-    // become Road, so a building can never be sealed in by neighbours (other
-    // footprints only take grass) and residents can always get out.
+    // Every entrance keeps a clear approach: the tile in front of each door
+    // becomes Road, so a building can never be sealed in by neighbours.
     this.reserveEntrance(building);
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
-        this.world.setTile(door, "Road");
+        // A house keeps its doorway as a Door tile; civic buildings pave it.
+        if (building.kind !== "house") {
+          this.world.setTile(door, "Road");
+        }
       }
     }
     if (stage === "built" && building.kind === "station") {

@@ -12,6 +12,11 @@ export type TileType =
   | "HouseSite"
   | "HouseFoundation"
   | "House"
+  // Room construction: walls enclose a space, a door breaks the wall, and the
+  // interior is walkable floor. A house is a walled room rather than a solid block.
+  | "Wall"
+  | "Floor"
+  | "Door"
   | "Berry"
   | "FieldEmpty"
   | "FieldGrowing"
