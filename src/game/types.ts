@@ -61,6 +61,14 @@ export type AgentState =
   | "MoveToClean"
   | "Clean"
   | "Patrol"
+  // Physical hauling: carry produced goods to the warehouse and draw them back
+  // out for construction (RimWorld-style stockpiling).
+  | "MoveToHaul" // walking to a loose ground stack to pick it up
+  | "LoadWood" // picking the stack up into one's arms
+  | "MoveToStore" // carrying the load to the warehouse
+  | "StoreWood" // depositing the load into the warehouse stock
+  | "MoveToWithdraw" // walking to the warehouse to fetch build materials
+  | "WithdrawWood" // drawing materials out of the warehouse stock
   | "Wander"
   | "Rest";
 
@@ -74,7 +82,11 @@ export type AgentJob =
   | "hunter"
   | "cleaner"
   | "police"
-  | "mayor";
+  | "mayor"
+  // Moves produced goods from where they're made to the warehouse, freeing
+  // producers to keep producing — a delivery role that emerges once there's a
+  // warehouse to stock.
+  | "hauler";
 
 export type BuildingKind =
   | "house"
@@ -110,6 +122,21 @@ export type Building = {
   // Redevelopment tier (1+). Higher levels pack more output/capacity into the
   // same footprint; builders raise it in place when land pressure is high.
   level?: number;
+};
+
+// Goods that can be physically carried and stockpiled. Only wood is hauled for
+// now; food/meals follow the same model in a later pass.
+export type ResourceKind = "wood";
+
+// A loose pile of goods sitting on the ground, dropped where it was produced
+// until a hauler carries it to the warehouse.
+export type ItemStack = {
+  id: string;
+  resource: ResourceKind;
+  amount: number;
+  position: Vec2;
+  // Id of the agent currently hauling this pile, so two don't fight over it.
+  reservedBy?: string;
 };
 
 export type AnimalKind = "deer" | "boar" | "rabbit";
@@ -179,6 +206,10 @@ export type Agent = {
   socialCooldown?: number;
   resumeState?: AgentState;
   eatPlan?: "berry" | "warehouse" | "meal";
+  // How much wood to draw out of the warehouse on the current fetch trip.
+  fetchAmount?: number;
+  // The ground stack this agent has reserved and is hauling.
+  haulItemId?: string;
 };
 
 export type GameLogEntry = {
@@ -206,6 +237,8 @@ export type SimulationSnapshot = {
   animals: Animal[];
   trains: Vec2[];
   poweredBuildingIds: string[];
+  // Wood physically stored in the warehouse, available to withdraw for building.
+  woodStock: number;
   // The soft cap on residents the village can currently support (housing ∩ era).
   supportedPopulation: number;
   // Pieces of uncollected litter — the hygiene pressure that calls for cleaners.

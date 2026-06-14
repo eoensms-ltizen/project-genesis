@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import type { Agent, Animal, Building, TileType, Vec2 } from "../types";
+import type { Agent, Animal, Building, ItemStack, TileType, Vec2 } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
@@ -214,6 +214,7 @@ export class PixiRenderer {
     trains: Vec2[] = [],
     poweredBuildingIds: string[] = [],
     litter: Vec2[] = [],
+    items: ItemStack[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -269,6 +270,18 @@ export class PixiRenderer {
       this.overlayGraphics.fill({ color: 0x7c6a48, alpha: 0.85 });
       this.overlayGraphics.rect(lx + 6, ly + 10, 2.4, 1.4);
       this.overlayGraphics.fill({ color: 0x554631, alpha: 0.85 });
+    }
+    // Loose wood piles waiting to be hauled: a small stack of logs, taller the
+    // more wood has accumulated.
+    for (const stack of items) {
+      const sx = stack.position.x * TILE_SIZE;
+      const sy = stack.position.y * TILE_SIZE;
+      const logs = Math.min(4, Math.max(1, Math.ceil(stack.amount / 3)));
+      for (let i = 0; i < logs; i += 1) {
+        const ly = sy + 11 - i * 2.4;
+        this.overlayGraphics.rect(sx + 3, ly, 10, 2);
+        this.overlayGraphics.fill({ color: i % 2 === 0 ? 0x8a6a44 : 0x6f5436, alpha: 0.95 });
+      }
     }
 
     this.nightGraphics.clear();
@@ -705,6 +718,7 @@ const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
   cleaner: 0x4ec9c9,
   police: 0x4a6ed0,
   mayor: 0xd7b65f,
+  hauler: 0xc27b3e,
 };
 
 function drawAgent(graphics: Graphics, agent: Agent) {
@@ -723,6 +737,13 @@ function drawAgent(graphics: Graphics, agent: Agent) {
   graphics.fill(isChild ? 0xf7ecd0 : 0xf2e6bd);
   graphics.circle(px + radius * 0.33, py - radius * 0.33, isChild ? 1 : 1.4);
   graphics.fill(0x20231d);
+
+  // A resident carrying wood shows a small log slung on their back.
+  if (agent.inventory.wood > 0) {
+    graphics.rect(px - 3.4, py - radius - 3.4, 6.8, 2.6);
+    graphics.fill({ color: 0x8a6a44, alpha: 0.95 });
+    graphics.stroke({ color: 0x4f3c25, width: 0.6, alpha: 0.9 });
+  }
 
   if (agent.state === "Chat") {
     drawSpeechBubble(graphics, px, py);

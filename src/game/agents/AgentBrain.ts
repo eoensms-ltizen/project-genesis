@@ -31,6 +31,11 @@ const TAME_DURATION_SECONDS = 2.5;
 const PASTURE_HERD_CAP = 6;
 const WOOD_STOCKPILE_CAP = 10;
 const WOODCUTTER_STOCKPILE_CAP = 14;
+// How much wood a hauler can carry in one trip from a forest pile to the warehouse.
+const HAUL_CAPACITY = 12;
+const LOAD_DURATION_SECONDS = 0.6;
+const STORE_DURATION_SECONDS = 0.6;
+const WITHDRAW_DURATION_SECONDS = 0.6;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
@@ -64,6 +69,9 @@ const CHATTABLE_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToWorship",
   "MoveToStump",
   "MoveToPlant",
+  "MoveToHaul",
+  "MoveToStore",
+  "MoveToWithdraw",
   "MoveHome",
   "Wander",
 ]);
@@ -122,6 +130,12 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "MoveToClean",
   "Clean",
   "Patrol",
+  "MoveToHaul",
+  "LoadWood",
+  "MoveToStore",
+  "StoreWood",
+  "MoveToWithdraw",
+  "WithdrawWood",
 ]);
 
 export class AgentBrain {
@@ -246,6 +260,24 @@ export class AgentBrain {
       case "Patrol":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
+      case "MoveToHaul":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "LoadWood");
+        break;
+      case "LoadWood":
+        this.loadWood(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToStore":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "StoreWood");
+        break;
+      case "StoreWood":
+        this.storeWood(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToWithdraw":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "WithdrawWood");
+        break;
+      case "WithdrawWood":
+        this.withdrawWood(agent, simulation, deltaSeconds);
+        break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
@@ -315,8 +347,7 @@ export class AgentBrain {
         this.setState(agent, simulation, "FindHouseSite");
         return;
       }
-      if (agent.inventory.wood < HOUSE_WOOD_COST) {
-        this.setState(agent, simulation, "FindTree");
+      if (this.fetchWood(agent, simulation, HOUSE_WOOD_COST)) {
         return;
       }
       this.headToHomeSite(agent, simulation);
@@ -340,9 +371,9 @@ export class AgentBrain {
       if (building && building.stage !== "built") {
         if (agent.inventory.wood >= buildCost(building.kind)) {
           this.headToProject(agent, simulation, building.door);
-        } else {
-          this.setState(agent, simulation, "FindTree");
+          return;
         }
+        this.fetchWood(agent, simulation, buildCost(building.kind));
         return;
       }
       agent.projectBuildingId = undefined;
@@ -503,19 +534,30 @@ export class AgentBrain {
       if (communal === "started") {
         return true;
       }
-      if (communal === "gather") {
-        this.setState(agent, simulation, "FindTree");
-        return true;
-      }
       if (this.doJobWork(agent, simulation)) {
         return true;
       }
     }
 
-    const woodCap = agent.job === "woodcutter" ? WOODCUTTER_STOCKPILE_CAP : WOOD_STOCKPILE_CAP;
-    if (agent.inventory.wood < woodCap) {
-      this.setState(agent, simulation, "FindTree");
-      return true;
+    // Keep the wood economy flowing. Once there's a warehouse, anyone with idle
+    // hands hauls loose piles into it, but only woodcutters fell fresh timber —
+    // otherwise a crowd of idle residents would all chop at once and bury the
+    // forest in logs. (Builders still fell on demand via fetchWood when the
+    // warehouse runs dry, so construction never stalls.)
+    if (simulation.hasAnyWarehouse()) {
+      if (this.findHaulWork(agent, simulation)) {
+        return true;
+      }
+      if (agent.job === "woodcutter" && simulation.wantsMoreWood()) {
+        this.setState(agent, simulation, "FindTree");
+        return true;
+      }
+    } else {
+      const woodCap = agent.job === "woodcutter" ? WOODCUTTER_STOCKPILE_CAP : WOOD_STOCKPILE_CAP;
+      if (agent.inventory.wood < woodCap) {
+        this.setState(agent, simulation, "FindTree");
+        return true;
+      }
     }
 
     if (simulation.era >= 2 && this.findPaveWork(agent, simulation)) {
@@ -539,7 +581,7 @@ export class AgentBrain {
       return false;
     }
     if (agent.inventory.wood < simulation.redevelopCost(house)) {
-      this.setState(agent, simulation, "FindTree");
+      this.fetchWood(agent, simulation, simulation.redevelopCost(house));
       return true;
     }
     const path = findPath(simulation.world, { start: agent.position, goal: house.door });
@@ -709,13 +751,13 @@ export class AgentBrain {
   }
 
   /**
-   * Returns "started" when the agent took on a communal building project,
-   * "gather" when it should collect wood for one, "none" otherwise.
+   * Returns "started" when the agent took on a communal building project (or
+   * went to fetch the wood for one), "none" otherwise.
    */
   private communalProject(
     agent: Agent,
     simulation: Simulation,
-  ): "started" | "gather" | "none" {
+  ): "started" | "none" {
     let kind:
       | "warehouse"
       | "kitchen"
@@ -774,7 +816,8 @@ export class AgentBrain {
 
     const cost = buildCost(kind);
     if (agent.inventory.wood < cost) {
-      return "gather";
+      this.fetchWood(agent, simulation, cost);
+      return "started";
     }
     return this.startCommunalBuilding(agent, simulation, kind) ? "started" : "none";
   }
@@ -793,6 +836,9 @@ export class AgentBrain {
       case "woodcutter":
         // Reforest by relocating an in-the-way stump, otherwise gather wood below.
         return this.findTransplantWork(agent, simulation);
+      case "hauler":
+        // Ferry felled wood from the forest into the warehouse.
+        return this.findHaulWork(agent, simulation);
       case "hunter":
         return this.findHuntWork(agent, simulation);
       case "cleaner":
@@ -883,15 +929,179 @@ export class AgentBrain {
       return;
     }
 
+    const stump = agent.target ? roundVec(agent.target) : undefined;
     if (agent.target) {
       simulation.world.setTile(agent.target, "Stump");
       simulation.releaseClaim(agent.target);
     }
-    agent.inventory.wood += 1;
     agent.health.stamina = Math.max(0, agent.health.stamina - 8);
-    simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
+    // Before there's a warehouse, the feller carries the log themselves (it goes
+    // straight into the first homes). Once a warehouse exists, the log is left as
+    // a pile on the ground for a hauler to carry in — the producer keeps felling.
+    if (stump && simulation.hasAnyWarehouse()) {
+      simulation.dropWood(stump, 1);
+      simulation.log(tr(`${agent.name} felled a tree, leaving the log to be hauled. 🪵`, `${agent.name}이(가) 나무를 베어 통나무를 운반용으로 남겼다. 🪵`));
+    } else {
+      agent.inventory.wood += 1;
+      simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
+    }
     agent.target = undefined;
     agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  // --- Physical wood hauling ------------------------------------------------
+
+  /**
+   * Ensures the agent will end up holding at least `cost` wood before building.
+   * Returns true if it put the agent on a sub-task (fetching) — the caller should
+   * stop; the build resumes from Idle once the wood is in hand. Returns false
+   * when the agent already carries enough (proceed to build).
+   *
+   * Before a warehouse exists this is simply "go chop". Once one does, the wood
+   * economy runs through the warehouse: withdraw if it's stocked, otherwise top
+   * it up by hauling a loose pile or felling a fresh tree.
+   */
+  private fetchWood(agent: Agent, simulation: Simulation, cost: number): boolean {
+    if (agent.inventory.wood >= cost) {
+      return false;
+    }
+    if (!simulation.hasAnyWarehouse()) {
+      this.setState(agent, simulation, "FindTree");
+      return true;
+    }
+    const need = cost - agent.inventory.wood;
+    const warehouse = simulation.getWarehouse();
+    if (warehouse && simulation.woodStock >= need) {
+      const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+      if (path) {
+        agent.fetchAmount = need;
+        agent.target = { ...warehouse.door };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveToWithdraw");
+        return true;
+      }
+    }
+    // The warehouse can't cover it: top it up. Haul a loose pile if there is one,
+    // otherwise fell a fresh tree to make one.
+    if (simulation.hasHaulableWood() && this.findHaulWork(agent, simulation)) {
+      return true;
+    }
+    this.setState(agent, simulation, "FindTree");
+    return true;
+  }
+
+  /** Claim the nearest loose wood pile and set off to carry it to the warehouse. */
+  private findHaulWork(agent: Agent, simulation: Simulation): boolean {
+    const warehouse = simulation.getWarehouse();
+    if (!warehouse || simulation.woodStoreSpace() <= 0) {
+      return false;
+    }
+    const stack = simulation.nearestHaulableWood(agent.position, agent.id);
+    if (!stack) {
+      return false;
+    }
+    const path = findPath(simulation.world, {
+      start: agent.position,
+      goal: stack.position,
+      stopAdjacent: true,
+    });
+    if (!path) {
+      return false;
+    }
+    simulation.reserveItem(stack.id, agent.id);
+    agent.haulItemId = stack.id;
+    agent.target = { ...stack.position };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToHaul");
+    return true;
+  }
+
+  /** Arrived at the pile: scoop a load into one's arms, then head off to store it. */
+  private loadWood(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < LOAD_DURATION_SECONDS) {
+      return;
+    }
+    const stack = agent.haulItemId ? simulation.getItem(agent.haulItemId) : undefined;
+    if (!stack || stack.amount <= 0) {
+      // The pile vanished (someone else hauled it); give up and rethink.
+      if (agent.haulItemId) {
+        simulation.releaseItem(agent.haulItemId);
+      }
+      agent.haulItemId = undefined;
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    const room = Math.max(0, HAUL_CAPACITY - agent.inventory.wood);
+    const taken = Math.min(stack.amount, room);
+    agent.inventory.wood += taken;
+    stack.amount -= taken;
+    if (stack.amount <= 0) {
+      simulation.removeItem(stack.id);
+    } else {
+      simulation.releaseItem(stack.id);
+    }
+    agent.haulItemId = undefined;
+
+    const warehouse = simulation.getWarehouse();
+    if (!warehouse) {
+      if (agent.inventory.wood > 0) {
+        simulation.dropWood(agent.position, agent.inventory.wood);
+        agent.inventory.wood = 0;
+      }
+      this.backOff(agent, simulation);
+      return;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+    if (!path) {
+      this.backOff(agent, simulation);
+      return;
+    }
+    agent.target = { ...warehouse.door };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToStore");
+  }
+
+  /** Arrived at the warehouse with a load: deposit it into the stock. */
+  private storeWood(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < STORE_DURATION_SECONDS) {
+      return;
+    }
+    if (agent.inventory.wood > 0) {
+      const stored = simulation.storeWood(agent.inventory.wood);
+      agent.inventory.wood -= stored;
+      // Anything that didn't fit stays in their arms and gets set back down.
+      if (agent.inventory.wood > 0) {
+        simulation.dropWood(agent.position, agent.inventory.wood);
+        agent.inventory.wood = 0;
+      }
+      if (stored > 0 && Math.random() < 0.4) {
+        simulation.log(tr(`${agent.name} stocked ${stored} wood in the warehouse. 🪵`, `${agent.name}이(가) 창고에 나무 ${stored}을(를) 채워 넣었다. 🪵`));
+      }
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /** Arrived at the warehouse to fetch materials: draw them into one's arms. */
+  private withdrawWood(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < WITHDRAW_DURATION_SECONDS) {
+      return;
+    }
+    const want = agent.fetchAmount ?? 0;
+    if (want > 0) {
+      agent.inventory.wood += simulation.withdrawWood(want);
+    }
+    agent.fetchAmount = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    // Back to Idle: decideNextAction resumes the build now the wood is in hand.
     this.setState(agent, simulation, "Idle");
   }
 
@@ -1760,7 +1970,7 @@ export class AgentBrain {
     }
     const cost = simulation.redevelopCost(house);
     if (agent.inventory.wood < cost) {
-      this.setState(agent, simulation, "FindTree");
+      this.fetchWood(agent, simulation, cost);
       return true;
     }
     agent.inventory.wood -= cost;
@@ -1992,6 +2202,11 @@ export class AgentBrain {
     if (agent.target && !(agent.homeSite && samePos(agent.target, agent.homeSite))) {
       simulation.releaseClaim(agent.target);
     }
+    if (agent.haulItemId) {
+      simulation.releaseItem(agent.haulItemId);
+      agent.haulItemId = undefined;
+    }
+    agent.fetchAmount = undefined;
     agent.target = undefined;
     agent.path = undefined;
   }

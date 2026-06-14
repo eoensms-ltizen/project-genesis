@@ -63,6 +63,12 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   MoveToClean: "청소지로 이동",
   Clean: "청소",
   Patrol: "순찰",
+  MoveToHaul: "더미로 이동",
+  LoadWood: "짐 싣기",
+  MoveToStore: "창고로 운반",
+  StoreWood: "창고 적재",
+  MoveToWithdraw: "자재 가지러 가기",
+  WithdrawWood: "자재 인출",
   Wander: "배회",
   Rest: "쉬기",
 };
@@ -82,6 +88,7 @@ const JOB_LABELS_KO: Record<Agent["job"], string> = {
   cleaner: "청소부",
   police: "경찰",
   mayor: "시장",
+  hauler: "운반꾼",
 };
 
 function jobName(job: Agent["job"]): string {
@@ -101,6 +108,7 @@ export default function App() {
   const [litter, setLitter] = useState(0);
   const [unrest, setUnrest] = useState(0);
   const [steel, setSteel] = useState(0);
+  const [woodStock, setWoodStock] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -137,6 +145,7 @@ export default function App() {
         setLitter(snapshot.litter);
         setUnrest(snapshot.unrest);
         setSteel(snapshot.steel);
+        setWoodStock(snapshot.woodStock);
         setBuildings(snapshot.buildings);
         setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
@@ -251,6 +260,7 @@ export default function App() {
                 <span className="hud-stats">
                   {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
                   {meals}
+                  {woodStock > 0 ? ` · 🪵${woodStock}` : ""}
                   {litter > 0 ? ` · 🗑️${litter}` : ""}
                   {unrest >= 20 ? ` · 😠${unrest}` : ""}
                   {steel > 0 ? ` · 🔩${steel}` : ""}

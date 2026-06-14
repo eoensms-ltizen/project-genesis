@@ -10,6 +10,7 @@ import type {
   BuildingStage,
   GameClock,
   GameLogEntry,
+  ItemStack,
   SimulationSnapshot,
   TileType,
   Vec2,
@@ -104,6 +105,13 @@ const AUTOSAVE_INTERVAL_SECONDS = 15;
 // Throttle React panel updates; the Pixi canvas renders independently every tick.
 const UI_EMIT_INTERVAL_SECONDS = 0.25;
 const FOOD_CAP = 400;
+// How much wood the warehouse can physically hold, and how full the village
+// tries to keep it (store + loose ground piles) before woodcutters stop felling.
+// The store cap sits well above the want target so haulers always have room to
+// bring loose piles in — felling stops at the target, then the forest piles
+// drain into the warehouse rather than stranding on the ground.
+const WOOD_STORE_CAP = 300;
+const WOOD_WANT_TARGET = 120;
 
 // Land pressure: when the nearest open plot to the village centre is farther
 // than this, residents densify existing housing instead of sprawling.
@@ -208,7 +216,14 @@ const POLICE_MIN_POP = 10;
 
 type SavedAgent = Omit<
   Agent,
-  "target" | "path" | "state" | "actionTimer" | "socialCooldown" | "resumeState"
+  | "target"
+  | "path"
+  | "state"
+  | "actionTimer"
+  | "socialCooldown"
+  | "resumeState"
+  | "fetchAmount"
+  | "haulItemId"
 >;
 
 type SaveData = {
@@ -225,6 +240,9 @@ type SaveData = {
   era: number;
   foodStock: number;
   meals: number;
+  woodStock?: number;
+  items?: ItemStack[];
+  nextItemId?: number;
   animals: Animal[];
   nextAnimalId: number;
   trainX: number | null;
@@ -244,8 +262,13 @@ export class Simulation {
   meals = 0;
   steel = 0;
   deaths = 0;
+  // Wood physically stored in the warehouse. Producers deposit here; builders
+  // withdraw from here. Loose wood sits in `items` until a hauler brings it in.
+  woodStock = 0;
+  readonly items: ItemStack[] = [];
 
   private nextBuildingId = 1;
+  private nextItemId = 1;
   private nextAnimalId = 1;
   private trainX: number | null = null;
   private trainRow = 0;
@@ -285,6 +308,12 @@ export class Simulation {
       this.era = saved.era;
       this.foodStock = saved.foodStock;
       this.meals = saved.meals;
+      this.woodStock = saved.woodStock ?? 0;
+      for (const stack of saved.items ?? []) {
+        // Reservations are transient; drop them so loose piles are haulable again.
+        this.items.push({ ...stack, position: { ...stack.position }, reservedBy: undefined });
+      }
+      this.nextItemId = saved.nextItemId ?? 1;
       this.nextAnimalId = saved.nextAnimalId ?? 1;
       this.trainX = saved.trainX ?? null;
       this.trainRow = saved.trainRow ?? 0;
@@ -646,6 +675,13 @@ export class Simulation {
         era: this.era,
         foodStock: this.foodStock,
         meals: this.meals,
+        woodStock: this.woodStock,
+        items: this.items.map((stack) => ({
+          ...stack,
+          position: { ...stack.position },
+          reservedBy: undefined,
+        })),
+        nextItemId: this.nextItemId,
         animals: this.animals.map((animal) => ({
           ...animal,
           position: { ...animal.position },
@@ -796,6 +832,7 @@ export class Simulation {
       })),
       trains: this.getTrainPositions(),
       poweredBuildingIds: this.getPoweredBuildingIds(),
+      woodStock: Math.round(this.woodStock),
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
       unrest: Math.round(this.unrest),
@@ -1624,6 +1661,129 @@ export class Simulation {
     return this.buildings.some((building) => building.kind === "warehouse");
   }
 
+  // --- Physical goods: loose ground piles and warehouse stock ---------------
+
+  /** Drop wood on the ground at a tile, merging into a pile already sitting there. */
+  dropWood(position: Vec2, amount = 1) {
+    const tile = { x: Math.round(position.x), y: Math.round(position.y) };
+    const existing = this.items.find(
+      (stack) => stack.resource === "wood" && stack.position.x === tile.x && stack.position.y === tile.y,
+    );
+    if (existing) {
+      existing.amount += amount;
+    } else {
+      this.items.push({
+        id: `item-${this.nextItemId++}`,
+        resource: "wood",
+        amount,
+        position: { ...tile },
+      });
+    }
+    this.notifyChanged();
+  }
+
+  getItem(id: string): ItemStack | undefined {
+    return this.items.find((stack) => stack.id === id);
+  }
+
+  /** Nearest loose wood pile that no one else has claimed (or is claimed by us). */
+  nearestHaulableWood(from: Vec2, agentId: string): ItemStack | undefined {
+    let best: ItemStack | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const stack of this.items) {
+      if (stack.resource !== "wood" || stack.amount <= 0) {
+        continue;
+      }
+      if (stack.reservedBy && stack.reservedBy !== agentId) {
+        continue;
+      }
+      const dx = stack.position.x - from.x;
+      const dy = stack.position.y - from.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = stack;
+      }
+    }
+    return best;
+  }
+
+  hasHaulableWood(): boolean {
+    return this.items.some(
+      (stack) => stack.resource === "wood" && stack.amount > 0 && !stack.reservedBy,
+    );
+  }
+
+  reserveItem(id: string, agentId: string) {
+    const stack = this.getItem(id);
+    if (stack) {
+      stack.reservedBy = agentId;
+    }
+  }
+
+  releaseItem(id: string) {
+    const stack = this.getItem(id);
+    if (stack) {
+      stack.reservedBy = undefined;
+    }
+  }
+
+  /** Release every pile a (departed or distracted) agent had claimed. */
+  releaseItemsHeldBy(agentId: string) {
+    for (const stack of this.items) {
+      if (stack.reservedBy === agentId) {
+        stack.reservedBy = undefined;
+      }
+    }
+  }
+
+  removeItem(id: string) {
+    const index = this.items.findIndex((stack) => stack.id === id);
+    if (index >= 0) {
+      this.items.splice(index, 1);
+      this.notifyChanged();
+    }
+  }
+
+  woodStoreSpace(): number {
+    return Math.max(0, WOOD_STORE_CAP - this.woodStock);
+  }
+
+  /** Deposit carried wood into the warehouse; returns how much was accepted. */
+  storeWood(amount: number): number {
+    const accepted = Math.min(amount, this.woodStoreSpace());
+    this.woodStock += accepted;
+    if (accepted > 0) {
+      this.notifyChanged();
+    }
+    return accepted;
+  }
+
+  /** Take wood out of the warehouse for building; returns how much was drawn. */
+  withdrawWood(amount: number): number {
+    const drawn = Math.min(amount, this.woodStock);
+    this.woodStock -= drawn;
+    if (drawn > 0) {
+      this.notifyChanged();
+    }
+    return drawn;
+  }
+
+  private groundWoodTotal(): number {
+    let total = 0;
+    for (const stack of this.items) {
+      if (stack.resource === "wood") {
+        total += stack.amount;
+      }
+    }
+    return total;
+  }
+
+  /** Should woodcutters keep felling? Only while the wood supply is below target. */
+  wantsMoreWood(): boolean {
+    return this.woodStock + this.groundWoodTotal() < WOOD_WANT_TARGET && this.woodStoreSpace() > 0;
+  }
+
   getKitchen(): Building | undefined {
     return this.buildings.find(
       (building) => building.kind === "kitchen" && building.stage === "built",
@@ -1679,6 +1839,9 @@ export class Simulation {
       // A mayor plans the town — without one, no planned roads/plaza/parks happen.
       ["mayor", this.era >= 2 ? 1 : 0],
       ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
+      // Haulers only make sense once there's a warehouse to stock; they ferry
+      // felled wood in from the forest so woodcutters never stop to deliver.
+      ["hauler", this.hasAnyWarehouse() ? Math.min(2, Math.max(1, Math.floor(population / 6))) : 0],
       ["cleaner", this.litterIsHigh ? Math.min(2, Math.ceil(this.litter.length / 10)) : 0],
       ["police", this.unrestIsHigh ? Math.min(2, 1 + Math.floor(this.unrest / 40)) : 0],
       ["hunter", population >= 8 ? Math.min(2, Math.floor(population / 8)) : 0],
@@ -1847,6 +2010,12 @@ export class Simulation {
     // Release whatever the agent was holding onto.
     if (agent.target) {
       this.releaseClaim(agent.target);
+    }
+    this.releaseItemsHeldBy(agent.id);
+    // Wood they were carrying spills onto the ground where they fell.
+    if (agent.inventory.wood > 0 && this.hasAnyWarehouse()) {
+      this.dropWood(agent.position, agent.inventory.wood);
+      agent.inventory.wood = 0;
     }
     if (agent.projectBuildingId) {
       const pending = this.getBuilding(agent.projectBuildingId);

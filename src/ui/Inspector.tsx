@@ -102,6 +102,7 @@ const JOB_NAMES: Record<Agent["job"], () => string> = {
   cleaner: () => tr("cleaner", "청소부"),
   police: () => tr("police", "경찰"),
   mayor: () => tr("mayor", "시장"),
+  hauler: () => tr("hauler", "운반꾼"),
 };
 
 function jobName(job: Agent["job"]): string {

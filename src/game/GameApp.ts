@@ -117,6 +117,7 @@ export class GameApp {
       this.simulation.getTrainPositions(),
       this.simulation.getPoweredBuildingIds(),
       this.simulation.litter,
+      this.simulation.items,
     );
   }
 }
