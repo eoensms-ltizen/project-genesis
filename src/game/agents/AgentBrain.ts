@@ -31,6 +31,10 @@ const TAME_DURATION_SECONDS = 2.5;
 const PASTURE_HERD_CAP = 6;
 const WOOD_STOCKPILE_CAP = 10;
 const WOODCUTTER_STOCKPILE_CAP = 14;
+// A hamlet this size has no division of labour: everyone pitches in to gather
+// wood (there's no crowd to over-fell), so a lone settler can provision
+// themselves. Larger towns leave felling to woodcutters.
+const SMALL_SETTLEMENT = 4;
 // How much wood a hauler can carry in one trip from a forest pile to the warehouse.
 const HAUL_CAPACITY = 12;
 const LOAD_DURATION_SECONDS = 0.6;
@@ -408,7 +412,11 @@ export class AgentBrain {
     }
 
     const social = (100 - n.social) * (0.6 + p.sociability);
-    if (social >= NEED_ACT_THRESHOLD) {
+    // Socialising is only actionable when there's actually someone else to meet.
+    // A lone settler can't satisfy it, so it must not crowd out the work and
+    // provisioning that keep them alive — otherwise they wander forever seeking
+    // company that doesn't exist.
+    if (social >= NEED_ACT_THRESHOLD && this.hasCompany(agent, simulation)) {
       drives.push({ kind: "social", urgency: social });
     }
     const leisure = (100 - n.leisure) * (0.5 + p.curiosity);
@@ -521,34 +529,43 @@ export class AgentBrain {
   }
 
   private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
-    if (simulation.era >= 1) {
-      // Shelter before extras: when the town is full, growing housing upward
-      // takes priority over new communal amenities — otherwise housing capacity
-      // (and so the population) never grows past whatever it started at. Only one
-      // house redevelops at a time, so other workers fall through to the rest.
-      if (this.tryRedevelop(agent, simulation)) {
-        return true;
-      }
-      // Communal buildings outrank field work: gather wood for them first.
-      const communal = this.communalProject(agent, simulation);
-      if (communal === "started") {
-        return true;
-      }
-      if (this.doJobWork(agent, simulation)) {
-        return true;
-      }
+    // Shelter upgrades only matter once a town has filled out, so redeveloping
+    // taller stays gated on a grown settlement.
+    if (simulation.era >= 1 && this.tryRedevelop(agent, simulation)) {
+      return true;
+    }
+
+    // Provisioning is need-driven from the very first resident, not gated on
+    // reaching a later era: raise a warehouse to stockpile goods, then farm to
+    // keep the larder full so hunger is met from stores rather than foraging.
+    // communalProject builds the warehouse (and a kitchen once there's food);
+    // its advanced civic buildings remain gated by their own era checks inside.
+    const communal = this.communalProject(agent, simulation);
+    if (communal === "started") {
+      return true;
+    }
+    // Farm whenever the food stores sit below target — a standing guard against
+    // hunger that a lone settler tends to before idling.
+    if (this.findFarmWork(agent, simulation)) {
+      return true;
+    }
+    // Specialists ply their trade once the town is organised enough to assign jobs.
+    if (simulation.era >= 1 && this.doJobWork(agent, simulation)) {
+      return true;
     }
 
     // Keep the wood economy flowing. Once there's a warehouse, anyone with idle
-    // hands hauls loose piles into it, but only woodcutters fell fresh timber —
-    // otherwise a crowd of idle residents would all chop at once and bury the
-    // forest in logs. (Builders still fell on demand via fetchWood when the
-    // warehouse runs dry, so construction never stalls.)
+    // hands hauls loose piles into it; felling fresh timber is left to woodcutters
+    // in a busy town (so a crowd doesn't bury the forest in logs), but in a small
+    // hamlet everyone fells to stockpile materials. Builders still fell on demand
+    // via fetchWood when the warehouse runs dry, so construction never stalls.
     if (simulation.hasAnyWarehouse()) {
       if (this.findHaulWork(agent, simulation)) {
         return true;
       }
-      if (agent.job === "woodcutter" && simulation.wantsMoreWood()) {
+      const mayFell =
+        agent.job === "woodcutter" || simulation.agents.length <= SMALL_SETTLEMENT;
+      if (mayFell && simulation.wantsMoreWood()) {
         this.setState(agent, simulation, "FindTree");
         return true;
       }
@@ -655,10 +672,19 @@ export class AgentBrain {
   /** Lifestage idle for children and elders: company if lonely, else a stroll. */
   private liveByLeisure(agent: Agent, simulation: Simulation) {
     const social = (100 - agent.needs.social) * (0.6 + agent.personality.sociability);
-    if (social >= NEED_ACT_THRESHOLD && this.seekCompany(agent, simulation)) {
+    if (
+      social >= NEED_ACT_THRESHOLD &&
+      this.hasCompany(agent, simulation) &&
+      this.seekCompany(agent, simulation)
+    ) {
       return;
     }
     this.wanderNearHome(agent, simulation);
+  }
+
+  /** Is there anyone else around to socialise with? A hermit gives up on company. */
+  private hasCompany(agent: Agent, simulation: Simulation): boolean {
+    return simulation.agents.some((other) => other.id !== agent.id);
   }
 
   /**
