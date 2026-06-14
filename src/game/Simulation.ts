@@ -38,7 +38,9 @@ const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
 const BERRY_CAP = 140;
-const TREE_CAP = 320;
+// Forests are slow to recover so wood is a deliberate resource, not free and
+// instant — this is what pushes the colony toward stone and ore over time.
+const TREE_CAP = 240;
 
 const BIRTH_COOLDOWN_SECONDS = 12;
 // Attachment-first scale ladder: population is kept small and earned. The
@@ -74,7 +76,9 @@ const SAVE_VERSION = 10;
 export const ADULT_AGE = 12;
 export const ELDER_AGE = 60;
 const COUPLE_BIRTH_COOLDOWN_SECONDS = 90;
-const STUMP_REGROW_CHANCE = 0.03;
+// Stumps take a long while to grow back into trees (was 0.03 ≈ ~3 min; now an
+// order of magnitude slower) so felling has lasting consequence.
+const STUMP_REGROW_CHANCE = 0.003;
 const DURABILITY_DECAY_PER_TICK = 0.012;
 const EPISODE_CAP = 15;
 
@@ -925,7 +929,8 @@ export class Simulation {
 
     if (trees.length > 0 && trees.length < TREE_CAP) {
       for (const tree of trees) {
-        if (Math.random() < 0.008) {
+        // Forests spread slowly (was 0.008) so cleared land stays cleared.
+        if (Math.random() < 0.0015) {
           this.spreadTile(tree, "Tree");
         }
       }
