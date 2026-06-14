@@ -64,8 +64,6 @@ const STUMP_REGROW_CHANCE = 0.03;
 const DURABILITY_DECAY_PER_TICK = 0.012;
 const EPISODE_CAP = 15;
 
-// A 3x3 block of roads becomes a plaza; it then grows along adjacent roads.
-const PLAZA_DECOR_INTERVAL = 12;
 
 const ANIMAL_CAP = 8;
 const ANIMAL_MOVE_INTERVAL = 0.6;
@@ -1303,11 +1301,6 @@ export class Simulation {
     this.notifyChanged();
   }
 
-  /**
-   * A 3x3 cluster of roads condenses into a plaza, then keeps absorbing any
-   * road tiles that touch it. Decorations (fountain, lamps, statue) appear as
-   * the plaza grows, giving the town centre its civic landmark.
-   */
   /** A built building's door tile or the tile directly in front of it. */
   private isEntrance(position: Vec2): boolean {
     for (const b of this.buildings) {
@@ -1321,96 +1314,55 @@ export class Simulation {
     return false;
   }
 
+  /**
+   * A square plaza at the central avenue crossing — the grid's civic hub. It is
+   * a clean square (not an absorbing blob) centred on the grid intersection
+   * nearest the village centre, growing with the population, with a fountain at
+   * its heart, a statue, and lamps at the corners.
+   */
   private updatePlaza() {
-    const world = this.world;
-    let plazaCount = world.countType("Plaza");
-
-    if (plazaCount === 0) {
-      // A dense cluster of roads (a 3x3 window mostly paved) seeds a plaza.
-      for (let y = 1; y < world.height - 3 && plazaCount === 0; y += 1) {
-        for (let x = 1; x < world.width - 3 && plazaCount === 0; x += 1) {
-          if (this.roadDensity(x, y, 3) >= 7) {
-            for (let dy = 0; dy < 3; dy += 1) {
-              for (let dx = 0; dx < 3; dx += 1) {
-                const position = { x: x + dx, y: y + dy };
-                if (world.getTile(position)?.type === "Road") {
-                  world.setTile(position, "Plaza");
-                }
-              }
-            }
-            const fountain = { x: x + 1, y: y + 1 };
-            if (!this.isEntrance(fountain)) {
-              world.setTile(fountain, "Fountain");
-            }
-            world.setTile({ x, y }, "Lamp");
-            world.setTile({ x: x + 2, y: y + 2 }, "Lamp");
-            this.log("A village plaza has formed at the town's heart! ⛲");
-            plazaCount = world.countType("Plaza");
-          }
-        }
-      }
+    if (this.era < 2) {
       return;
     }
+    const world = this.world;
+    const center = this.villageCenter();
+    const hubX = Math.round(center.x / AVENUE_SPACING) * AVENUE_SPACING;
+    const hubY = Math.round(center.y / AVENUE_SPACING) * AVENUE_SPACING;
+    if (hubX < 2 || hubY < 2 || hubX > world.width - 3 || hubY > world.height - 3) {
+      return;
+    }
+    const radius = Math.min(2, 1 + Math.floor(this.agents.length / 24));
+    const first = world.countType("Plaza") === 0;
 
-    // Grow: absorb roads adjacent to the plaza.
-    const toPromote: Vec2[] = [];
-    for (const tile of world.tiles) {
-      if (tile.type !== "Road") {
-        continue;
-      }
-      if (this.hasOrthatType(tile, "Plaza")) {
-        toPromote.push({ x: tile.x, y: tile.y });
-      }
-    }
-    for (const position of toPromote) {
-      world.setTile(position, "Plaza");
-    }
-
-    // Add decorations as the plaza grows past size thresholds.
-    plazaCount += toPromote.length;
-    if (plazaCount >= PLAZA_DECOR_INTERVAL && !world.tiles.some((t) => t.type === "Statue")) {
-      const spot = world.tiles.find(
-        (t) => t.type === "Plaza" && this.hasOrthatType(t, "Plaza") && !this.isEntrance(t),
-      );
-      if (spot) {
-        world.setTile(spot, "Statue");
-        this.log("A statue was raised in the plaza. 🗽");
-      }
-    }
-    if (toPromote.length > 0 && plazaCount % PLAZA_DECOR_INTERVAL < toPromote.length) {
-      // Sprinkle a lamp on a fresh plaza edge for night lighting.
-      const edge = toPromote.find((p) => this.hasOrthatType(p, "Grass"));
-      if (edge) {
-        world.setTile(edge, "Lamp");
-      }
-    }
-  }
-
-  private roadDensity(x: number, y: number, size: number): number {
-    let count = 0;
-    for (let dy = 0; dy < size; dy += 1) {
-      for (let dx = 0; dx < size; dx += 1) {
-        const type = this.world.getTile({ x: x + dx, y: y + dy })?.type;
-        if (type === "Road" || type === "Plaza") {
-          count += 1;
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const p = { x: hubX + dx, y: hubY + dy };
+        const type = world.getTile(p)?.type;
+        if (type === "Road" || type === "Grass" || type === "Dirt" || type === "Lamp") {
+          world.setTile(p, "Plaza");
         }
       }
     }
-    return count;
-  }
-
-  private hasOrthatType(position: Vec2, type: TileType): boolean {
+    // Fountain at the heart; statue and lamps frame it.
+    if (world.getTile({ x: hubX, y: hubY })?.type === "Plaza") {
+      world.setTile({ x: hubX, y: hubY }, "Fountain");
+    }
     for (const [dx, dy] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
+      [-radius, -radius],
+      [radius, radius],
+      [-radius, radius],
+      [radius, -radius],
     ]) {
-      if (this.world.getTile({ x: position.x + dx, y: position.y + dy })?.type === type) {
-        return true;
+      if (world.getTile({ x: hubX + dx, y: hubY + dy })?.type === "Plaza") {
+        world.setTile({ x: hubX + dx, y: hubY + dy }, "Lamp");
       }
     }
-    return false;
+    if (radius >= 2 && world.getTile({ x: hubX, y: hubY - radius })?.type === "Plaza") {
+      world.setTile({ x: hubX, y: hubY - radius }, "Statue");
+    }
+    if (first && world.countType("Plaza") > 0) {
+      this.log("A village plaza was laid out at the town's heart! ⛲");
+    }
   }
 
   getWarehouse(): Building | undefined {

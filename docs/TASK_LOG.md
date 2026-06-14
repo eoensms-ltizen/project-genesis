@@ -112,6 +112,11 @@
   streets. The town reads as a deliberate, real-city layout. Verified: most
   roads (122/154) lie on the grid, buildings sit in blocks, growth to era 4 with
   no deadlock.
+- Plaza rework (phase 2c): the plaza is now a clean square centred on the grid
+  intersection nearest the village centre (the avenue hub), growing with the
+  population (3×3 → 5×5) with a fountain at its heart, corner lamps and a statue,
+  instead of an absorbing blob. Removed the old road-density seeding and the
+  now-unused helpers. Verified: a 5×5 square plaza with a grid-aligned fountain.
 
 ## 2026-06-12
 
