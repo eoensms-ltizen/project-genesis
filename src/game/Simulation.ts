@@ -642,6 +642,13 @@ export class Simulation {
     // interior). Open spaces — parks, pastures, cemeteries — stay solid/special.
     if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
       this.paintWalledRoom(building);
+      // A kitchen comes with a stove to cook at, set on its interior floor.
+      if (building.kind === "kitchen") {
+        const interior = this.interiorTiles(building);
+        if (interior.length > 0) {
+          this.world.setTile(interior[0], "Stove");
+        }
+      }
     } else {
       const tileType: TileType =
         stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
@@ -2074,6 +2081,12 @@ export class Simulation {
 
   hasAnyKitchen(): boolean {
     return this.buildings.some((building) => building.kind === "kitchen");
+  }
+
+  /** The stove tile a cook works at (inside a built kitchen), if any. */
+  getStove(): Vec2 | undefined {
+    const tile = this.world.tiles.find((t) => t.type === "Stove");
+    return tile ? { x: tile.x, y: tile.y } : undefined;
   }
 
   getChurch(): Building | undefined {

@@ -496,6 +496,28 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     }
   }
 
+  if (type === "Stove") {
+    // A dark iron stove with a glowing firebox.
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.fill(0x3c352e);
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.stroke({ color: 0x20201c, width: 1 });
+    graphics.rect(px + 5, py + 8, TILE_SIZE - 10, 4);
+    graphics.fill(0xe7873c);
+    graphics.circle(px + 8, py + 5, 1.3);
+    graphics.fill({ color: 0x8a8f99, alpha: 0.8 });
+  }
+
+  if (type === "Bed") {
+    // A mattress with a pillow at the head.
+    graphics.rect(px + 2, py + 3, TILE_SIZE - 4, TILE_SIZE - 6);
+    graphics.fill(0x5a6e88);
+    graphics.rect(px + 2, py + 3, TILE_SIZE - 4, TILE_SIZE - 6);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
+    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, 3);
+    graphics.fill(0xe6ddc8);
+  }
+
 }
 
 function resourcePileColors(resource: ResourceKind): [number, number] {
@@ -682,7 +704,13 @@ function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
  * need no emblem.
  */
 function drawRoomMarker(graphics: Graphics, building: Building) {
-  if (building.kind === "house" || building.kind === "warehouse") {
+  // House (sleeper), warehouse (piles) and kitchen (stove) identify themselves
+  // by what's inside — no emblem needed.
+  if (
+    building.kind === "house" ||
+    building.kind === "warehouse" ||
+    building.kind === "kitchen"
+  ) {
     return;
   }
   const cx = (building.x + building.width / 2) * TILE_SIZE;
@@ -701,9 +729,6 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
   } else if (building.kind === "smelter") {
     graphics.circle(cx, cy, 1.8);
     graphics.fill(0xe7873c);
-  } else if (building.kind === "kitchen") {
-    graphics.circle(cx, cy, 1.8);
-    graphics.fill(0xe3b94e);
   }
 }
 
@@ -1103,6 +1128,10 @@ function tileColor(type: TileType): number {
       return 0x6b6660;
     case "RockFloor":
       return 0x4f4a44;
+    case "Stove":
+      return 0x4a3b2a;
+    case "Bed":
+      return 0x4a3b2a;
     case "Berry":
       return 0x2c4a28;
     case "FieldEmpty":

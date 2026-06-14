@@ -29,6 +29,9 @@ const MOVE_COSTS: Record<TileType, number> = {
   RockGranite: Number.POSITIVE_INFINITY,
   OreIron: Number.POSITIVE_INFINITY,
   RockFloor: 1,
+  // Furniture sits on a room floor and is walkable (you stand at / lie on it).
+  Stove: 1,
+  Bed: 1,
   Berry: 2,
   FieldEmpty: 2.2,
   FieldGrowing: 2.2,
@@ -60,6 +63,8 @@ const TILE_CODES: Record<TileType, string> = {
   RockGranite: "g",
   OreIron: "i",
   RockFloor: ",",
+  Stove: "v",
+  Bed: "b",
   Berry: "B",
   FieldEmpty: "e",
   FieldGrowing: "c",

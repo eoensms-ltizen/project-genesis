@@ -53,6 +53,9 @@ const CRAFT_DURATION_SECONDS = 3;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
+// Anyone can cook, but a non-cook works at this efficiency: slower and wasting
+// some of the food (fewer meals from the same raw ingredients).
+const NON_EXPERT_COOK_EFFICIENCY = 0.55;
 const FARM_WORK_DURATION_SECONDS = 2;
 const CLEAN_DURATION_SECONDS = 1.5;
 const PAVE_DURATION_SECONDS = 1.5;
@@ -573,6 +576,11 @@ export class AgentBrain {
     // Farm whenever the food stores sit below target — a standing guard against
     // hunger that a lone settler tends to before idling.
     if (this.findFarmWork(agent, simulation)) {
+      return true;
+    }
+    // Cook raw food into meals once there's a stove — anyone may, though a
+    // non-cook does it slowly and wastefully (see cookEfficiency).
+    if (this.tryCook(agent, simulation)) {
       return true;
     }
     // Specialists ply their trade once the town is organised enough to assign jobs.
@@ -1488,8 +1496,10 @@ export class AgentBrain {
   }
 
   private tryCook(agent: Agent, simulation: Simulation): boolean {
-    const kitchen = simulation.getKitchen();
-    if (!kitchen) {
+    // Cooking needs a stove (inside a kitchen), raw food, and a larder that
+    // isn't already full of meals. Anyone may do it — see cookEfficiency.
+    const stove = simulation.getStove();
+    if (!stove) {
       return false;
     }
     if (
@@ -1499,28 +1509,41 @@ export class AgentBrain {
       return false;
     }
 
-    const path = findPath(simulation.world, { start: agent.position, goal: kitchen.door });
+    const path = findPath(simulation.world, { start: agent.position, goal: stove });
     if (!path) {
       return false;
     }
 
-    agent.target = { ...kitchen.door };
+    agent.target = { ...stove };
     agent.path = path;
     this.setState(agent, simulation, "MoveToKitchen");
     return true;
   }
 
+  /** A cook works at full speed and yield; anyone else cooks slower and wastefully. */
+  private cookEfficiency(agent: Agent): number {
+    return agent.job === "cook" ? 1 : NON_EXPERT_COOK_EFFICIENCY;
+  }
+
   private cook(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const efficiency = this.cookEfficiency(agent);
     agent.actionTimer += deltaSeconds;
-    if (agent.actionTimer < COOK_DURATION_SECONDS) {
+    // A clumsy cook takes longer over the stove.
+    if (agent.actionTimer < COOK_DURATION_SECONDS / efficiency) {
       return;
     }
 
     if (simulation.foodStock >= COOK_RAW_COST) {
       simulation.foodStock -= COOK_RAW_COST;
-      simulation.meals += COOK_MEAL_YIELD;
+      // A non-cook gets fewer meals out of the same ingredients (some is spoiled).
+      const yieldMeals = Math.max(1, Math.round(COOK_MEAL_YIELD * efficiency));
+      simulation.meals += yieldMeals;
       if (Math.random() < 0.4) {
-        simulation.log(tr(`${agent.name} cooked warm meals at the kitchen.`, `${agent.name}이(가) 부엌에서 따뜻한 식사를 지었다.`));
+        simulation.log(
+          efficiency >= 1
+            ? tr(`${agent.name} cooked warm meals at the stove.`, `${agent.name}이(가) 화덕에서 따뜻한 식사를 지었다.`)
+            : tr(`${agent.name} cooked at the stove, a little clumsily.`, `${agent.name}이(가) 화덕에서 서툴게 식사를 지었다.`),
+        );
       }
       simulation.notifyChanged();
     }

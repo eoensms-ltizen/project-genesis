@@ -158,6 +158,8 @@ const TILE_NAMES: Partial<Record<TileType, () => string>> = {
   RockGranite: () => tr("Granite", "화강암"),
   OreIron: () => tr("Iron ore", "철광석"),
   RockFloor: () => tr("Rough stone floor", "암반 바닥"),
+  Stove: () => tr("Stove", "화덕"),
+  Bed: () => tr("Bed", "침대"),
   Berry: () => tr("Berry bush", "베리 덤불"),
   FieldEmpty: () => tr("Field", "밭"),
   FieldGrowing: () => tr("Growing field", "자라는 밭"),
