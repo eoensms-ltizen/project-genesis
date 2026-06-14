@@ -574,9 +574,14 @@ function drawBuilding(graphics: Graphics, building: Building) {
       graphics.fill(0x9fb8cc);
     }
   }
-  // Door on the bottom (south) face, on the door column.
-  graphics.rect(doorX - 3, py + h - 9, 6, 9);
-  graphics.fill(0x2c2118);
+  // An opening at each entrance, on whichever side it faces the street.
+  const doors = building.doors ?? [building.door];
+  for (const door of doors) {
+    const sx = door.x * TILE_SIZE;
+    const sy = door.y * TILE_SIZE;
+    graphics.rect(sx + 3, sy + 4, TILE_SIZE - 6, TILE_SIZE - 5);
+    graphics.fill(0x2c2118);
+  }
   drawRoofAccent(graphics, building.kind, px, w, top, doorX);
 }
 

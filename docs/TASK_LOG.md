@@ -137,6 +137,13 @@
   map (mayor gold, police blue, cleaner teal, ...). Verified: no mayor before the
   Town era; once one is on duty the grid forms (179 avenue tiles), avenues are
   clear of trees, growth reaches era 4 with no deadlock.
+- Road-facing, multiple entrances: buildings now place their door(s) on the
+  side(s) facing the nearest avenue instead of always south, and larger
+  buildings (3×3 communal, 2×3 apartments) get a second entrance on the next
+  street. registerBuilding computes the doors; all doors are paved to road and
+  kept walkable; apartment expansion grows on a doorless side so it never seals a
+  doorway. Verified: doors face all four directions, 8/14 buildings have multiple
+  doors, zero trapped buildings, growth to era 4. (Fire station is next.)
 
 ## 2026-06-12
 

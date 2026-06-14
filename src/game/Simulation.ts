@@ -422,13 +422,86 @@ export class Simulation {
     door: Vec2;
     ownerId?: string;
   }): Building {
+    const doors = this.computeDoors(input.x, input.y, input.width, input.height);
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
       ...input,
+      door: doors[0],
+      doors,
     };
     this.buildings.push(building);
     return building;
+  }
+
+  /**
+   * Entrances facing the nearest streets. Each candidate side's door sits on the
+   * footprint edge with its approach tile just outside; sides are ranked by how
+   * close they are to a bounding avenue, and only sides whose approach is open
+   * ground qualify. Big buildings get a second entrance. Falls back to the south
+   * side so a building always has at least one door.
+   */
+  private computeDoors(x: number, y: number, width: number, height: number): Vec2[] {
+    const S = AVENUE_SPACING;
+    const cx = x + Math.floor(width / 2);
+    const cy = y + Math.floor(height / 2);
+    const xl = x;
+    const xr = x + width - 1;
+    const yt = y;
+    const yb = y + height - 1;
+    type Side = { dist: number; door: Vec2; front: Vec2 };
+    const candidates: Side[] = [
+      // south, north, east, west — distance to the bounding avenue in that direction
+      { dist: (Math.floor(yb / S) + 1) * S - yb, door: { x: cx, y: yb }, front: { x: cx, y: yb + 1 } },
+      { dist: yt - Math.floor(yt / S) * S, door: { x: cx, y: yt }, front: { x: cx, y: yt - 1 } },
+      { dist: (Math.floor(xr / S) + 1) * S - xr, door: { x: xr, y: cy }, front: { x: xr + 1, y: cy } },
+      { dist: xl - Math.floor(xl / S) * S, door: { x: xl, y: cy }, front: { x: xl - 1, y: cy } },
+    ];
+    const open = (p: Vec2): boolean => {
+      const t = this.world.getTile(p)?.type;
+      return (
+        t !== undefined &&
+        t !== "Water" &&
+        t !== "Tree" &&
+        t !== "Fountain" &&
+        t !== "Statue" &&
+        t !== "House" &&
+        t !== "HouseSite" &&
+        t !== "HouseFoundation"
+      );
+    };
+    const usable = candidates.filter((s) => this.world.getTile(s.front) && open(s.front));
+    usable.sort((a, b) => a.dist - b.dist);
+    const chosen = usable.length === 0 ? [candidates[0]] : [usable[0]];
+    // A larger building opens a second entrance on the next-closest street.
+    if (usable.length > 1 && (width >= 3 || height >= 3)) {
+      chosen.push(usable[1]);
+    }
+    const doors: Vec2[] = [];
+    for (const s of chosen) {
+      if (!doors.some((d) => d.x === s.door.x && d.y === s.door.y)) {
+        doors.push(s.door);
+      }
+    }
+    return doors;
+  }
+
+  /** The open tile just outside a door (its approach), based on which edge it's on. */
+  private doorFront(building: Building, door: Vec2): Vec2 {
+    if (door.y === building.y) {
+      return { x: door.x, y: building.y - 1 };
+    }
+    if (door.y === building.y + building.height - 1) {
+      return { x: door.x, y: building.y + building.height };
+    }
+    if (door.x === building.x) {
+      return { x: building.x - 1, y: door.y };
+    }
+    return { x: building.x + building.width, y: door.y };
+  }
+
+  private buildingDoors(building: Building): Vec2[] {
+    return building.doors ?? [building.door];
   }
 
   getBuilding(id: string): Building | undefined {
@@ -452,12 +525,14 @@ export class Simulation {
     for (const position of footprintTiles(building)) {
       this.world.setTile(position, tileType);
     }
-    // The entrance is always a road: the door tile and the tile in front of it
+    // Every entrance is a road: each door tile and the tile in front of it
     // become Road, so a building can never be sealed in by neighbours (other
     // footprints only take grass) and residents can always get out.
-    this.reserveEntrance(building.door);
+    this.reserveEntrance(building);
     if (stage === "built") {
-      this.world.setTile(building.door, "Road");
+      for (const door of this.buildingDoors(building)) {
+        this.world.setTile(door, "Road");
+      }
     }
     if (stage === "built" && building.kind === "station") {
       this.layStationRail(building);
@@ -467,23 +542,25 @@ export class Simulation {
   }
 
   /**
-   * Pave the tile in front of a door to Road so nothing can build over it. Call
-   * this the moment a site is staked (before the footprint tiles are typed), so
-   * a clustered neighbour can't drop its footprint onto the doorway first.
+   * Pave the tile in front of each door to Road so nothing can build over it.
+   * Call this the moment a site is staked (before the footprint tiles are typed),
+   * so a clustered neighbour can't drop its footprint onto a doorway first.
    */
-  reserveEntrance(door: Vec2) {
-    const front = { x: door.x, y: door.y + 1 };
-    if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
-      this.world.setTile(front, "Road");
+  reserveEntrance(building: Building) {
+    for (const door of this.buildingDoors(building)) {
+      const front = this.doorFront(building, door);
+      if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
+        this.world.setTile(front, "Road");
+      }
     }
   }
 
-  /** A built building is solid except its door; tell the world which tiles those are. */
+  /** A built building is solid except its doors; tell the world which tiles those are. */
   private refreshDoors() {
     const doors: Vec2[] = [];
     for (const building of this.buildings) {
       if (building.stage === "built") {
-        doors.push(building.door);
+        doors.push(...this.buildingDoors(building));
       }
     }
     this.world.setDoors(doors);
@@ -2198,36 +2275,50 @@ export class Simulation {
    * left alone, in which case the block stays its current size.
    */
   private expandHouseFootprint(building: Building): boolean {
-    const newY = building.y - 1;
-    if (newY < 1) {
-      return false;
-    }
-    const newRow: Vec2[] = [];
-    for (let dx = 0; dx < building.width; dx += 1) {
-      newRow.push({ x: building.x + dx, y: newY });
-    }
-    for (const p of newRow) {
-      if (this.world.getTile(p)?.type === "Water") {
-        return false;
+    const { x, y, width, height } = building;
+    const doors = this.buildingDoors(building);
+    // Candidate sides; never grow over a side that holds a door (it would seal
+    // that doorway), so the building grows into a doorless edge.
+    const sides = [
+      { has: doors.some((d) => d.y === y), strip: row(x, width, y - 1), apply: () => { building.y -= 1; building.height += 1; } },
+      { has: doors.some((d) => d.y === y + height - 1), strip: row(x, width, y + height), apply: () => { building.height += 1; } },
+      { has: doors.some((d) => d.x === x), strip: col(y, height, x - 1), apply: () => { building.x -= 1; building.width += 1; } },
+      { has: doors.some((d) => d.x === x + width - 1), strip: col(y, height, x + width), apply: () => { building.width += 1; } },
+    ];
+    for (const side of sides) {
+      if (side.has) {
+        continue;
       }
-      const occ = this.buildingAt(p);
-      if (occ && occ !== building && occ.kind !== "house") {
-        return false; // don't bulldoze the warehouse, church, etc.
+      let clear = true;
+      for (const p of side.strip) {
+        const tile = this.world.getTile(p);
+        if (!tile || tile.type === "Water") {
+          clear = false;
+          break;
+        }
+        const occ = this.buildingAt(p);
+        if (occ && occ !== building && occ.kind !== "house") {
+          clear = false;
+          break;
+        }
       }
+      if (!clear) {
+        continue;
+      }
+      for (const p of side.strip) {
+        const occ = this.buildingAt(p);
+        if (occ && occ !== building && occ.kind === "house") {
+          this.demolishHouse(occ);
+          this.log("A house was cleared to make way for an apartment block. 🏗️");
+        }
+        if (this.world.getTile(p)?.type === "Tree") {
+          this.world.setTile(p, "Grass");
+        }
+      }
+      side.apply();
+      return true;
     }
-    for (const p of newRow) {
-      const occ = this.buildingAt(p);
-      if (occ && occ !== building && occ.kind === "house") {
-        this.demolishHouse(occ);
-        this.log("A house was cleared to make way for an apartment block. 🏗️");
-      }
-      if (this.world.getTile(p)?.type === "Tree") {
-        this.world.setTile(p, "Grass");
-      }
-    }
-    building.y = newY;
-    building.height += 1;
-    return true;
+    return false;
   }
 
   /** Redevelop a house one tier taller, packing more households per tile. */
@@ -2243,16 +2334,15 @@ export class Simulation {
         this.expandHouseFootprint(building);
       }
     }
-    // Re-tile the (possibly grown) footprint, then keep the doorway a road so
+    // Re-tile the (possibly grown) footprint, then keep every doorway a road so
     // the rebuilt block is never sealed in.
     for (const position of footprintTiles(building)) {
       this.world.setTile(position, "House");
     }
-    this.world.setTile(building.door, "Road");
-    const front = { x: building.door.x, y: building.door.y + 1 };
-    if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
-      this.world.setTile(front, "Road");
+    for (const door of this.buildingDoors(building)) {
+      this.world.setTile(door, "Road");
     }
+    this.reserveEntrance(building);
     const label =
       next >= 4
         ? "A block was rebuilt into a residential tower. 🗼"
@@ -2397,6 +2487,14 @@ function loadSaveData(): SaveData | undefined {
 
 function claimKey(position: Vec2): string {
   return `${position.x},${position.y}`;
+}
+
+function row(x: number, width: number, y: number): Vec2[] {
+  return Array.from({ length: width }, (_, i) => ({ x: x + i, y }));
+}
+
+function col(y: number, height: number, x: number): Vec2[] {
+  return Array.from({ length: height }, (_, i) => ({ x, y: y + i }));
 }
 
 export function footprintTiles(building: Building): Vec2[] {

@@ -909,11 +909,7 @@ export class AgentBrain {
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
       },
     );
-    const door = site ? { x: site.x, y: site.y + 1 } : undefined;
-    const path = door
-      ? findPath(simulation.world, { start: agent.position, goal: door })
-      : undefined;
-    if (!site || !door || !path) {
+    if (!site) {
       simulation.log(`${agent.name} could not find a house site.`);
       this.backOff(agent, simulation);
       return;
@@ -925,13 +921,21 @@ export class AgentBrain {
       y: site.y,
       width: 2,
       height: 2,
-      door,
+      door: { x: site.x, y: site.y + 1 },
       ownerId: agent.id,
     });
+    // registerBuilding picks road-facing doors; head for the primary one.
+    const door = building.door;
+    const path = findPath(simulation.world, { start: agent.position, goal: door });
+    if (!path) {
+      simulation.cancelBuilding(building);
+      this.backOff(agent, simulation);
+      return;
+    }
     simulation.claimBuildingFootprint(building);
-    // Reserve the doorway as road immediately, before any clustered neighbour
-    // staked the same tick can drop its footprint onto it.
-    simulation.reserveEntrance(door);
+    // Reserve the doorways as road immediately, before any clustered neighbour
+    // staked the same tick can drop its footprint onto one.
+    simulation.reserveEntrance(building);
     agent.homeBuildingId = building.id;
     agent.projectBuildingId = building.id;
     agent.homeSite = { ...door };
@@ -997,21 +1001,22 @@ export class AgentBrain {
     if (!site) {
       return false;
     }
-    const door = { x: site.x + Math.floor(width / 2), y: site.y + height - 1 };
-    const path = findPath(simulation.world, { start: agent.position, goal: door });
-    if (!path) {
-      return false;
-    }
-
     const building = simulation.registerBuilding({
       kind,
       x: site.x,
       y: site.y,
       width,
       height,
-      door,
+      door: { x: site.x + Math.floor(width / 2), y: site.y + height - 1 },
     });
+    const door = building.door;
+    const path = findPath(simulation.world, { start: agent.position, goal: door });
+    if (!path) {
+      simulation.cancelBuilding(building);
+      return false;
+    }
     simulation.claimBuildingFootprint(building);
+    simulation.reserveEntrance(building);
     agent.projectBuildingId = building.id;
     agent.target = { ...door };
     agent.path = path;

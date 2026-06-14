@@ -98,7 +98,8 @@ export type Building = {
   y: number;
   width: number;
   height: number;
-  door: Vec2;
+  door: Vec2; // primary entrance (used by pathing/home)
+  doors?: Vec2[]; // all entrances incl. the primary; face the nearest streets
   stage: BuildingStage;
   ownerId?: string;
   builtAtDay?: number;
