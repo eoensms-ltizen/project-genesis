@@ -117,6 +117,14 @@
   population (3×3 → 5×5) with a fountain at its heart, corner lamps and a statue,
   instead of an absorbing blob. Removed the old road-density seeding and the
   now-unused helpers. Verified: a 5×5 square plaza with a grid-aligned fountain.
+- Bigger blocks, growing parks, house clustering: widened the avenue grid (6→8)
+  so each block holds several buildings. Parks now scale with population by
+  growing ONE park bigger (a larger park reaches farther; it can pave over the
+  avenue between two parks to merge them) rather than scattering many small ones,
+  and they're laid out/grown as civic projects. Home comfort now follows a
+  cluster curve: a few close neighbours are cosy, an overpacked crush is not.
+  Verified: blocks with multiple buildings, a single ~5×6 park scaled to the
+  population, growth to era 4 with no deadlock.
 
 ## 2026-06-12
 

@@ -77,9 +77,12 @@ const PRAY_DURATION_SECONDS = 8;
 const RELAX_DURATION_SECONDS = 6;
 // Crowding: homes packed within this radius drain comfort faster (the first
 // couple of neighbours are fine; beyond that it starts to feel cramped).
-const COMFORT_CROWD_RADIUS = 6;
-const COMFORT_CROWD_TOLERANCE = 2;
-const COMFORT_CROWD_DECAY = 0.02;
+// Living among a few close neighbours is cosy (a hamlet); being hemmed in by a
+// crush of them is not. A small cluster lifts comfort, a large one drains it.
+const HOUSE_CLUSTER_RADIUS = 2.6;
+const CLUSTER_COSY_CAP = 3; // neighbours up to here feel neighbourly
+const CLUSTER_CROWDED = 5; // neighbours past here start to grate
+const COMFORT_CLUSTER_RATE = 0.02;
 // How strongly the surrounding ambiance pushes comfort up (amenities) or down
 // (nuisances) per second, and how much it sways where things get built.
 const AMBIANCE_COMFORT_RATE = 0.005;
@@ -665,13 +668,13 @@ export class AgentBrain {
     if (simulation.getChurch()) {
       n.faith = clampNeed(n.faith - deltaSeconds * NEED_DECAY.faith);
     }
-    // Comfort drains faster the more crowded the resident's home is, and shifts
-    // with the surroundings: pleasant amenities soothe, nearby nuisances grate.
+    // Comfort shifts with the home's surroundings and how it clusters with
+    // neighbours: pleasant amenities soothe, nuisances grate; a small cluster of
+    // homes is cosy, an overpacked one is oppressive.
     const anchor = agent.home ?? roundVec(agent.position);
-    const crowd = Math.max(
-      0,
-      simulation.localHouseDensity(anchor, COMFORT_CROWD_RADIUS) - COMFORT_CROWD_TOLERANCE,
-    );
+    const neighbours = simulation.localHouseDensity(anchor, HOUSE_CLUSTER_RADIUS);
+    const cluster =
+      Math.min(neighbours, CLUSTER_COSY_CAP) - Math.max(0, neighbours - CLUSTER_CROWDED);
     const ambiance = simulation.ambianceAt(anchor);
     // An overcrowded home (more residents than it can comfortably hold) grates too.
     const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
@@ -681,8 +684,9 @@ export class AgentBrain {
         : 0;
     n.comfort = clampNeed(
       n.comfort -
-        deltaSeconds * (NEED_DECAY.comfort + crowd * COMFORT_CROWD_DECAY + overcrowd * 0.03) +
-        deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE,
+        deltaSeconds * (NEED_DECAY.comfort + overcrowd * 0.03) +
+        deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE +
+        deltaSeconds * cluster * COMFORT_CLUSTER_RATE,
     );
 
     // Refill while engaged in the matching activity.
@@ -720,7 +724,6 @@ export class AgentBrain {
       | "factory"
       | "station"
       | "cemetery"
-      | "park"
       | "police"
       | undefined;
     if (!simulation.hasAnyWarehouse()) {
@@ -728,9 +731,6 @@ export class AgentBrain {
     } else if (simulation.needsCemetery()) {
       // The dead must be laid to rest — built far from where people live.
       kind = "cemetery";
-    } else if (simulation.needsPark()) {
-      // A cramped town lays out green space near where people live.
-      kind = "park";
     } else if (simulation.needsPoliceStation()) {
       // A restless town builds a police station to keep the peace.
       kind = "police";
