@@ -158,6 +158,12 @@
   cap lifted (safety ceiling 90), to watch need-driven building. Verified: a town
   grows to ~90 adults with the full need→building chain, organic roads that don't
   vanish at night.
+- Police as a coverage service (radius + capacity): a station keeps the peace for
+  the residents nearest it (within 15 tiles) up to 10 of them; everyone beyond is
+  unpoliced, so unrest is driven by the unpoliced fraction and the town builds
+  stations distributed across it (each new one sited at the farthest uncovered
+  home), capped near one per 10 residents. Verified: ~5 stations for a town of
+  55, partial coverage yields moderate unrest, no runaway.
 
 ## 2026-06-12
 

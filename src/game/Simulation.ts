@@ -197,8 +197,13 @@ const ROADABLE: ReadonlySet<TileType> = new Set([
 // occasionally erupts into a quarrel that dents the participants' comfort.
 const UNREST_THRESHOLD = 30; // a quarrel can erupt above this
 const POLICE_ON_THRESHOLD = 10; // keep officers on duty above this (hysteresis vs the quarrel line)
-const POLICE_STATION_THRESHOLD = 15; // build a station once friction recurs
 const QUARREL_COMFORT_HIT = 16;
+// A police station (level 1) keeps the peace for residents whose home lies within
+// this radius, up to this many of them; people outside any station's reach go
+// unpoliced, so a spreading town needs several stations.
+const POLICE_RADIUS = 15;
+const POLICE_CAPACITY = 10;
+const POLICE_MIN_POP = 10;
 
 type SavedAgent = Omit<
   Agent,
@@ -1290,26 +1295,114 @@ export class Simulation {
     return this.unrest >= POLICE_ON_THRESHOLD;
   }
 
-  needsPoliceStation(): boolean {
-    // Any-stage check (not just built) so several builders don't each break
-    // ground on their own station in the same moment.
-    return (
-      this.unrest >= POLICE_STATION_THRESHOLD &&
-      !this.buildings.some((b) => b.kind === "police")
-    );
+  /**
+   * Residents a police station can't reach: each station keeps the peace for the
+   * residents nearest it (within POLICE_RADIUS) up to POLICE_CAPACITY; everyone
+   * beyond that goes unpoliced. So a spreading town needs stations distributed
+   * through it, not just one at the centre.
+   */
+  uncoveredResidents(): number {
+    const stations = this.buildings.filter((b) => b.kind === "police" && b.stage === "built");
+    const total = this.agents.length;
+    if (stations.length === 0) {
+      return total;
+    }
+    const load = new Map<string, number>();
+    const homes = this.buildings.filter((b) => b.kind === "house" && b.stage === "built");
+    type Pair = { home: string; occ: number; station: string; dist: number };
+    const pairs: Pair[] = [];
+    for (const home of homes) {
+      const occ = this.occupantsOf(home.id);
+      if (occ === 0) {
+        continue;
+      }
+      const hx = home.x + home.width / 2;
+      const hy = home.y + home.height / 2;
+      for (const st of stations) {
+        const d = Math.hypot(hx - (st.x + st.width / 2), hy - (st.y + st.height / 2));
+        if (d <= POLICE_RADIUS) {
+          pairs.push({ home: home.id, occ, station: st.id, dist: d });
+        }
+      }
+    }
+    // Assign each home to the nearest station that still has room.
+    pairs.sort((a, b) => a.dist - b.dist);
+    const assigned = new Set<string>();
+    let covered = 0;
+    for (const p of pairs) {
+      if (assigned.has(p.home)) {
+        continue;
+      }
+      const used = load.get(p.station) ?? 0;
+      if (used < POLICE_CAPACITY) {
+        covered += Math.min(p.occ, POLICE_CAPACITY - used);
+        load.set(p.station, used + p.occ);
+        assigned.add(p.home);
+      }
+    }
+    return Math.max(0, total - covered);
   }
 
   /**
-   * Unrest eases toward a target set by friction (crowding + discontent) minus
-   * the order that police and a station can keep — so it settles at an
-   * equilibrium instead of running away. High unrest occasionally erupts into a
-   * quarrel; officers break it up, otherwise comfort takes the hit.
+   * Where the next police station should go: the lived-in home that no station
+   * reaches and lies farthest from existing ones, so stations spread to cover the
+   * town rather than piling up at the centre.
+   */
+  plannedPoliceSpot(): Vec2 | undefined {
+    const stations = this.buildings.filter((b) => b.kind === "police" && b.stage === "built");
+    let best: Vec2 | undefined;
+    let bestScore = -1;
+    for (const home of this.buildings) {
+      if (home.kind !== "house" || home.stage !== "built" || this.occupantsOf(home.id) === 0) {
+        continue;
+      }
+      const hx = home.x + home.width / 2;
+      const hy = home.y + home.height / 2;
+      let nearest = Number.POSITIVE_INFINITY;
+      for (const st of stations) {
+        nearest = Math.min(
+          nearest,
+          Math.hypot(hx - (st.x + st.width / 2), hy - (st.y + st.height / 2)),
+        );
+      }
+      if (nearest <= POLICE_RADIUS) {
+        continue; // already covered
+      }
+      if (nearest > bestScore) {
+        bestScore = nearest;
+        best = { x: hx, y: hy };
+      }
+    }
+    return best;
+  }
+
+  needsPoliceStation(): boolean {
+    if (this.agents.length < POLICE_MIN_POP) {
+      return false;
+    }
+    if (this.buildings.some((b) => b.kind === "police" && b.stage !== "built")) {
+      return false; // one at a time
+    }
+    // A sane ceiling so coverage gaps never trigger runaway building.
+    const stations = this.buildings.filter((b) => b.kind === "police").length;
+    if (stations >= Math.ceil(this.agents.length / POLICE_CAPACITY) + 1) {
+      return false;
+    }
+    return this.uncoveredResidents() >= POLICE_CAPACITY / 2;
+  }
+
+  /**
+   * Unrest eases toward a target set by friction (crowding + discontent) scaled
+   * by how much of the town is unpoliced, minus the order on-duty officers keep.
+   * High unrest occasionally erupts into a quarrel; officers break it up.
    */
   private updateUnrest() {
     const friction =
       Math.max(0, this.agents.length - 10) * 0.3 + Math.max(0, 60 - this.meanWellbeing()) * 0.2;
-    const order = this.policeCount() * 15 + (this.hasPoliceStation() ? 20 : 0);
-    const target = Math.max(0, Math.min(100, friction * 6 - order));
+    const unpolicedFrac =
+      this.agents.length > 0 ? this.uncoveredResidents() / this.agents.length : 0;
+    const order = this.policeCount() * 8;
+    const target = Math.max(0, Math.min(100, friction * 6 * unpolicedFrac - order));
     this.unrest += (target - this.unrest) * 0.3;
     if (this.unrest < 0.5) {
       this.unrest = 0;

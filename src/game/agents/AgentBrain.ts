@@ -976,10 +976,13 @@ export class AgentBrain {
     // A factory must sit near the power plant to be electrified (and so forge
     // steel), so it builds next to it; other industry just shuns housing.
     const powerplant = simulation.getPowerPlant();
+    const policeSpot = kind === "police" ? simulation.plannedPoliceSpot() : undefined;
     const origin =
       kind === "factory" && powerplant
         ? { x: Math.round(powerplant.x + powerplant.width / 2), y: Math.round(powerplant.y + powerplant.height / 2) }
-        : agent.position;
+        : policeSpot
+          ? { x: Math.round(policeSpot.x), y: Math.round(policeSpot.y) }
+          : agent.position;
     const site =
       kind === "cemetery"
         ? simulation.world.findBuildingSite(
