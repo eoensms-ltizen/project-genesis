@@ -50,6 +50,9 @@ const WOOD_RESERVE_FLOOR = 24;
 const PICKAXE_WOOD_COST = 6;
 const PICKAXE_STONE_COST = 10;
 const CRAFT_DURATION_SECONDS = 3;
+// A bed: built from wood inside one's home. Sleeping in a bed rests best.
+const BED_WOOD_COST = 4;
+const FURNISH_DURATION_SECONDS = 3;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
@@ -157,6 +160,8 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "Mine",
   "MoveToCraft",
   "CraftTool",
+  "MoveToFurnish",
+  "Furnish",
 ]);
 
 export class AgentBrain {
@@ -310,6 +315,12 @@ export class AgentBrain {
         break;
       case "CraftTool":
         this.craftPickaxe(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToFurnish":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Furnish");
+        break;
+      case "Furnish":
+        this.furnish(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -581,6 +592,10 @@ export class AgentBrain {
     // Cook raw food into meals once there's a stove — anyone may, though a
     // non-cook does it slowly and wastefully (see cookEfficiency).
     if (this.tryCook(agent, simulation)) {
+      return true;
+    }
+    // Furnish the home with a bed so nights are spent resting properly.
+    if (this.tryBuildBed(agent, simulation)) {
       return true;
     }
     // Specialists ply their trade once the town is organised enough to assign jobs.
@@ -1359,6 +1374,56 @@ export class AgentBrain {
         ),
         [agent],
       );
+    }
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /**
+   * A resident furnishes their home with a bed (from wood) once they have one —
+   * a comfort improvement so they rest properly instead of on the bare floor.
+   */
+  private tryBuildBed(agent: Agent, simulation: Simulation): boolean {
+    if (!agent.home || !agent.homeBuildingId) {
+      return false;
+    }
+    const home = simulation.getBuilding(agent.homeBuildingId);
+    if (!home || home.kind !== "house" || home.stage !== "built" || simulation.hasBed(home)) {
+      return false;
+    }
+    if (agent.inventory.wood < BED_WOOD_COST) {
+      return this.fetchWood(agent, simulation, BED_WOOD_COST);
+    }
+    const spot = simulation.bedSpot(home);
+    if (!spot) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: spot });
+    if (!path) {
+      return false;
+    }
+    agent.target = { ...spot };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFurnish");
+    return true;
+  }
+
+  private furnish(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < FURNISH_DURATION_SECONDS) {
+      return;
+    }
+    if (agent.target) {
+      const pos = roundVec(agent.target);
+      if (
+        simulation.world.getTile(pos)?.type === "Floor" &&
+        agent.inventory.wood >= BED_WOOD_COST
+      ) {
+        simulation.world.setTile(pos, "Bed");
+        agent.inventory.wood -= BED_WOOD_COST;
+        simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 침대를 놓았다. 🛏️`), [agent]);
+      }
     }
     agent.target = undefined;
     agent.path = undefined;
@@ -2328,11 +2393,27 @@ export class AgentBrain {
     this.setState(agent, simulation, resume ?? "Idle");
   }
 
+  /** Where a resident lies down: their bed if they have one, else home, else here. */
+  private sleepSpot(agent: Agent, simulation: Simulation): Vec2 | undefined {
+    if (!agent.home) {
+      return undefined;
+    }
+    if (agent.homeBuildingId) {
+      const home = simulation.getBuilding(agent.homeBuildingId);
+      const bed = home ? simulation.bedOf(home) : undefined;
+      if (bed) {
+        return bed;
+      }
+    }
+    return agent.home;
+  }
+
   private goSleep(agent: Agent, simulation: Simulation) {
-    if (agent.home && !samePos(roundVec(agent.position), agent.home)) {
-      const path = findPath(simulation.world, { start: agent.position, goal: agent.home });
+    const spot = this.sleepSpot(agent, simulation);
+    if (spot && !samePos(roundVec(agent.position), spot)) {
+      const path = findPath(simulation.world, { start: agent.position, goal: spot });
       if (path) {
-        agent.target = { ...agent.home };
+        agent.target = { ...spot };
         agent.path = path;
         this.setState(agent, simulation, "MoveHome");
         return;
@@ -2342,8 +2423,10 @@ export class AgentBrain {
   }
 
   private sleep(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    // A bed rests best, one's own home next, rough sleeping outside the least.
+    const onBed = simulation.world.getTile(roundVec(agent.position))?.type === "Bed";
     const atHome = Boolean(agent.home && samePos(roundVec(agent.position), agent.home));
-    const regenRate = atHome ? 12 : 6;
+    const regenRate = onBed ? 18 : atHome ? 12 : 6;
     agent.health.stamina = Math.min(100, agent.health.stamina + deltaSeconds * regenRate);
 
     if (!simulation.isNight()) {

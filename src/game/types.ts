@@ -88,6 +88,8 @@ export type AgentState =
   | "Mine" // breaking rock for stone or ore
   | "MoveToCraft" // walking to the workshop/warehouse to make tools
   | "CraftTool" // fashioning a tool (e.g. a pickaxe) from materials
+  | "MoveToFurnish" // walking home to install furniture (a bed)
+  | "Furnish" // building a piece of furniture
   | "Wander"
   | "Rest";
 

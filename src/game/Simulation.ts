@@ -526,6 +526,28 @@ export class Simulation {
     }
   }
 
+  /** The bed tile inside a home, if one has been built. */
+  bedOf(building: Building): Vec2 | undefined {
+    return this.interiorTiles(building).find(
+      (tile) => this.world.getTile(tile)?.type === "Bed",
+    );
+  }
+
+  hasBed(building: Building): boolean {
+    return this.bedOf(building) !== undefined;
+  }
+
+  /** A free interior floor tile to put a bed on (prefers the home's centre). */
+  bedSpot(building: Building): Vec2 | undefined {
+    const interior = this.interiorTiles(building);
+    const home = this.houseInterior(building);
+    const ordered = interior.sort(
+      (a, b) =>
+        Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y),
+    );
+    return ordered.find((tile) => this.world.getTile(tile)?.type === "Floor");
+  }
+
   /** The interior (non-wall, non-door) floor tiles of a walled room. */
   interiorTiles(building: Building): Vec2[] {
     const tiles: Vec2[] = [];
