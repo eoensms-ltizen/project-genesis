@@ -100,6 +100,12 @@
   deadlocks waiting on a material. Parks enlarged to 3×3; overcrowded homes lose
   comfort. Verified: low-rise spread through eras 1–3, then apartments/towers in
   the industrial era, no deadlock to pop 40.
+- Roads, phase 1 (orthogonal + single-lane): pathfinding is now 4-directional, so
+  residents travel along the grid and the desire paths/roads they wear run
+  straight instead of diagonally. Paving is blocked where it would complete a
+  2×2 block, keeping streets a single lane (crossroads still allowed). Verified:
+  no diagonal roads, zero 2×2 road blocks in a grown town. (Planned grid avenues
+  + rectangular plaza are phase 2.)
 
 ## 2026-06-12
 

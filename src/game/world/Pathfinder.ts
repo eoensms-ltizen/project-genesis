@@ -1,17 +1,14 @@
 import type { Vec2 } from "../types";
 import { MIN_MOVE_COST, type WorldMap } from "./WorldMap";
 
-const DIAGONAL_COST = Math.SQRT2;
-
+// Orthogonal only: residents travel along the grid (no diagonal shortcuts), so
+// the desire paths they wear in — and the roads that grow from them — run
+// straight like a planned street grid rather than cutting across diagonally.
 const DIRECTIONS: Vec2[] = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
   { x: 0, y: 1 },
   { x: 0, y: -1 },
-  { x: 1, y: 1 },
-  { x: 1, y: -1 },
-  { x: -1, y: 1 },
-  { x: -1, y: -1 },
 ];
 
 export type PathRequest = {
@@ -90,23 +87,12 @@ export function findPath(world: WorldMap, request: PathRequest): Vec2[] | undefi
         continue;
       }
 
-      const isDiagonal = dir.x !== 0 && dir.y !== 0;
-      if (isDiagonal) {
-        // No cutting corners around blocked tiles.
-        if (
-          !world.isWalkable({ x: cx + dir.x, y: cy }) ||
-          !world.isWalkable({ x: cx, y: cy + dir.y })
-        ) {
-          continue;
-        }
-      }
-
       const next = ny * width + nx;
       if (closed[next]) {
         continue;
       }
 
-      const tentative = gScore[current] + (isDiagonal ? DIAGONAL_COST : 1) * moveCost;
+      const tentative = gScore[current] + moveCost;
       if (tentative < gScore[next]) {
         gScore[next] = tentative;
         fScore[next] = tentative + heuristic({ x: nx, y: ny }, goal);
@@ -139,10 +125,8 @@ function collectGoalIndices(world: WorldMap, goal: Vec2, stopAdjacent: boolean):
 }
 
 function heuristic(a: Vec2, b: Vec2): number {
-  const dx = Math.abs(a.x - b.x);
-  const dy = Math.abs(a.y - b.y);
-  const octile = dx + dy + (DIAGONAL_COST - 2) * Math.min(dx, dy);
-  return octile * MIN_MOVE_COST;
+  // Manhattan distance — admissible for orthogonal movement.
+  return (Math.abs(a.x - b.x) + Math.abs(a.y - b.y)) * MIN_MOVE_COST;
 }
 
 function reconstructPath(parent: Int32Array, end: number, start: number, width: number): Vec2[] {

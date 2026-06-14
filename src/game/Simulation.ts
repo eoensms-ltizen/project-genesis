@@ -573,6 +573,11 @@ export class Simulation {
     const count = (this.traffic.get(index) ?? 0) + 1;
     this.traffic.set(index, count);
 
+    // Keep streets a single lane: don't pave a tile if doing so would complete a
+    // 2x2 block of paving (a "lane" widening). Crossroads (a + shape) are fine.
+    if (this.wouldThickenPaving(tile)) {
+      return;
+    }
     if (tile.type === "Grass" && count >= PATH_WEAR_THRESHOLD) {
       this.world.setTile(tile, "Dirt");
       this.logPathEvent("A footpath is being worn into the grass.");
@@ -581,6 +586,32 @@ export class Simulation {
       this.traffic.delete(index);
       this.logPathEvent("A well-trodden path has become a road.");
     }
+  }
+
+  /** Would paving this tile complete a 2x2 square of paving (a widened lane)? */
+  private wouldThickenPaving(tile: Vec2): boolean {
+    const paved = (x: number, y: number): boolean => {
+      const t = this.world.getTile({ x, y })?.type;
+      return t === "Road" || t === "Dirt" || t === "Plaza" || t === "Lamp";
+    };
+    for (const [ox, oy] of [
+      [-1, -1],
+      [0, -1],
+      [-1, 0],
+      [0, 0],
+    ]) {
+      const x0 = tile.x + ox;
+      const y0 = tile.y + oy;
+      if (
+        (x0 !== tile.x || y0 !== tile.y ? paved(x0, y0) : true) &&
+        (x0 + 1 !== tile.x || y0 !== tile.y ? paved(x0 + 1, y0) : true) &&
+        (x0 !== tile.x || y0 + 1 !== tile.y ? paved(x0, y0 + 1) : true) &&
+        (x0 + 1 !== tile.x || y0 + 1 !== tile.y ? paved(x0 + 1, y0 + 1) : true)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   log(message: string, participants?: { id: string }[]) {
