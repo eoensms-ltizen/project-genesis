@@ -2,6 +2,7 @@ import { tr } from "../i18n";
 
 type ControlPanelProps = {
   onAddRandom: () => void;
+  onAddImmigrant: () => void;
   onPlaceAgent: () => void;
   onReset: () => void;
   placementActive: boolean;
@@ -9,6 +10,7 @@ type ControlPanelProps = {
 
 export function ControlPanel({
   onAddRandom,
+  onAddImmigrant,
   onPlaceAgent,
   onReset,
   placementActive,
@@ -17,6 +19,9 @@ export function ControlPanel({
     <section className="panel-section">
       <h2>{tr("Controls", "조작")}</h2>
       <div className="button-grid">
+        <button type="button" onClick={onAddImmigrant}>
+          {tr("Add immigrant", "이주민 추가")} 🧳
+        </button>
         <button type="button" onClick={onAddRandom}>
           {tr("Random resident", "무작위 주민")}
         </button>

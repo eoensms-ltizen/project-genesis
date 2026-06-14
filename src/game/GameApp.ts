@@ -40,6 +40,11 @@ export class GameApp {
     this.render();
   }
 
+  addImmigrant() {
+    this.simulation.addImmigrant();
+    this.render();
+  }
+
   setPlacementMode(enabled: boolean) {
     this.placementMode = enabled;
     this.render();

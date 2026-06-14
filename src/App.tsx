@@ -200,6 +200,10 @@ export default function App() {
     gameRef.current?.addRandomAgent(defaultSpawn);
   };
 
+  const addImmigrant = () => {
+    gameRef.current?.addImmigrant();
+  };
+
   const enablePlacement = () => {
     gameRef.current?.setPlacementMode(true);
     setPendingPlacement(true);
@@ -366,6 +370,7 @@ export default function App() {
           <>
             <ControlPanel
               onAddRandom={addRandomAgent}
+              onAddImmigrant={addImmigrant}
               onPlaceAgent={enablePlacement}
               onReset={resetWorld}
               placementActive={pendingPlacement}

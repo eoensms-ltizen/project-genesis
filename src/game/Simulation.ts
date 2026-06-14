@@ -50,6 +50,9 @@ const ERA_POP_CEILING = [8, 14, 22, 30, 40];
 // adult newcomers arriving over time, with the cap lifted, so the town's
 // need-driven building can be watched without a glut of children.
 const BIRTHS_ENABLED = false;
+// Automatic immigration is off: newcomers arrive only when the player adds one
+// (the "이주민 추가" / Add immigrant control), so population growth is hand-paced.
+const IMMIGRATION_ENABLED = false;
 const IMMIGRATION_INTERVAL_SECONDS = 20;
 const EXPERIMENT_POP_CAP = 90; // a safety ceiling for performance, not a design cap
 // Couples only have children when the village is, on average, content — so
@@ -386,7 +389,9 @@ export class Simulation {
       if (BIRTHS_ENABLED) {
         this.tryBirth();
       }
-      this.immigrate();
+      if (IMMIGRATION_ENABLED) {
+        this.immigrate();
+      }
       this.checkEraPromotion();
       this.assignJobs();
       this.ageResidents();
@@ -1888,7 +1893,20 @@ export class Simulation {
     }
   }
 
-  /** Babies are born to married couples with a shared home and enough food. */
+  /**
+   * Bring a newcomer into the heart of town, looking for a home. This is the
+   * manual entry point behind the Add-immigrant control — no timer or cap, the
+   * player decides when the population grows.
+   */
+  addImmigrant() {
+    const center = this.villageCenter();
+    const spawn = this.findSpawnPosition({ x: Math.round(center.x), y: Math.round(center.y) });
+    const agent = createRandomAgent(spawn, this.takenNames());
+    this.agents.push(agent);
+    this.log(tr(`${agent.name} arrived in town, looking for a home. 🧳`, `${agent.name}이(가) 살 곳을 찾아 마을에 도착했다. 🧳`), [agent]);
+    this.notifyChanged();
+  }
+
   /** Observation mode: adult newcomers arrive over time and settle in. */
   private immigrate() {
     if (this.agents.length >= EXPERIMENT_POP_CAP) {
@@ -1898,12 +1916,7 @@ export class Simulation {
       return;
     }
     this.lastImmigrationAt = this.elapsedSeconds;
-    const center = this.villageCenter();
-    const spawn = this.findSpawnPosition({ x: Math.round(center.x), y: Math.round(center.y) });
-    const agent = createRandomAgent(spawn, this.takenNames());
-    this.agents.push(agent);
-    this.log(tr(`${agent.name} arrived in town, looking for a home. 🧳`, `${agent.name}이(가) 살 곳을 찾아 마을에 도착했다. 🧳`), [agent]);
-    this.notifyChanged();
+    this.addImmigrant();
   }
 
   private tryBirth() {
