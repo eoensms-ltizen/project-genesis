@@ -118,14 +118,14 @@ const FOOD_CAP = 400;
 // The store cap sits well above the want target so haulers always have room to
 // bring loose piles in — felling stops at the target, then the forest piles
 // drain into the warehouse rather than stranding on the ground.
-const WOOD_STORE_CAP = 300;
 const WOOD_WANT_TARGET = 120;
 // Stone and ore: the colony stockpiles a stone reserve from soft rock; ore is
 // only mineable once tools exist (Slice 4) so its target stays modest.
-const STONE_STORE_CAP = 240;
 const STONE_WANT_TARGET = 90;
-const ORE_STORE_CAP = 120;
 const ORE_WANT_TARGET = 40;
+// How much of one material a single stockpile tile can hold. The warehouse's
+// floor tiles are the stockpile zone, so its footprint sets total capacity.
+const TILE_STACK_CAP = 50;
 
 // Land pressure: when the nearest open plot to the village centre is farther
 // than this, residents densify existing housing instead of sprawling.
@@ -255,9 +255,6 @@ type SaveData = {
   era: number;
   foodStock: number;
   meals: number;
-  woodStock?: number;
-  stoneStock?: number;
-  oreStock?: number;
   hasMiningTools?: boolean;
   items?: ItemStack[];
   nextItemId?: number;
@@ -280,11 +277,8 @@ export class Simulation {
   meals = 0;
   steel = 0;
   deaths = 0;
-  // Materials physically stored in the warehouse. Producers deposit here;
-  // builders withdraw. Loose piles sit in `items` until a hauler brings them in.
-  woodStock = 0;
-  stoneStock = 0;
-  oreStock = 0;
+  // Materials are stored as physical piles (ItemStacks) sitting on the warehouse
+  // floor — the stockpile zone — not as abstract numbers. See stockOf()/store().
   // True once the colony has the tools (a pickaxe) to mine hard rock and ore.
   hasMiningTools = false;
   private notedNeedTools = false;
@@ -331,9 +325,6 @@ export class Simulation {
       this.era = saved.era;
       this.foodStock = saved.foodStock;
       this.meals = saved.meals;
-      this.woodStock = saved.woodStock ?? 0;
-      this.stoneStock = saved.stoneStock ?? 0;
-      this.oreStock = saved.oreStock ?? 0;
       this.hasMiningTools = saved.hasMiningTools ?? false;
       for (const stack of saved.items ?? []) {
         // Reservations are transient; drop them so loose piles are haulable again.
@@ -628,10 +619,15 @@ export class Simulation {
         building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
       }
     }
-    // A finished home is a walled room (perimeter walls, interior floor, a single
-    // doorway) rather than a solid block. Civic buildings stay solid for now.
+    // A finished home is a walled room; a finished warehouse is an open floored
+    // stockpile yard you can walk into and pile goods on. Other civic buildings
+    // stay solid blocks for now.
     if (stage === "built" && building.kind === "house") {
       this.paintHouseRoom(building);
+    } else if (stage === "built" && building.kind === "warehouse") {
+      for (const position of footprintTiles(building)) {
+        this.world.setTile(position, "Floor");
+      }
     } else {
       const tileType: TileType =
         stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
@@ -644,8 +640,9 @@ export class Simulation {
     this.reserveEntrance(building);
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
-        // A house keeps its doorway as a Door tile; civic buildings pave it.
-        if (building.kind !== "house") {
+        // Houses keep a Door tile; the warehouse yard is open Floor; other civic
+        // buildings pave their doorway.
+        if (building.kind !== "house" && building.kind !== "warehouse") {
           this.world.setTile(door, "Road");
         }
       }
@@ -740,9 +737,6 @@ export class Simulation {
         era: this.era,
         foodStock: this.foodStock,
         meals: this.meals,
-        woodStock: this.woodStock,
-        stoneStock: this.stoneStock,
-        oreStock: this.oreStock,
         hasMiningTools: this.hasMiningTools,
         items: this.items.map((stack) => ({
           ...stack,
@@ -900,9 +894,9 @@ export class Simulation {
       })),
       trains: this.getTrainPositions(),
       poweredBuildingIds: this.getPoweredBuildingIds(),
-      woodStock: Math.round(this.woodStock),
-      stoneStock: Math.round(this.stoneStock),
-      oreStock: Math.round(this.oreStock),
+      woodStock: this.stockOf("wood"),
+      stoneStock: this.stockOf("stone"),
+      oreStock: this.stockOf("ironOre"),
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
       unrest: Math.round(this.unrest),
@@ -1826,52 +1820,128 @@ export class Simulation {
     }
   }
 
+  // --- Stockpile zone: stored goods are physical piles on the warehouse floor --
+
+  /** The walkable floor tiles of every built warehouse — the stockpile zone. */
+  stockpileTiles(): Vec2[] {
+    const tiles: Vec2[] = [];
+    for (const building of this.buildings) {
+      if (building.kind === "warehouse" && building.stage === "built") {
+        for (const position of footprintTiles(building)) {
+          tiles.push(position);
+        }
+      }
+    }
+    return tiles;
+  }
+
+  isInStockpile(position: Vec2): boolean {
+    const x = Math.round(position.x);
+    const y = Math.round(position.y);
+    return this.stockpileTiles().some((t) => t.x === x && t.y === y);
+  }
+
+  /** The pile sitting on a tile (optionally only of a given resource). */
+  private itemAt(tile: Vec2, resource?: ResourceKind): ItemStack | undefined {
+    return this.items.find(
+      (stack) =>
+        stack.position.x === tile.x &&
+        stack.position.y === tile.y &&
+        stack.amount > 0 &&
+        (!resource || stack.resource === resource),
+    );
+  }
+
+  /** How much of a material is stored in the stockpile zone right now. */
   stockOf(resource: ResourceKind): number {
-    return resource === "wood" ? this.woodStock : resource === "stone" ? this.stoneStock : this.oreStock;
+    let total = 0;
+    for (const tile of this.stockpileTiles()) {
+      const pile = this.itemAt(tile, resource);
+      if (pile) {
+        total += pile.amount;
+      }
+    }
+    return total;
   }
 
-  private setStock(resource: ResourceKind, value: number) {
-    if (resource === "wood") this.woodStock = value;
-    else if (resource === "stone") this.stoneStock = value;
-    else this.oreStock = value;
+  /** Spare room in the zone for a material: partial like-piles plus empty tiles. */
+  storeSpaceFor(resource: ResourceKind): number {
+    let space = 0;
+    for (const tile of this.stockpileTiles()) {
+      const pile = this.itemAt(tile);
+      if (!pile) {
+        space += TILE_STACK_CAP;
+      } else if (pile.resource === resource) {
+        space += Math.max(0, TILE_STACK_CAP - pile.amount);
+      }
+    }
+    return space;
   }
 
-  private storeCap(resource: ResourceKind): number {
-    return resource === "wood" ? WOOD_STORE_CAP : resource === "stone" ? STONE_STORE_CAP : ORE_STORE_CAP;
+  /** Deposit a material into the zone as physical piles; returns how much fit. */
+  store(resource: ResourceKind, amount: number): number {
+    let remaining = amount;
+    const zone = this.stockpileTiles();
+    // Top up existing like-piles first, then settle the rest onto empty tiles.
+    for (const tile of zone) {
+      if (remaining <= 0) break;
+      const pile = this.itemAt(tile, resource);
+      if (pile) {
+        const add = Math.min(TILE_STACK_CAP - pile.amount, remaining);
+        pile.amount += add;
+        remaining -= add;
+      }
+    }
+    for (const tile of zone) {
+      if (remaining <= 0) break;
+      if (this.itemAt(tile)) continue;
+      const add = Math.min(TILE_STACK_CAP, remaining);
+      this.items.push({
+        id: `item-${this.nextItemId++}`,
+        resource,
+        amount: add,
+        position: { ...tile },
+      });
+      remaining -= add;
+    }
+    const accepted = amount - remaining;
+    if (accepted > 0) {
+      this.notifyChanged();
+    }
+    return accepted;
+  }
+
+  /** Draw a material out of the zone's piles; returns how much was taken. */
+  withdraw(resource: ResourceKind, amount: number): number {
+    let remaining = amount;
+    for (const tile of this.stockpileTiles()) {
+      if (remaining <= 0) break;
+      const pile = this.itemAt(tile, resource);
+      if (pile) {
+        const take = Math.min(pile.amount, remaining);
+        pile.amount -= take;
+        remaining -= take;
+        if (pile.amount <= 0) {
+          this.removeItem(pile.id);
+        }
+      }
+    }
+    const drawn = amount - remaining;
+    if (drawn > 0) {
+      this.notifyChanged();
+    }
+    return drawn;
   }
 
   private wantTarget(resource: ResourceKind): number {
     return resource === "wood" ? WOOD_WANT_TARGET : resource === "stone" ? STONE_WANT_TARGET : ORE_WANT_TARGET;
   }
 
-  storeSpaceFor(resource: ResourceKind): number {
-    return Math.max(0, this.storeCap(resource) - this.stockOf(resource));
-  }
-
-  /** Deposit a carried material into the warehouse; returns how much was accepted. */
-  store(resource: ResourceKind, amount: number): number {
-    const accepted = Math.min(amount, this.storeSpaceFor(resource));
-    if (accepted > 0) {
-      this.setStock(resource, this.stockOf(resource) + accepted);
-      this.notifyChanged();
-    }
-    return accepted;
-  }
-
-  /** Take a material out of the warehouse; returns how much was drawn. */
-  withdraw(resource: ResourceKind, amount: number): number {
-    const drawn = Math.min(amount, this.stockOf(resource));
-    if (drawn > 0) {
-      this.setStock(resource, this.stockOf(resource) - drawn);
-      this.notifyChanged();
-    }
-    return drawn;
-  }
-
+  /** Loose piles of a material sitting outside the stockpile (awaiting hauling). */
   groundTotal(resource: ResourceKind): number {
     let total = 0;
     for (const stack of this.items) {
-      if (stack.resource === resource) {
+      if (stack.resource === resource && stack.amount > 0 && !this.isInStockpile(stack.position)) {
         total += stack.amount;
       }
     }

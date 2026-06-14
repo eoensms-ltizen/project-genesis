@@ -247,7 +247,14 @@ export class PixiRenderer {
       // it (a simple 2.5D depth order). A finished home is drawn from its wall/
       // floor/door tiles instead of a solid block, so skip it here.
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
+        // A finished home is drawn from its wall/floor/door tiles; a finished
+        // warehouse is an open fenced yard you pile goods in — both skip the
+        // solid-block draw.
         if (building.kind === "house" && building.stage === "built") {
+          continue;
+        }
+        if (building.kind === "warehouse" && building.stage === "built") {
+          drawStockpileYard(this.worldGraphics, building);
           continue;
         }
         drawBuilding(this.worldGraphics, building, this.flatBuildings);
@@ -666,6 +673,27 @@ function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
     graphics.fill(0x7a5a36);
     graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, S_ - 2);
     graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+  }
+}
+
+/** A warehouse rendered as a fenced, open stockpile yard (its floor holds piles). */
+function drawStockpileYard(graphics: Graphics, building: Building) {
+  const px = building.x * TILE_SIZE;
+  const py = building.y * TILE_SIZE;
+  const w = building.width * TILE_SIZE;
+  const h = building.height * TILE_SIZE;
+  // A wooden fence outline around the yard.
+  graphics.rect(px + 1, py + 1, w - 2, h - 2);
+  graphics.stroke({ color: 0x8a6a44, width: 2, alpha: 0.95 });
+  // Fence posts at the corners.
+  for (const [sx, sy] of [
+    [px + 1, py + 1],
+    [px + w - 4, py + 1],
+    [px + 1, py + h - 4],
+    [px + w - 4, py + h - 4],
+  ]) {
+    graphics.rect(sx, sy, 3, 3);
+    graphics.fill(0x6f5436);
   }
 }
 

@@ -1023,7 +1023,7 @@ export class AgentBrain {
     }
     const need = cost - agent.inventory.wood;
     const warehouse = simulation.getWarehouse();
-    if (warehouse && simulation.woodStock >= need) {
+    if (warehouse && simulation.stockOf("wood") >= need) {
       const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
       if (path) {
         agent.fetchAmount = need;
@@ -1059,6 +1059,10 @@ export class AgentBrain {
         continue;
       }
       if (stack.reservedBy && stack.reservedBy !== agent.id) {
+        continue;
+      }
+      // Goods already in the stockpile are stored — don't re-haul them.
+      if (simulation.isInStockpile(stack.position)) {
         continue;
       }
       if (simulation.storeSpaceFor(stack.resource) <= 0) {
