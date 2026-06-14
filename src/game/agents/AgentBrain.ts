@@ -1,4 +1,4 @@
-import type { Agent, AgentState, Building, BuildingKind, TileType, Vec2 } from "../types";
+import type { Agent, AgentState, Building, BuildingKind, ResourceKind, TileType, Vec2 } from "../types";
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
@@ -40,6 +40,11 @@ const HAUL_CAPACITY = 12;
 const LOAD_DURATION_SECONDS = 0.6;
 const STORE_DURATION_SECONDS = 0.6;
 const WITHDRAW_DURATION_SECONDS = 0.6;
+// Breaking rock is slower than felling a tree.
+const MINE_DURATION_SECONDS = 3;
+// Keep at least this much wood on hand before turning idle effort to mining, so
+// construction never starves but stone still gets gathered before wood is maxed.
+const WOOD_RESERVE_FLOOR = 24;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
 const COOK_MEAL_YIELD = 2;
@@ -140,6 +145,8 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "StoreWood",
   "MoveToWithdraw",
   "WithdrawWood",
+  "MoveToMine",
+  "Mine",
 ]);
 
 export class AgentBrain {
@@ -281,6 +288,12 @@ export class AgentBrain {
         break;
       case "WithdrawWood":
         this.withdrawWood(agent, simulation, deltaSeconds);
+        break;
+      case "MoveToMine":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Mine");
+        break;
+      case "Mine":
+        this.mine(agent, simulation, deltaSeconds);
         break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
@@ -563,11 +576,23 @@ export class AgentBrain {
       if (this.findHaulWork(agent, simulation)) {
         return true;
       }
-      const mayFell =
+      const mayGather =
         agent.job === "woodcutter" || simulation.agents.length <= SMALL_SETTLEMENT;
-      if (mayFell && simulation.wantsMoreWood()) {
-        this.setState(agent, simulation, "FindTree");
-        return true;
+      if (mayGather) {
+        const woodSupply = simulation.stockOf("wood") + simulation.groundTotal("wood");
+        // Urgent wood first; once a working reserve exists, mine soft rock for a
+        // stone reserve, then keep topping wood toward its target.
+        if (woodSupply < WOOD_RESERVE_FLOOR && simulation.wantsMoreWood()) {
+          this.setState(agent, simulation, "FindTree");
+          return true;
+        }
+        if (this.findMineWork(agent, simulation)) {
+          return true;
+        }
+        if (simulation.wantsMoreWood()) {
+          this.setState(agent, simulation, "FindTree");
+          return true;
+        }
       }
     } else {
       const woodCap = agent.job === "woodcutter" ? WOODCUTTER_STOCKPILE_CAP : WOOD_STOCKPILE_CAP;
@@ -1008,36 +1033,57 @@ export class AgentBrain {
         return true;
       }
     }
-    // The warehouse can't cover it: top it up. Haul a loose pile if there is one,
-    // otherwise fell a fresh tree to make one.
-    if (simulation.hasHaulableWood() && this.findHaulWork(agent, simulation)) {
+    // The warehouse can't cover it: top it up. Haul a loose wood pile if there is
+    // one, otherwise fell a fresh tree to make one.
+    if (simulation.hasHaulable("wood") && this.findHaulWork(agent, simulation, "wood")) {
       return true;
     }
     this.setState(agent, simulation, "FindTree");
     return true;
   }
 
-  /** Claim the nearest loose wood pile and set off to carry it to the warehouse. */
-  private findHaulWork(agent: Agent, simulation: Simulation): boolean {
+  /**
+   * Claim the nearest loose pile that the warehouse still has room for and set
+   * off to carry it in. Pass a resource to haul only that material (e.g. a
+   * builder topping up wood); omit it to haul whatever is nearest.
+   */
+  private findHaulWork(agent: Agent, simulation: Simulation, resource?: ResourceKind): boolean {
     const warehouse = simulation.getWarehouse();
-    if (!warehouse || simulation.woodStoreSpace() <= 0) {
+    if (!warehouse) {
       return false;
     }
-    const stack = simulation.nearestHaulableWood(agent.position, agent.id);
-    if (!stack) {
+    let best: { id: string; position: Vec2 } | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const stack of simulation.items) {
+      if (stack.amount <= 0 || (resource && stack.resource !== resource)) {
+        continue;
+      }
+      if (stack.reservedBy && stack.reservedBy !== agent.id) {
+        continue;
+      }
+      if (simulation.storeSpaceFor(stack.resource) <= 0) {
+        continue;
+      }
+      const d = squaredDistance(agent.position, stack.position);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { id: stack.id, position: stack.position };
+      }
+    }
+    if (!best) {
       return false;
     }
     const path = findPath(simulation.world, {
       start: agent.position,
-      goal: stack.position,
+      goal: best.position,
       stopAdjacent: true,
     });
     if (!path) {
       return false;
     }
-    simulation.reserveItem(stack.id, agent.id);
-    agent.haulItemId = stack.id;
-    agent.target = { ...stack.position };
+    simulation.reserveItem(best.id, agent.id);
+    agent.haulItemId = best.id;
+    agent.target = { ...best.position };
     agent.path = path;
     this.setState(agent, simulation, "MoveToHaul");
     return true;
@@ -1061,9 +1107,8 @@ export class AgentBrain {
       this.setState(agent, simulation, "Idle");
       return;
     }
-    const room = Math.max(0, HAUL_CAPACITY - agent.inventory.wood);
-    const taken = Math.min(stack.amount, room);
-    agent.inventory.wood += taken;
+    const taken = Math.min(stack.amount, HAUL_CAPACITY);
+    agent.carry = { resource: stack.resource, amount: taken };
     stack.amount -= taken;
     if (stack.amount <= 0) {
       simulation.removeItem(stack.id);
@@ -1074,10 +1119,7 @@ export class AgentBrain {
 
     const warehouse = simulation.getWarehouse();
     if (!warehouse) {
-      if (agent.inventory.wood > 0) {
-        simulation.dropWood(agent.position, agent.inventory.wood);
-        agent.inventory.wood = 0;
-      }
+      this.dropCarry(agent, simulation);
       this.backOff(agent, simulation);
       return;
     }
@@ -1097,18 +1139,113 @@ export class AgentBrain {
     if (agent.actionTimer < STORE_DURATION_SECONDS) {
       return;
     }
-    if (agent.inventory.wood > 0) {
-      const stored = simulation.storeWood(agent.inventory.wood);
-      agent.inventory.wood -= stored;
-      // Anything that didn't fit stays in their arms and gets set back down.
-      if (agent.inventory.wood > 0) {
-        simulation.dropWood(agent.position, agent.inventory.wood);
-        agent.inventory.wood = 0;
-      }
+    if (agent.carry && agent.carry.amount > 0) {
+      const { resource } = agent.carry;
+      const stored = simulation.store(resource, agent.carry.amount);
+      agent.carry.amount -= stored;
+      // Anything that didn't fit is set back down at the warehouse door.
+      this.dropCarry(agent, simulation);
       if (stored > 0 && Math.random() < 0.4) {
-        simulation.log(tr(`${agent.name} stocked ${stored} wood in the warehouse. 🪵`, `${agent.name}이(가) 창고에 나무 ${stored}을(를) 채워 넣었다. 🪵`));
+        simulation.log(
+          tr(
+            `${agent.name} stocked ${stored} ${resource} in the warehouse.`,
+            `${agent.name}이(가) 창고에 ${resourceNameKo(resource)} ${stored}을(를) 채워 넣었다.`,
+          ),
+        );
       }
     }
+    agent.carry = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /** Set a carried load back down on the ground (e.g. nowhere to store it). */
+  private dropCarry(agent: Agent, simulation: Simulation) {
+    if (agent.carry && agent.carry.amount > 0) {
+      simulation.dropItem(agent.position, agent.carry.resource, agent.carry.amount);
+    }
+    agent.carry = undefined;
+  }
+
+  /**
+   * Head out to mine rock for stone (or ore, once tools exist). Picks the
+   * nearest workable rock; if the only rock nearby is too hard to mine without
+   * tools, it notes that the colony needs better tools and gives up for now.
+   */
+  private findMineWork(agent: Agent, simulation: Simulation): boolean {
+    const wantStone = simulation.wantsMore("stone");
+    const wantOre = simulation.hasMiningTools && simulation.wantsMore("ironOre");
+    if (!wantStone && !wantOre) {
+      return false;
+    }
+    let best: Vec2 | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let blockedByTools = false;
+    for (const tile of simulation.world.tiles) {
+      if (!simulation.isRockTile(tile.type) || simulation.isTileClaimed(tile)) {
+        continue;
+      }
+      const yielded = simulation.mineYield(tile.type);
+      if (yielded.resource === "stone" && !wantStone) {
+        continue;
+      }
+      if (yielded.resource === "ironOre" && !wantOre) {
+        continue;
+      }
+      if (!simulation.canMineRock(tile.type)) {
+        blockedByTools = true;
+        continue;
+      }
+      const d = squaredDistance(agent.position, tile);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { x: tile.x, y: tile.y };
+      }
+    }
+    if (!best) {
+      if (blockedByTools) {
+        simulation.noteNeedsMiningTools();
+      }
+      return false;
+    }
+    const path = findPath(simulation.world, {
+      start: agent.position,
+      goal: best,
+      stopAdjacent: true,
+    });
+    if (!path) {
+      return false;
+    }
+    simulation.claimTile(best);
+    agent.target = best;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToMine");
+    return true;
+  }
+
+  private mine(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < MINE_DURATION_SECONDS) {
+      return;
+    }
+    if (agent.target) {
+      const pos = roundVec(agent.target);
+      simulation.releaseClaim(pos);
+      const tile = simulation.world.getTile(pos);
+      if (tile && simulation.isRockTile(tile.type)) {
+        const yielded = simulation.mineYield(tile.type);
+        simulation.world.setTile(pos, "RockFloor");
+        simulation.dropItem(pos, yielded.resource, yielded.amount);
+        simulation.log(
+          tr(
+            `${agent.name} mined ${yielded.amount} ${yielded.resource}. ⛏️`,
+            `${agent.name}이(가) ${resourceNameKo(yielded.resource)} ${yielded.amount}을(를) 캤다. ⛏️`,
+          ),
+        );
+      }
+    }
+    agent.health.stamina = Math.max(0, agent.health.stamina - 8);
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -2164,7 +2301,7 @@ export class AgentBrain {
       const replanned = findPath(simulation.world, {
         start: agent.position,
         goal: agent.target,
-        stopAdjacent: nextState === "ChopTree",
+        stopAdjacent: nextState === "ChopTree" || nextState === "Mine",
       });
       if (!replanned) {
         simulation.log(tr(`${agent.name} is blocked and gave up.`, `${agent.name}이(가) 길이 막혀 포기했다.`));
@@ -2234,6 +2371,8 @@ export class AgentBrain {
       simulation.releaseItem(agent.haulItemId);
       agent.haulItemId = undefined;
     }
+    // A carried load is set down where they stand so it isn't lost.
+    this.dropCarry(agent, simulation);
     agent.fetchAmount = undefined;
     agent.target = undefined;
     agent.path = undefined;
@@ -2285,6 +2424,10 @@ function samePos(a: Vec2, b: Vec2): boolean {
 
 function clampNeed(value: number): number {
   return value < 0 ? 0 : value > 100 ? 100 : value;
+}
+
+function resourceNameKo(resource: ResourceKind): string {
+  return resource === "wood" ? "나무" : resource === "stone" ? "돌" : "철광석";
 }
 
 function buildCost(kind: BuildingKind): number {

@@ -11,6 +11,7 @@ import type {
   GameClock,
   GameLogEntry,
   ItemStack,
+  ResourceKind,
   SimulationSnapshot,
   TileType,
   Vec2,
@@ -119,6 +120,12 @@ const FOOD_CAP = 400;
 // drain into the warehouse rather than stranding on the ground.
 const WOOD_STORE_CAP = 300;
 const WOOD_WANT_TARGET = 120;
+// Stone and ore: the colony stockpiles a stone reserve from soft rock; ore is
+// only mineable once tools exist (Slice 4) so its target stays modest.
+const STONE_STORE_CAP = 240;
+const STONE_WANT_TARGET = 90;
+const ORE_STORE_CAP = 120;
+const ORE_WANT_TARGET = 40;
 
 // Land pressure: when the nearest open plot to the village centre is farther
 // than this, residents densify existing housing instead of sprawling.
@@ -231,6 +238,7 @@ type SavedAgent = Omit<
   | "resumeState"
   | "fetchAmount"
   | "haulItemId"
+  | "carry"
 >;
 
 type SaveData = {
@@ -248,6 +256,9 @@ type SaveData = {
   foodStock: number;
   meals: number;
   woodStock?: number;
+  stoneStock?: number;
+  oreStock?: number;
+  hasMiningTools?: boolean;
   items?: ItemStack[];
   nextItemId?: number;
   animals: Animal[];
@@ -269,9 +280,14 @@ export class Simulation {
   meals = 0;
   steel = 0;
   deaths = 0;
-  // Wood physically stored in the warehouse. Producers deposit here; builders
-  // withdraw from here. Loose wood sits in `items` until a hauler brings it in.
+  // Materials physically stored in the warehouse. Producers deposit here;
+  // builders withdraw. Loose piles sit in `items` until a hauler brings them in.
   woodStock = 0;
+  stoneStock = 0;
+  oreStock = 0;
+  // True once the colony has the tools (a pickaxe) to mine hard rock and ore.
+  hasMiningTools = false;
+  private notedNeedTools = false;
   readonly items: ItemStack[] = [];
 
   private nextBuildingId = 1;
@@ -316,6 +332,9 @@ export class Simulation {
       this.foodStock = saved.foodStock;
       this.meals = saved.meals;
       this.woodStock = saved.woodStock ?? 0;
+      this.stoneStock = saved.stoneStock ?? 0;
+      this.oreStock = saved.oreStock ?? 0;
+      this.hasMiningTools = saved.hasMiningTools ?? false;
       for (const stack of saved.items ?? []) {
         // Reservations are transient; drop them so loose piles are haulable again.
         this.items.push({ ...stack, position: { ...stack.position }, reservedBy: undefined });
@@ -722,6 +741,9 @@ export class Simulation {
         foodStock: this.foodStock,
         meals: this.meals,
         woodStock: this.woodStock,
+        stoneStock: this.stoneStock,
+        oreStock: this.oreStock,
+        hasMiningTools: this.hasMiningTools,
         items: this.items.map((stack) => ({
           ...stack,
           position: { ...stack.position },
@@ -879,6 +901,8 @@ export class Simulation {
       trains: this.getTrainPositions(),
       poweredBuildingIds: this.getPoweredBuildingIds(),
       woodStock: Math.round(this.woodStock),
+      stoneStock: Math.round(this.stoneStock),
+      oreStock: Math.round(this.oreStock),
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
       unrest: Math.round(this.unrest),
@@ -1710,18 +1734,19 @@ export class Simulation {
 
   // --- Physical goods: loose ground piles and warehouse stock ---------------
 
-  /** Drop wood on the ground at a tile, merging into a pile already sitting there. */
-  dropWood(position: Vec2, amount = 1) {
+  /** Drop a material on the ground at a tile, merging into a like pile there. */
+  dropItem(position: Vec2, resource: ResourceKind, amount = 1) {
     const tile = { x: Math.round(position.x), y: Math.round(position.y) };
     const existing = this.items.find(
-      (stack) => stack.resource === "wood" && stack.position.x === tile.x && stack.position.y === tile.y,
+      (stack) =>
+        stack.resource === resource && stack.position.x === tile.x && stack.position.y === tile.y,
     );
     if (existing) {
       existing.amount += amount;
     } else {
       this.items.push({
         id: `item-${this.nextItemId++}`,
-        resource: "wood",
+        resource,
         amount,
         position: { ...tile },
       });
@@ -1729,16 +1754,24 @@ export class Simulation {
     this.notifyChanged();
   }
 
+  /** Drop wood (shorthand used by felling). */
+  dropWood(position: Vec2, amount = 1) {
+    this.dropItem(position, "wood", amount);
+  }
+
   getItem(id: string): ItemStack | undefined {
     return this.items.find((stack) => stack.id === id);
   }
 
-  /** Nearest loose wood pile that no one else has claimed (or is claimed by us). */
-  nearestHaulableWood(from: Vec2, agentId: string): ItemStack | undefined {
+  /**
+   * Nearest loose pile no one else has claimed (or that we claimed). Pass a
+   * resource to restrict to that material; omit it to haul whatever is nearest.
+   */
+  nearestHaulable(from: Vec2, agentId: string, resource?: ResourceKind): ItemStack | undefined {
     let best: ItemStack | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const stack of this.items) {
-      if (stack.resource !== "wood" || stack.amount <= 0) {
+      if (stack.amount <= 0 || (resource && stack.resource !== resource)) {
         continue;
       }
       if (stack.reservedBy && stack.reservedBy !== agentId) {
@@ -1755,9 +1788,10 @@ export class Simulation {
     return best;
   }
 
-  hasHaulableWood(): boolean {
+  hasHaulable(resource?: ResourceKind): boolean {
     return this.items.some(
-      (stack) => stack.resource === "wood" && stack.amount > 0 && !stack.reservedBy,
+      (stack) =>
+        stack.amount > 0 && !stack.reservedBy && (!resource || stack.resource === resource),
     );
   }
 
@@ -1792,43 +1826,128 @@ export class Simulation {
     }
   }
 
-  woodStoreSpace(): number {
-    return Math.max(0, WOOD_STORE_CAP - this.woodStock);
+  stockOf(resource: ResourceKind): number {
+    return resource === "wood" ? this.woodStock : resource === "stone" ? this.stoneStock : this.oreStock;
   }
 
-  /** Deposit carried wood into the warehouse; returns how much was accepted. */
-  storeWood(amount: number): number {
-    const accepted = Math.min(amount, this.woodStoreSpace());
-    this.woodStock += accepted;
+  private setStock(resource: ResourceKind, value: number) {
+    if (resource === "wood") this.woodStock = value;
+    else if (resource === "stone") this.stoneStock = value;
+    else this.oreStock = value;
+  }
+
+  private storeCap(resource: ResourceKind): number {
+    return resource === "wood" ? WOOD_STORE_CAP : resource === "stone" ? STONE_STORE_CAP : ORE_STORE_CAP;
+  }
+
+  private wantTarget(resource: ResourceKind): number {
+    return resource === "wood" ? WOOD_WANT_TARGET : resource === "stone" ? STONE_WANT_TARGET : ORE_WANT_TARGET;
+  }
+
+  storeSpaceFor(resource: ResourceKind): number {
+    return Math.max(0, this.storeCap(resource) - this.stockOf(resource));
+  }
+
+  /** Deposit a carried material into the warehouse; returns how much was accepted. */
+  store(resource: ResourceKind, amount: number): number {
+    const accepted = Math.min(amount, this.storeSpaceFor(resource));
     if (accepted > 0) {
+      this.setStock(resource, this.stockOf(resource) + accepted);
       this.notifyChanged();
     }
     return accepted;
   }
 
-  /** Take wood out of the warehouse for building; returns how much was drawn. */
-  withdrawWood(amount: number): number {
-    const drawn = Math.min(amount, this.woodStock);
-    this.woodStock -= drawn;
+  /** Take a material out of the warehouse; returns how much was drawn. */
+  withdraw(resource: ResourceKind, amount: number): number {
+    const drawn = Math.min(amount, this.stockOf(resource));
     if (drawn > 0) {
+      this.setStock(resource, this.stockOf(resource) - drawn);
       this.notifyChanged();
     }
     return drawn;
   }
 
-  private groundWoodTotal(): number {
+  groundTotal(resource: ResourceKind): number {
     let total = 0;
     for (const stack of this.items) {
-      if (stack.resource === "wood") {
+      if (stack.resource === resource) {
         total += stack.amount;
       }
     }
     return total;
   }
 
-  /** Should woodcutters keep felling? Only while the wood supply is below target. */
+  /** Should producers keep gathering this material? Only while supply < target. */
+  wantsMore(resource: ResourceKind): boolean {
+    return (
+      this.stockOf(resource) + this.groundTotal(resource) < this.wantTarget(resource) &&
+      this.storeSpaceFor(resource) > 0
+    );
+  }
+
+  // Wood-named shorthands kept for the existing felling/building paths.
+  woodStoreSpace(): number {
+    return this.storeSpaceFor("wood");
+  }
+  storeWood(amount: number): number {
+    return this.store("wood", amount);
+  }
+  withdrawWood(amount: number): number {
+    return this.withdraw("wood", amount);
+  }
   wantsMoreWood(): boolean {
-    return this.woodStock + this.groundWoodTotal() < WOOD_WANT_TARGET && this.woodStoreSpace() > 0;
+    return this.wantsMore("wood");
+  }
+
+  // --- Mining: rock yields stone, ore veins yield iron ----------------------
+
+  /** Is this a solid, mineable rock or ore tile? */
+  isRockTile(type: TileType): boolean {
+    return (
+      type === "RockSandstone" ||
+      type === "RockLimestone" ||
+      type === "RockGranite" ||
+      type === "OreIron"
+    );
+  }
+
+  /**
+   * Can the colony mine this rock yet? Soft rock (sandstone, limestone) is
+   * workable by hand; hard rock (granite) and ore need tools the colony hasn't
+   * fashioned yet — the gate that ties material access to tech/tools.
+   */
+  canMineRock(type: TileType): boolean {
+    if (type === "RockSandstone" || type === "RockLimestone") {
+      return true;
+    }
+    if (type === "RockGranite" || type === "OreIron") {
+      return this.hasMiningTools;
+    }
+    return false;
+  }
+
+  /** What a mined rock/ore tile yields. */
+  mineYield(type: TileType): { resource: ResourceKind; amount: number } {
+    if (type === "OreIron") {
+      return { resource: "ironOre", amount: 2 };
+    }
+    // Harder rock gives a little more usable stone.
+    return { resource: "stone", amount: type === "RockGranite" ? 3 : 2 };
+  }
+
+  /** Note (once) that the colony wants to mine something it lacks tools for. */
+  noteNeedsMiningTools() {
+    if (this.notedNeedTools) {
+      return;
+    }
+    this.notedNeedTools = true;
+    this.log(
+      tr(
+        "The hard rock and ore here need better tools to mine.",
+        "여기 단단한 암석과 광석을 캐려면 더 나은 도구가 필요하다.",
+      ),
+    );
   }
 
   getKitchen(): Building | undefined {
@@ -2067,10 +2186,14 @@ export class Simulation {
       this.releaseClaim(agent.target);
     }
     this.releaseItemsHeldBy(agent.id);
-    // Wood they were carrying spills onto the ground where they fell.
+    // Goods they were carrying spill onto the ground where they fell.
     if (agent.inventory.wood > 0 && this.hasAnyWarehouse()) {
       this.dropWood(agent.position, agent.inventory.wood);
       agent.inventory.wood = 0;
+    }
+    if (agent.carry && agent.carry.amount > 0) {
+      this.dropItem(agent.position, agent.carry.resource, agent.carry.amount);
+      agent.carry = undefined;
     }
     if (agent.projectBuildingId) {
       const pending = this.getBuilding(agent.projectBuildingId);

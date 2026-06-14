@@ -81,6 +81,8 @@ export type AgentState =
   | "StoreWood" // depositing the load into the warehouse stock
   | "MoveToWithdraw" // walking to the warehouse to fetch build materials
   | "WithdrawWood" // drawing materials out of the warehouse stock
+  | "MoveToMine" // walking to a rock/ore tile to mine it
+  | "Mine" // breaking rock for stone or ore
   | "Wander"
   | "Rest";
 
@@ -136,9 +138,9 @@ export type Building = {
   level?: number;
 };
 
-// Goods that can be physically carried and stockpiled. Only wood is hauled for
-// now; food/meals follow the same model in a later pass.
-export type ResourceKind = "wood";
+// Goods that can be physically carried and stockpiled. Wood is felled; stone and
+// iron ore are mined from rock. Food/meals follow the same model in a later pass.
+export type ResourceKind = "wood" | "stone" | "ironOre";
 
 // A loose pile of goods sitting on the ground, dropped where it was produced
 // until a hauler carries it to the warehouse.
@@ -222,6 +224,9 @@ export type Agent = {
   fetchAmount?: number;
   // The ground stack this agent has reserved and is hauling.
   haulItemId?: string;
+  // A load being physically carried to the warehouse (any resource). Kept apart
+  // from inventory.wood, which is the wood a builder consumes on site.
+  carry?: { resource: ResourceKind; amount: number };
 };
 
 export type GameLogEntry = {
@@ -249,8 +254,10 @@ export type SimulationSnapshot = {
   animals: Animal[];
   trains: Vec2[];
   poweredBuildingIds: string[];
-  // Wood physically stored in the warehouse, available to withdraw for building.
+  // Materials physically stored in the warehouse, available to withdraw.
   woodStock: number;
+  stoneStock: number;
+  oreStock: number;
   // The soft cap on residents the village can currently support (housing ∩ era).
   supportedPopulation: number;
   // Pieces of uncollected litter — the hygiene pressure that calls for cleaners.

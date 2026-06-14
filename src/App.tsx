@@ -69,6 +69,8 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   StoreWood: "창고 적재",
   MoveToWithdraw: "자재 가지러 가기",
   WithdrawWood: "자재 인출",
+  MoveToMine: "채굴지로 이동",
+  Mine: "채굴",
   Wander: "배회",
   Rest: "쉬기",
 };
@@ -109,6 +111,8 @@ export default function App() {
   const [unrest, setUnrest] = useState(0);
   const [steel, setSteel] = useState(0);
   const [woodStock, setWoodStock] = useState(0);
+  const [stoneStock, setStoneStock] = useState(0);
+  const [oreStock, setOreStock] = useState(0);
   const [meals, setMeals] = useState(0);
   const [pendingPlacement, setPendingPlacement] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -146,6 +150,8 @@ export default function App() {
         setUnrest(snapshot.unrest);
         setSteel(snapshot.steel);
         setWoodStock(snapshot.woodStock);
+        setStoneStock(snapshot.stoneStock);
+        setOreStock(snapshot.oreStock);
         setBuildings(snapshot.buildings);
         setAnimals(snapshot.animals);
         forceFrame((value) => value + 1);
@@ -265,6 +271,8 @@ export default function App() {
                   {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
                   {meals}
                   {woodStock > 0 ? ` · 🪵${woodStock}` : ""}
+                  {stoneStock > 0 ? ` · 🪨${stoneStock}` : ""}
+                  {oreStock > 0 ? ` · ⛏️${oreStock}` : ""}
                   {litter > 0 ? ` · 🗑️${litter}` : ""}
                   {unrest >= 20 ? ` · 😠${unrest}` : ""}
                   {steel > 0 ? ` · 🔩${steel}` : ""}

@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import type { Agent, Animal, Building, ItemStack, TileType, Vec2 } from "../types";
+import type { Agent, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
@@ -283,16 +283,17 @@ export class PixiRenderer {
       this.overlayGraphics.rect(lx + 6, ly + 10, 2.4, 1.4);
       this.overlayGraphics.fill({ color: 0x554631, alpha: 0.85 });
     }
-    // Loose wood piles waiting to be hauled: a small stack of logs, taller the
-    // more wood has accumulated.
+    // Loose material piles waiting to be hauled: a small stack, taller the more
+    // has accumulated, coloured by material (wood logs, grey stone, rusty ore).
     for (const stack of items) {
       const sx = stack.position.x * TILE_SIZE;
       const sy = stack.position.y * TILE_SIZE;
-      const logs = Math.min(4, Math.max(1, Math.ceil(stack.amount / 3)));
-      for (let i = 0; i < logs; i += 1) {
+      const layers = Math.min(4, Math.max(1, Math.ceil(stack.amount / 3)));
+      const [a, b] = resourcePileColors(stack.resource);
+      for (let i = 0; i < layers; i += 1) {
         const ly = sy + 11 - i * 2.4;
         this.overlayGraphics.rect(sx + 3, ly, 10, 2);
-        this.overlayGraphics.fill({ color: i % 2 === 0 ? 0x8a6a44 : 0x6f5436, alpha: 0.95 });
+        this.overlayGraphics.fill({ color: i % 2 === 0 ? a : b, alpha: 0.95 });
       }
     }
 
@@ -490,6 +491,17 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     }
   }
 
+}
+
+function resourcePileColors(resource: ResourceKind): [number, number] {
+  switch (resource) {
+    case "stone":
+      return [0x9a948a, 0x787169];
+    case "ironOre":
+      return [0x8a7a66, 0xb5763e];
+    default:
+      return [0x8a6a44, 0x6f5436]; // wood
+  }
 }
 
 function rockBaseColor(type: TileType): number {
@@ -935,10 +947,14 @@ function drawAgent(graphics: Graphics, agent: Agent) {
   graphics.circle(px + radius * 0.33, py - radius * 0.33, isChild ? 1 : 1.4);
   graphics.fill(0x20231d);
 
-  // A resident carrying wood shows a small log slung on their back.
-  if (agent.inventory.wood > 0) {
+  // A resident carrying a load (hauled material, or wood for building) shows a
+  // small bundle slung on their back, coloured by what it is.
+  const carried: ResourceKind | undefined =
+    agent.carry?.resource ?? (agent.inventory.wood > 0 ? "wood" : undefined);
+  if (carried) {
+    const [color] = resourcePileColors(carried);
     graphics.rect(px - 3.4, py - radius - 3.4, 6.8, 2.6);
-    graphics.fill({ color: 0x8a6a44, alpha: 0.95 });
+    graphics.fill({ color, alpha: 0.95 });
     graphics.stroke({ color: 0x4f3c25, width: 0.6, alpha: 0.9 });
   }
 
