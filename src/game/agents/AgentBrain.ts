@@ -798,6 +798,10 @@ export class AgentBrain {
         return this.findCleanWork(agent, simulation) || this.findFarmWork(agent, simulation);
       case "police":
         return this.patrol(agent, simulation);
+      case "mayor":
+        // The mayor surveys the town on foot; their oversight is what lets the
+        // planned roads, plaza and parks happen (see the gated planners).
+        return this.patrol(agent, simulation);
       default:
         return this.findFarmWork(agent, simulation);
     }

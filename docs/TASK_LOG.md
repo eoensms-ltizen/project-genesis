@@ -126,6 +126,18 @@
   Verified: blocks with multiple buildings, a single ~5×6 park scaled to the
   population, growth to era 4 with no deadlock.
 
+## 2026-06-14
+
+- Town planning is now a resident's job, not invisible system magic (restoring
+  the autonomy pillar): a mayor (assigned from the Town era) must be on duty for
+  the planned avenue grid, plaza, parks and workplace relocation to happen — all
+  gated on hasMayor(). The mayor surveys the town on foot, has trees/berries that
+  block an avenue transplanted onto nearby grass so streets run straight, and
+  tidies stray off-grid roads back to grass. Jobs are now colour-coded on the
+  map (mayor gold, police blue, cleaner teal, ...). Verified: no mayor before the
+  Town era; once one is on duty the grid forms (179 avenue tiles), avenues are
+  clear of trees, growth reaches era 4 with no deadlock.
+
 ## 2026-06-12
 
 - Created Vite + React + TypeScript + PixiJS prototype structure.

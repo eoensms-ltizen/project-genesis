@@ -610,7 +610,7 @@ export class Simulation {
    * fixed grid lines, threading between the blocks the buildings occupy.
    */
   private planRoads() {
-    if (this.era < 2) {
+    if (this.era < 2 || !this.hasMayor()) {
       return;
     }
     let minX = Infinity;
@@ -638,13 +638,46 @@ export class Simulation {
 
     for (let y = minY; y <= maxY; y += 1) {
       for (let x = minX; x <= maxX; x += 1) {
-        if (x % AVENUE_SPACING !== 0 && y % AVENUE_SPACING !== 0) {
-          continue; // only the grid lines become avenues
-        }
+        const onGrid = x % AVENUE_SPACING === 0 || y % AVENUE_SPACING === 0;
         const tile = this.world.getTile({ x, y });
-        if (tile && (tile.type === "Grass" || tile.type === "Dirt") && !this.isTileClaimed({ x, y })) {
-          this.world.setTile({ x, y }, "Road");
+        if (!tile) {
+          continue;
         }
+        if (onGrid) {
+          // A tree or berry bush in the avenue's path is transplanted out so the
+          // street runs straight; then the grid line is paved.
+          if (tile.type === "Tree" || tile.type === "Berry") {
+            this.transplantObstruction({ x, y }, tile.type);
+          }
+          if ((tile.type === "Grass" || tile.type === "Dirt") && !this.isTileClaimed({ x, y })) {
+            this.world.setTile({ x, y }, "Road");
+          }
+        } else if (
+          (tile.type === "Road" || tile.type === "Dirt") &&
+          !this.isTileClaimed({ x, y }) &&
+          !this.adjacentToStructure(tile) &&
+          (this.traffic.get(y * this.world.width + x) ?? 0) === 0
+        ) {
+          // Tidy a stray, off-grid, untrafficked street back to grass — the
+          // planner straightening the town toward the grid.
+          this.world.setTile({ x, y }, "Grass");
+        }
+      }
+    }
+  }
+
+  /** Move a tree/berry off an avenue and replant it on nearby open grass. */
+  private transplantObstruction(position: Vec2, type: TileType) {
+    this.world.setTile(position, "Grass");
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const spot = {
+        x: position.x + Math.floor(Math.random() * 7) - 3,
+        y: position.y + Math.floor(Math.random() * 7) - 3,
+      };
+      const tile = this.world.getTile(spot);
+      if (tile && tile.type === "Grass" && !this.isOnAvenue(spot) && !this.isTileClaimed(spot)) {
+        this.world.setTile(spot, type);
+        return;
       }
     }
   }
@@ -955,7 +988,7 @@ export class Simulation {
    * Growing can pave over the avenue between two parks, merging them.
    */
   private updateParks() {
-    if (this.era < 1 || this.agents.length < 6) {
+    if (this.era < 1 || this.agents.length < 6 || !this.hasMayor()) {
       return;
     }
     const parks = this.buildings.filter((b) => b.kind === "park" && b.stage === "built");
@@ -1141,6 +1174,9 @@ export class Simulation {
    * homes. The freed land becomes pleasant ground for houses and amenities.
    */
   private relocateMisplacedWork() {
+    if (!this.hasMayor()) {
+      return; // no planner, no zoning
+    }
     let cleared = 0;
     for (const tile of this.world.tiles) {
       if (cleared >= FIELD_RELOCATE_PER_TICK) {
@@ -1227,6 +1263,11 @@ export class Simulation {
 
   policeCount(): number {
     return this.agents.filter((a) => a.job === "police").length;
+  }
+
+  /** Is a town planner (mayor) on duty? Planning only happens when one is. */
+  hasMayor(): boolean {
+    return this.agents.some((a) => a.job === "mayor");
   }
 
   hasPoliceStation(): boolean {
@@ -1424,7 +1465,7 @@ export class Simulation {
    * its heart, a statue, and lamps at the corners.
    */
   private updatePlaza() {
-    if (this.era < 2) {
+    if (this.era < 2 || !this.hasMayor()) {
       return;
     }
     const world = this.world;
@@ -1530,6 +1571,8 @@ export class Simulation {
     const quotas: [AgentJob, number][] = [
       ["farmer", Math.min(3, Math.max(1, Math.floor(population / 4)))],
       ["cook", this.hasAnyKitchen() ? 1 : 0],
+      // A mayor plans the town — without one, no planned roads/plaza/parks happen.
+      ["mayor", this.era >= 2 ? 1 : 0],
       ["woodcutter", Math.min(2, Math.max(1, Math.floor(population / 5)))],
       ["cleaner", this.litterIsHigh ? Math.min(2, Math.ceil(this.litter.length / 10)) : 0],
       ["police", this.unrestIsHigh ? Math.min(2, 1 + Math.floor(this.unrest / 40)) : 0],

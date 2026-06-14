@@ -73,7 +73,8 @@ export type AgentJob =
   | "cook"
   | "hunter"
   | "cleaner"
-  | "police";
+  | "police"
+  | "mayor";
 
 export type BuildingKind =
   | "house"

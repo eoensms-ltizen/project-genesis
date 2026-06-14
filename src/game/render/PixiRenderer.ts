@@ -672,6 +672,9 @@ const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
   woodcutter: 0x8a6a44,
   cook: 0xe39a4e,
   builder: 0x9aa7b5,
+  cleaner: 0x4ec9c9,
+  police: 0x4a6ed0,
+  mayor: 0xd7b65f,
 };
 
 function drawAgent(graphics: Graphics, agent: Agent) {
