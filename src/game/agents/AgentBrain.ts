@@ -1414,26 +1414,23 @@ export class AgentBrain {
     simulation: Simulation,
     kind: Exclude<BuildingKind, "house">,
   ): boolean {
-    const threeWide = new Set([
-      "warehouse",
-      "church",
-      "pasture",
-      "powerplant",
-      "factory",
-      "station",
-      "cemetery",
-      "park",
-    ]);
-    const threeTall = new Set([
-      "church",
-      "pasture",
-      "powerplant",
-      "factory",
-      "cemetery",
-      "park",
-    ]);
-    const width = threeWide.has(kind) ? 3 : 2;
-    const height = threeTall.has(kind) ? 3 : 2;
+    // Walled-room buildings need at least a 3x3 footprint so they have a floor
+    // interior; the warehouse is larger to hold a decent stockpile. Open spaces
+    // (park, pasture, cemetery) keep their 3x3 yard.
+    const SIZES: Partial<Record<BuildingKind, [number, number]>> = {
+      warehouse: [4, 4],
+      kitchen: [3, 3],
+      church: [3, 3],
+      powerplant: [3, 3],
+      factory: [3, 3],
+      station: [3, 3],
+      police: [3, 3],
+      smelter: [3, 3],
+      pasture: [3, 3],
+      cemetery: [3, 3],
+      park: [3, 3],
+    };
+    const [width, height] = SIZES[kind] ?? [3, 3];
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
     const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);

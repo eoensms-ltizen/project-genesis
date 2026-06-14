@@ -121,6 +121,21 @@ export type BuildingKind =
 
 export type BuildingStage = "site" | "foundation" | "built";
 
+// Buildings that are enclosed walled rooms (perimeter walls, a door, a floor
+// interior) rather than open yards. Parks, pastures and cemeteries are outdoor
+// spaces and keep their own look.
+export const ROOM_BUILDING_KINDS: ReadonlySet<BuildingKind> = new Set([
+  "house",
+  "warehouse",
+  "kitchen",
+  "church",
+  "powerplant",
+  "factory",
+  "station",
+  "police",
+  "smelter",
+]);
+
 export type Building = {
   id: string;
   kind: BuildingKind;

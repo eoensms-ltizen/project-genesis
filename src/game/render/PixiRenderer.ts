@@ -1,5 +1,6 @@
 import { Application, Container, Graphics } from "pixi.js";
 import type { Agent, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
+import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
@@ -247,14 +248,11 @@ export class PixiRenderer {
       // it (a simple 2.5D depth order). A finished home is drawn from its wall/
       // floor/door tiles instead of a solid block, so skip it here.
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
-        // A finished home is drawn from its wall/floor/door tiles; a finished
-        // warehouse is an open fenced yard you pile goods in — both skip the
-        // solid-block draw.
-        if (building.kind === "house" && building.stage === "built") {
-          continue;
-        }
-        if (building.kind === "warehouse" && building.stage === "built") {
-          drawStockpileYard(this.worldGraphics, building);
+        // Finished buildings are drawn from their wall/floor/door tiles; a small
+        // emblem on the floor marks what each room is for. Open spaces still draw
+        // as their own shapes.
+        if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "built") {
+          drawRoomMarker(this.worldGraphics, building);
           continue;
         }
         drawBuilding(this.worldGraphics, building, this.flatBuildings);
@@ -678,24 +676,34 @@ function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
   }
 }
 
-/** A warehouse rendered as a fenced, open stockpile yard (its floor holds piles). */
-function drawStockpileYard(graphics: Graphics, building: Building) {
-  const px = building.x * TILE_SIZE;
-  const py = building.y * TILE_SIZE;
-  const w = building.width * TILE_SIZE;
-  const h = building.height * TILE_SIZE;
-  // A wooden fence outline around the yard.
-  graphics.rect(px + 1, py + 1, w - 2, h - 2);
-  graphics.stroke({ color: 0x8a6a44, width: 2, alpha: 0.95 });
-  // Fence posts at the corners.
-  for (const [sx, sy] of [
-    [px + 1, py + 1],
-    [px + w - 4, py + 1],
-    [px + 1, py + h - 4],
-    [px + w - 4, py + h - 4],
-  ]) {
-    graphics.rect(sx, sy, 3, 3);
-    graphics.fill(0x6f5436);
+/**
+ * A small emblem on a walled room's floor so you can tell what it's for at a
+ * glance. The house (resident sleeps inside) and warehouse (piles show inside)
+ * need no emblem.
+ */
+function drawRoomMarker(graphics: Graphics, building: Building) {
+  if (building.kind === "house" || building.kind === "warehouse") {
+    return;
+  }
+  const cx = (building.x + building.width / 2) * TILE_SIZE;
+  const cy = (building.y + building.height / 2) * TILE_SIZE;
+  const palette = buildingPalette(building.kind, 1);
+  graphics.circle(cx, cy, 5);
+  graphics.fill({ color: palette.roof, alpha: 0.95 });
+  graphics.circle(cx, cy, 5);
+  graphics.stroke({ color: 0x000000, width: 1, alpha: 0.25 });
+  // A tiny hint glyph for a few rooms.
+  if (building.kind === "church") {
+    graphics.rect(cx - 0.7, cy - 3, 1.4, 6);
+    graphics.fill(0xf0ead8);
+    graphics.rect(cx - 2.5, cy - 1.2, 5, 1.4);
+    graphics.fill(0xf0ead8);
+  } else if (building.kind === "smelter") {
+    graphics.circle(cx, cy, 1.8);
+    graphics.fill(0xe7873c);
+  } else if (building.kind === "kitchen") {
+    graphics.circle(cx, cy, 1.8);
+    graphics.fill(0xe3b94e);
   }
 }
 

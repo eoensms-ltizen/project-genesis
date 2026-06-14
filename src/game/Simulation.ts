@@ -16,6 +16,7 @@ import type {
   TileType,
   Vec2,
 } from "./types";
+import { ROOM_BUILDING_KINDS } from "./types";
 import { WorldMap } from "./world/WorldMap";
 import { tr } from "../i18n";
 
@@ -507,8 +508,8 @@ export class Simulation {
     };
   }
 
-  /** Paint a finished home as a walled room: perimeter walls, a doorway, floor. */
-  private paintHouseRoom(building: Building) {
+  /** Paint a finished building as a walled room: perimeter walls, doorway(s), floor. */
+  private paintWalledRoom(building: Building) {
     const { x, y, width, height } = building;
     const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
     for (let fy = 0; fy < height; fy += 1) {
@@ -523,6 +524,21 @@ export class Simulation {
         }
       }
     }
+  }
+
+  /** The interior (non-wall, non-door) floor tiles of a walled room. */
+  interiorTiles(building: Building): Vec2[] {
+    const tiles: Vec2[] = [];
+    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    for (let fy = 1; fy < building.height - 1; fy += 1) {
+      for (let fx = 1; fx < building.width - 1; fx += 1) {
+        const pos = { x: building.x + fx, y: building.y + fy };
+        if (!doorKeys.has(`${pos.x},${pos.y}`)) {
+          tiles.push(pos);
+        }
+      }
+    }
+    return tiles;
   }
 
   /**
@@ -622,15 +638,10 @@ export class Simulation {
         building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
       }
     }
-    // A finished home is a walled room; a finished warehouse is an open floored
-    // stockpile yard you can walk into and pile goods on. Other civic buildings
-    // stay solid blocks for now.
-    if (stage === "built" && building.kind === "house") {
-      this.paintHouseRoom(building);
-    } else if (stage === "built" && building.kind === "warehouse") {
-      for (const position of footprintTiles(building)) {
-        this.world.setTile(position, "Floor");
-      }
+    // Finished buildings are walled rooms (perimeter walls, a doorway, a floor
+    // interior). Open spaces — parks, pastures, cemeteries — stay solid/special.
+    if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
+      this.paintWalledRoom(building);
     } else {
       const tileType: TileType =
         stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
@@ -643,9 +654,9 @@ export class Simulation {
     this.reserveEntrance(building);
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
-        // Houses keep a Door tile; the warehouse yard is open Floor; other civic
-        // buildings pave their doorway.
-        if (building.kind !== "house" && building.kind !== "warehouse") {
+        // Walled rooms keep a Door tile to walk through; open spaces (park,
+        // pasture, cemetery) pave their doorway instead.
+        if (!ROOM_BUILDING_KINDS.has(building.kind)) {
           this.world.setTile(door, "Road");
         }
       }
@@ -1850,12 +1861,12 @@ export class Simulation {
 
   // --- Stockpile zone: stored goods are physical piles on the warehouse floor --
 
-  /** The walkable floor tiles of every built warehouse — the stockpile zone. */
+  /** The interior floor tiles of every built warehouse — the stockpile zone. */
   stockpileTiles(): Vec2[] {
     const tiles: Vec2[] = [];
     for (const building of this.buildings) {
       if (building.kind === "warehouse" && building.stage === "built") {
-        for (const position of footprintTiles(building)) {
+        for (const position of this.interiorTiles(building)) {
           tiles.push(position);
         }
       }
