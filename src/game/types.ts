@@ -115,7 +115,9 @@ export type BuildingKind =
   | "station"
   | "cemetery"
   | "park"
-  | "police";
+  | "police"
+  // Forges mined iron ore into steel.
+  | "smelter";
 
 export type BuildingStage = "site" | "foundation" | "built";
 
@@ -142,7 +144,7 @@ export type Building = {
 
 // Goods that can be physically carried and stockpiled. Wood is felled; stone and
 // iron ore are mined from rock. Food/meals follow the same model in a later pass.
-export type ResourceKind = "wood" | "stone" | "ironOre";
+export type ResourceKind = "wood" | "stone" | "ironOre" | "steel";
 
 // A loose pile of goods sitting on the ground, dropped where it was produced
 // until a hauler carries it to the warehouse.

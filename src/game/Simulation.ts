@@ -102,7 +102,8 @@ const FACTORY_FOOD_PER_TICK = 3;
 // be built once the town produces steel — so before industry, growth spreads
 // outward into more homes rather than upward.
 const FACTORY_STEEL_PER_TICK = 2;
-const STEEL_CAP = 240;
+// A smelter forges this much iron ore into steel each nature tick.
+const SMELT_ORE_PER_BATCH = 2;
 const REDEVELOP_STEEL_COST = 10;
 const TRAIN_SPEED = 9;
 const TRAIN_DELIVER_FOOD = 8;
@@ -275,7 +276,6 @@ export class Simulation {
   era = 0;
   foodStock = 0;
   meals = 0;
-  steel = 0;
   deaths = 0;
   // Materials are stored as physical piles (ItemStacks) sitting on the warehouse
   // floor — the stockpile zone — not as abstract numbers. See stockOf()/store().
@@ -414,6 +414,7 @@ export class Simulation {
       this.updatePlaza();
       this.spawnAnimals();
       this.runFactories();
+      this.runSmelters();
       this.decayInfrastructure();
       this.recomputeAmbiance();
       this.relocateMisplacedWork();
@@ -902,7 +903,7 @@ export class Simulation {
       supportedPopulation: this.supportedPopulation(),
       litter: this.litter.length,
       unrest: Math.round(this.unrest),
-      steel: Math.round(this.steel),
+      steel: this.stockOf("steel"),
     };
   }
 
@@ -1607,7 +1608,32 @@ export class Simulation {
     for (const building of this.buildings) {
       if (building.kind === "factory" && building.stage === "built" && this.isPowered(building)) {
         this.foodStock = Math.min(FOOD_CAP, this.foodStock + FACTORY_FOOD_PER_TICK);
-        this.steel = Math.min(STEEL_CAP, this.steel + FACTORY_STEEL_PER_TICK);
+        this.store("steel", FACTORY_STEEL_PER_TICK);
+      }
+    }
+  }
+
+  hasAnySmelter(): boolean {
+    return this.buildings.some((building) => building.kind === "smelter");
+  }
+
+  getSmelter(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "smelter" && building.stage === "built",
+    );
+  }
+
+  /** A built smelter forges stored iron ore into steel, a little each tick. */
+  private runSmelters() {
+    for (const building of this.buildings) {
+      if (building.kind !== "smelter" || building.stage !== "built") {
+        continue;
+      }
+      if (this.stockOf("ironOre") >= SMELT_ORE_PER_BATCH && this.storeSpaceFor("steel") > 0) {
+        const ore = this.withdraw("ironOre", SMELT_ORE_PER_BATCH);
+        if (ore > 0) {
+          this.store("steel", ore);
+        }
       }
     }
   }
@@ -2695,7 +2721,7 @@ export class Simulation {
    * stays low-rise and spreads outward instead.
    */
   maxRedevelopLevel(): number {
-    return this.steel >= REDEVELOP_STEEL_COST ? HOUSE_MAX_LEVEL : 2;
+    return this.stockOf("steel") >= REDEVELOP_STEEL_COST ? HOUSE_MAX_LEVEL : 2;
   }
 
   /** A built house that can still be upgraded to a denser tier. */
@@ -2800,7 +2826,7 @@ export class Simulation {
     building.durability = 100;
     // Apartments and towers consume steel and need a larger 2x3 footprint.
     if (next >= 3) {
-      this.steel = Math.max(0, this.steel - REDEVELOP_STEEL_COST);
+      this.withdraw("steel", REDEVELOP_STEEL_COST);
       if (building.height < 3) {
         this.expandHouseFootprint(building);
       }

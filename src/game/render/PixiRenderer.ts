@@ -506,6 +506,8 @@ function resourcePileColors(resource: ResourceKind): [number, number] {
       return [0x9a948a, 0x787169];
     case "ironOre":
       return [0x8a7a66, 0xb5763e];
+    case "steel":
+      return [0x9fb0bd, 0x6c7c88];
     default:
       return [0x8a6a44, 0x6f5436]; // wood
   }
@@ -874,6 +876,8 @@ function buildingLift(kind: Building["kind"], level: number): number {
       return 18;
     case "kitchen":
       return 17;
+    case "smelter":
+      return 20;
     case "warehouse":
       return 16;
     case "station":
@@ -901,6 +905,8 @@ function buildingPalette(kind: Building["kind"], level: number): { roof: number;
       return { roof: 0x9c4a38, wall: 0x7a5a3a };
     case "police":
       return { roof: 0x3a5a8a, wall: 0x8a8f99 };
+    case "smelter":
+      return { roof: 0x52483f, wall: 0x6e5a48 };
     default:
       return { roof: 0x9c4a38, wall: 0x8a6a44 };
   }

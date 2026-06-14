@@ -24,6 +24,7 @@ const STATION_WOOD_COST = 14;
 const CEMETERY_WOOD_COST = 10;
 const PARK_WOOD_COST = 8;
 const POLICE_WOOD_COST = 12;
+const SMELTER_WOOD_COST = 14;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -835,6 +836,7 @@ export class AgentBrain {
       | "station"
       | "cemetery"
       | "police"
+      | "smelter"
       | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
@@ -844,6 +846,14 @@ export class AgentBrain {
     } else if (simulation.needsPoliceStation()) {
       // A restless town builds a police station to keep the peace.
       kind = "police";
+    } else if (
+      // Iron ore on hand and no smelter yet — build one to forge it into steel.
+      // Material-driven, not era-gated: mastering iron is its own milestone.
+      !simulation.hasAnySmelter() &&
+      simulation.hasMiningTools &&
+      simulation.stockOf("ironOre") > 0
+    ) {
+      kind = "smelter";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
@@ -1427,7 +1437,7 @@ export class AgentBrain {
     // The cemetery is sited remotely (away from the village centre and housing);
     // everything else slots in near the builder, close to the village.
     const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
-    const avoidsHomes = kind === "powerplant" || kind === "factory";
+    const avoidsHomes = kind === "powerplant" || kind === "factory" || kind === "smelter";
     // A factory must sit near the power plant to be electrified (and so forge
     // steel), so it builds next to it; other industry just shuns housing.
     const powerplant = simulation.getPowerPlant();
@@ -2510,7 +2520,13 @@ function clampNeed(value: number): number {
 }
 
 function resourceNameKo(resource: ResourceKind): string {
-  return resource === "wood" ? "나무" : resource === "stone" ? "돌" : "철광석";
+  return resource === "wood"
+    ? "나무"
+    : resource === "stone"
+      ? "돌"
+      : resource === "ironOre"
+        ? "철광석"
+        : "강철";
 }
 
 function buildCost(kind: BuildingKind): number {
@@ -2543,6 +2559,9 @@ function buildCost(kind: BuildingKind): number {
   }
   if (kind === "police") {
     return POLICE_WOOD_COST;
+  }
+  if (kind === "smelter") {
+    return SMELTER_WOOD_COST;
   }
   return HOUSE_WOOD_COST;
 }
