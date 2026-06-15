@@ -82,11 +82,28 @@ export class GameApp {
       return { kind: "animal", animalId: nearestAnimal.id };
     }
 
-    // Walls, doors and floors are selectable structures in their own right, even
-    // though they sit inside a house's footprint — clicking a wall inspects the
-    // wall, not the whole building.
+    // A material pile sitting on this tile (loose, or stored in the warehouse).
+    const tx = Math.round(position.x);
+    const ty = Math.round(position.y);
+    const pile = this.simulation.items.find(
+      (stack) => stack.amount > 0 && stack.position.x === tx && stack.position.y === ty,
+    );
+    if (pile) {
+      return { kind: "item", itemId: pile.id };
+    }
+
+    // Walls, doors, floors and furniture are selectable structures in their own
+    // right, even though they sit inside a building's footprint — clicking a bed
+    // inspects the bed, not the whole building.
     const structureTile = this.simulation.world.getTile(position)?.type;
-    if (structureTile === "Wall" || structureTile === "Door" || structureTile === "Floor") {
+    if (
+      structureTile === "Wall" ||
+      structureTile === "Door" ||
+      structureTile === "Floor" ||
+      structureTile === "Bed" ||
+      structureTile === "Table" ||
+      structureTile === "Stove"
+    ) {
       return { kind: "tile", position: { ...position } };
     }
 

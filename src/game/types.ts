@@ -197,6 +197,7 @@ export type InspectionTarget =
   | { kind: "agent"; agentId: string }
   | { kind: "building"; buildingId: string }
   | { kind: "animal"; animalId: string }
+  | { kind: "item"; itemId: string }
   | { kind: "tile"; position: Vec2 };
 
 export type Agent = {

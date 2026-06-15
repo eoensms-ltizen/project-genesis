@@ -337,6 +337,7 @@ export default function App() {
               agents={agents}
               buildings={buildings}
               animals={animals}
+              items={gameRef.current?.simulation.items ?? []}
               episodes={
                 selection.kind === "agent"
                   ? (gameRef.current?.simulation.getEpisodes(selection.agentId) ?? [])

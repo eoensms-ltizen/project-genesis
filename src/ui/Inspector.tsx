@@ -4,6 +4,8 @@ import type {
   Building,
   GameLogEntry,
   InspectionTarget,
+  ItemStack,
+  ResourceKind,
   TileType,
 } from "../game/types";
 import { tr } from "../i18n";
@@ -13,6 +15,7 @@ type InspectorProps = {
   agents: Agent[];
   buildings: Building[];
   animals: Animal[];
+  items: ItemStack[];
   episodes: GameLogEntry[];
   tileType?: TileType;
   tileTraffic?: number;
@@ -25,6 +28,7 @@ export function Inspector({
   agents,
   buildings,
   animals,
+  items,
   episodes,
   tileType,
   tileTraffic,
@@ -55,6 +59,9 @@ export function Inspector({
       )}
       {selection.kind === "animal" && (
         <AnimalInfo animal={animals.find((animal) => animal.id === selection.animalId)} />
+      )}
+      {selection.kind === "item" && (
+        <ItemInfo item={items.find((stack) => stack.id === selection.itemId)} />
       )}
       {selection.kind === "tile" && (
         <TileInfo
@@ -139,6 +146,13 @@ function animalName(kind: Animal["kind"]): string {
   if (kind === "boar") return tr("boar", "멧돼지");
   if (kind === "rabbit") return tr("rabbit", "토끼");
   return kind;
+}
+
+function resourceName(resource: ResourceKind): string {
+  if (resource === "wood") return tr("Wood", "나무");
+  if (resource === "stone") return tr("Stone", "돌");
+  if (resource === "ironOre") return tr("Iron ore", "철광석");
+  return tr("Steel", "강철");
 }
 
 const TILE_NAMES: Partial<Record<TileType, () => string>> = {
@@ -357,6 +371,27 @@ function AnimalInfo({ animal }: { animal?: Animal }) {
         <dt>{tr("Position", "위치")}</dt>
         <dd>
           ({Math.round(animal.position.x)}, {Math.round(animal.position.y)})
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+function ItemInfo({ item }: { item?: ItemStack }) {
+  if (!item) {
+    return <p className="muted">{tr("This pile is gone.", "이 더미는 사라졌습니다.")}</p>;
+  }
+  return (
+    <div className="inspector-body">
+      <strong>{resourceName(item.resource)}</strong>
+      <dl>
+        <dt>{tr("Type", "종류")}</dt>
+        <dd>{tr("Material pile", "자재 더미")}</dd>
+        <dt>{tr("Amount", "수량")}</dt>
+        <dd>{item.amount}</dd>
+        <dt>{tr("Position", "위치")}</dt>
+        <dd>
+          ({item.position.x}, {item.position.y})
         </dd>
       </dl>
     </div>
