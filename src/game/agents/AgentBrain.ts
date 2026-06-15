@@ -125,6 +125,13 @@ const CRAMP_COMFORT_RATE = 0.012;
 const AMBIANCE_SITING_WEIGHT = 1.5;
 // A soft need must reach this urgency to pull an adult away from work.
 const NEED_ACT_THRESHOLD = 55;
+
+// Mood (0..100): a smoothed aggregate of needs and circumstances. It eases
+// toward a target each tick; when it sinks low a resident grows despondent and
+// downs tools for a moment. Mood's grip tightens as the colony develops — early
+// on survival crowds it out, later quality of life starts to bite.
+const MOOD_EASE_PER_SECOND = 0.2;
+const MOOD_BREAK_THRESHOLD = 30;
 // Work is the baseline drive, so it always carries at least this much pull.
 const WORK_BASELINE_URGENCY = 18;
 
@@ -188,6 +195,7 @@ export class AgentBrain {
     }
 
     this.updateNeeds(agent, simulation, deltaSeconds);
+    this.updateMood(agent, simulation, deltaSeconds);
 
     switch (agent.state) {
       case "Idle":
@@ -428,6 +436,12 @@ export class AgentBrain {
         return;
       }
       agent.projectBuildingId = undefined;
+    }
+
+    // A despondent resident may down tools and wander before any work begins
+    // (but only once fed, rested and housed — survival came first above).
+    if (this.maybeMoodBreak(agent, simulation)) {
+      return;
     }
 
     // The dominant need chooses the next action.
@@ -861,6 +875,54 @@ export class AgentBrain {
     if (agent.state === "Relax") {
       n.comfort = clampNeed(n.comfort + deltaSeconds * NEED_FILL.comfort);
     }
+  }
+
+  /** Ease mood toward a target blended from the resident's needs and survival. */
+  private updateMood(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const n = agent.needs;
+    let target = 50;
+    target += (n.comfort - 50) * 0.35;
+    target += (n.social - 50) * 0.2;
+    target += (n.leisure - 50) * 0.15;
+    target += (n.purpose - 50) * 0.1;
+    if (simulation.getChurch()) {
+      target += (n.faith - 50) * 0.1;
+    }
+    // Acute survival pressure weighs heavily on the heart.
+    if (agent.health.hunger >= HUNGER_SEEK_THRESHOLD) {
+      target -= 18;
+    }
+    if (agent.health.stamina < STAMINA_EXHAUSTED) {
+      target -= 14;
+    }
+    target = clampNeed(target);
+    const current = agent.mood ?? 60;
+    agent.mood = current + (target - current) * Math.min(1, deltaSeconds * MOOD_EASE_PER_SECOND);
+  }
+
+  /** How strongly mood bites: negligible in a struggling young settlement, full in a developed one. */
+  private moodImpact(simulation: Simulation): number {
+    return Math.min(1, 0.15 + simulation.era * 0.22);
+  }
+
+  /**
+   * When mood sinks, a resident grows despondent and downs tools for a moment —
+   * a stroll to clear their head. More likely the unhappier they are and the more
+   * developed the colony (where comfort is expected).
+   */
+  private maybeMoodBreak(agent: Agent, simulation: Simulation): boolean {
+    const mood = agent.mood ?? 60;
+    if (mood >= MOOD_BREAK_THRESHOLD) {
+      return false;
+    }
+    const severity = (MOOD_BREAK_THRESHOLD - mood) / MOOD_BREAK_THRESHOLD; // 0..1
+    // Kept modest so even a miserable resident still works between breaks.
+    if (Math.random() >= severity * this.moodImpact(simulation) * 0.22) {
+      return false;
+    }
+    this.wanderNearHome(agent, simulation);
+    this.maybeLog(simulation, tr(`${agent.name} is downhearted and stepped away from work.`, `${agent.name}이(가) 낙담해 잠시 일손을 놓았다.`));
+    return true;
   }
 
   /**

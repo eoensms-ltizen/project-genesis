@@ -208,6 +208,14 @@ function motivation(agent: Agent): string {
   return pulls[0].urgency < 35 ? tr("content", "만족") : pulls[0].label;
 }
 
+function moodLabel(mood: number): string {
+  if (mood >= 75) return tr("happy 😊", "행복 😊");
+  if (mood >= 55) return tr("content 🙂", "좋음 🙂");
+  if (mood >= 40) return tr("okay 😐", "보통 😐");
+  if (mood >= 25) return tr("low 😟", "우울 😟");
+  return tr("miserable 😣", "비참 😣");
+}
+
 function NeedBar({ label, value }: { label: string; value: number }) {
   const pct = Math.max(0, Math.min(100, Math.round(value)));
   const hue = Math.round((pct / 100) * 120); // red (low) -> green (full)
@@ -256,6 +264,8 @@ function AgentInfo({
         </dd>
         <dt>{tr("Job", "직업")}</dt>
         <dd>{jobName(agent.job)}</dd>
+        <dt>{tr("Mood", "기분")}</dt>
+        <dd>{moodLabel(agent.mood ?? 60)}</dd>
         <dt>{tr("Motivation", "동기")}</dt>
         <dd>{motivation(agent)}</dd>
         <dt>{tr("Family", "가족")}</dt>
@@ -275,6 +285,7 @@ function AgentInfo({
       </dl>
       <h3>{tr("Needs", "욕구")}</h3>
       <div className="need-bars">
+        <NeedBar label={tr("Mood", "기분")} value={agent.mood ?? 60} />
         <NeedBar label={tr("Food", "허기")} value={100 - agent.health.hunger} />
         <NeedBar label={tr("Energy", "체력")} value={agent.health.stamina} />
         <NeedBar label={tr("Social", "사교")} value={agent.needs.social} />

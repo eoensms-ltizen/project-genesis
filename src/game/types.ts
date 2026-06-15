@@ -228,6 +228,9 @@ export type Agent = {
     comfort: number; // breathing room; drains faster when homes are crowded
   };
   position: Vec2;
+  // Overall happiness (0..100), a smoothed aggregate of needs and circumstances.
+  // Drives despondent breaks when low; matters more as the colony develops.
+  mood?: number;
   inventory: {
     wood: number;
     food: number;
