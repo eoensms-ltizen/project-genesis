@@ -13,7 +13,7 @@ const IDLE_THINK_SECONDS = 0.4;
 const SEARCH_FAIL_BACKOFF_SECONDS = 3;
 const TARGET_CANDIDATE_LIMIT = 12;
 
-const HOUSE_WOOD_COST = 8;
+const HOUSE_WOOD_COST = 11;
 const WAREHOUSE_WOOD_COST = 10;
 const KITCHEN_WOOD_COST = 8;
 const CHURCH_WOOD_COST = 14;
@@ -118,6 +118,10 @@ const COMFORT_CLUSTER_RATE = 0.02;
 // How strongly the surrounding ambiance pushes comfort up (amenities) or down
 // (nuisances) per second, and how much it sways where things get built.
 const AMBIANCE_COMFORT_RATE = 0.005;
+// A home wants at least this many interior tiles per resident to feel roomy; a
+// 3x3 (9-tile) interior comfortably houses one. Falling short drains comfort.
+const ROOMY_AREA_PER_RESIDENT = 6;
+const CRAMP_COMFORT_RATE = 0.012;
 const AMBIANCE_SITING_WEIGHT = 1.5;
 // A soft need must reach this urgency to pull an adult away from work.
 const NEED_ACT_THRESHOLD = 55;
@@ -825,9 +829,17 @@ export class AgentBrain {
     // A furnished home (bed, dining table) is cosier — room quality lifts comfort.
     const furniture =
       home && home.kind === "house" ? simulation.homeFurnitureComfort(home) : 0;
+    // A cramped home grates: too little interior space per resident feels stuffy,
+    // which nudges the colony toward roomier homes.
+    let cramp = 0;
+    if (home && home.kind === "house") {
+      const area = simulation.interiorTiles(home).length;
+      const occupants = Math.max(1, simulation.occupantsOf(home.id));
+      cramp = Math.max(0, ROOMY_AREA_PER_RESIDENT - area / occupants);
+    }
     n.comfort = clampNeed(
       n.comfort -
-        deltaSeconds * (NEED_DECAY.comfort + overcrowd * 0.03) +
+        deltaSeconds * (NEED_DECAY.comfort + overcrowd * 0.03 + cramp * CRAMP_COMFORT_RATE) +
         deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE +
         deltaSeconds * cluster * COMFORT_CLUSTER_RATE +
         deltaSeconds * furniture,
@@ -1480,8 +1492,8 @@ export class AgentBrain {
     // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
       agent.position,
-      4,
-      4,
+      5,
+      5,
       (position) => simulation.isTileClaimed(position),
       {
         // Keep a one-tile gap so each walled home reads as its own building and
@@ -1496,15 +1508,15 @@ export class AgentBrain {
       return;
     }
 
-    // A starter home: 4x4 footprint, a 2x2 walled interior — just enough to cram
-    // a bed, a little storage and a hearth into one room early on.
+    // A home: 5x5 footprint with a roomy 3x3 interior — space for a bed, a dining
+    // table and breathing room, so it doesn't feel cramped.
     const building = simulation.registerBuilding({
       kind: "house",
       x: site.x,
       y: site.y,
-      width: 4,
-      height: 4,
-      door: { x: site.x + 2, y: site.y + 3 },
+      width: 5,
+      height: 5,
+      door: { x: site.x + 2, y: site.y + 4 },
       ownerId: agent.id,
     });
     // registerBuilding picks road-facing doors; head for the primary one.

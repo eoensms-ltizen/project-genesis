@@ -302,6 +302,21 @@ export class PixiRenderer {
       }
     }
 
+    // Doors swing open while a resident is passing through them.
+    const occupied = new Set(
+      agents.map((a) => `${Math.round(a.position.x)},${Math.round(a.position.y)}`),
+    );
+    for (const building of buildings) {
+      if (building.stage !== "built") {
+        continue;
+      }
+      for (const door of building.doors ?? [building.door]) {
+        if (occupied.has(`${door.x},${door.y}`)) {
+          drawOpenDoor(this.overlayGraphics, door.x, door.y, wallMask(world, door.x, door.y));
+        }
+      }
+    }
+
     this.nightGraphics.clear();
     if (darkness > 0.02) {
       this.nightGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
@@ -691,6 +706,23 @@ function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
     graphics.rect(px + S_ - 2, py, 2, S_);
     graphics.fill({ color: shadow, alpha: 0.3 });
   }
+}
+
+/** A door drawn open (leaf swung against the jamb) while someone passes through. */
+function drawOpenDoor(graphics: Graphics, x: number, y: number, mask: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const S_ = TILE_SIZE;
+  // Cover the closed slab with a clear threshold, then a thin open leaf to one side.
+  graphics.rect(px, py, S_, S_);
+  graphics.fill(0x4a3b2a);
+  const alongHorizontal = Boolean(mask & E) || Boolean(mask & W);
+  if (alongHorizontal) {
+    graphics.rect(px + 1, py + S_ / 2 - 3.5, 2.5, 7);
+  } else {
+    graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, 2.5);
+  }
+  graphics.fill(0x7a5a36);
 }
 
 /** A door slab set into the wall it breaks, oriented along the wall's run. */

@@ -611,6 +611,9 @@ export class Simulation {
     ];
     const open = (p: Vec2): boolean => {
       const t = this.world.getTile(p)?.type;
+      // The tile just outside a doorway must be genuinely open — not another
+      // building's wall/door/floor, water, a cliff, or decor. Otherwise a door
+      // ends up opening straight into a neighbour's wall.
       return (
         t !== undefined &&
         t !== "Water" &&
@@ -619,7 +622,14 @@ export class Simulation {
         t !== "Statue" &&
         t !== "House" &&
         t !== "HouseSite" &&
-        t !== "HouseFoundation"
+        t !== "HouseFoundation" &&
+        t !== "Wall" &&
+        t !== "Door" &&
+        t !== "Floor" &&
+        t !== "RockSandstone" &&
+        t !== "RockLimestone" &&
+        t !== "RockGranite" &&
+        t !== "OreIron"
       );
     };
     const usable = candidates.filter((s) => this.world.getTile(s.front) && open(s.front));
