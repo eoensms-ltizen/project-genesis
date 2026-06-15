@@ -128,6 +128,8 @@ const ORE_WANT_TARGET = 40;
 // How much of one material a single stockpile tile can hold. The warehouse's
 // floor tiles are the stockpile zone, so its footprint sets total capacity.
 const TILE_STACK_CAP = 50;
+// How far a new building will reach to connect its doorway to an existing path.
+const APPROACH_MAX_TILES = 7;
 
 // Land pressure: when the nearest open plot to the village centre is farther
 // than this, residents densify existing housing instead of sprawling.
@@ -536,6 +538,17 @@ export class Simulation {
     return this.bedOf(building) !== undefined;
   }
 
+  hasTable(building: Building): boolean {
+    return this.interiorTiles(building).some(
+      (tile) => this.world.getTile(tile)?.type === "Table",
+    );
+  }
+
+  /** Comfort bonus per second from a home's furniture (a furnished home is cosier). */
+  homeFurnitureComfort(building: Building): number {
+    return (this.hasBed(building) ? 0.03 : 0) + (this.hasTable(building) ? 0.025 : 0);
+  }
+
   /** A free interior floor tile to put a bed on (prefers the home's centre). */
   bedSpot(building: Building): Vec2 | undefined {
     const interior = this.interiorTiles(building);
@@ -689,6 +702,9 @@ export class Simulation {
         }
       }
     }
+    if (stage === "built") {
+      this.paveApproach(building);
+    }
     if (stage === "built" && building.kind === "station") {
       this.layStationRail(building);
     }
@@ -708,6 +724,59 @@ export class Simulation {
         this.world.setTile(front, "Road");
       }
     }
+  }
+
+  /**
+   * Lay a short footpath from each doorway to the nearest existing road/path, so
+   * a new building joins the street network instead of opening onto bare grass.
+   * If nothing's close, leaves it — residents' desire paths will connect it.
+   */
+  private paveApproach(building: Building) {
+    for (const door of this.buildingDoors(building)) {
+      const route = this.routeToNearestPath(this.doorFront(building, door), APPROACH_MAX_TILES);
+      if (!route) {
+        continue;
+      }
+      for (const position of route) {
+        const type = this.world.getTile(position)?.type;
+        if (type === "Grass" || type === "Stump") {
+          this.world.setTile(position, "Dirt");
+        }
+      }
+    }
+  }
+
+  /** Breadth-first walk over open ground to the nearest road/path within range. */
+  private routeToNearestPath(start: Vec2, maxLen: number): Vec2[] | undefined {
+    const key = (p: Vec2) => p.y * this.world.width + p.x;
+    const visited = new Set<number>([key(start)]);
+    let frontier: { p: Vec2; path: Vec2[] }[] = [{ p: start, path: [] }];
+    for (let depth = 0; depth < maxLen && frontier.length > 0; depth += 1) {
+      const next: { p: Vec2; path: Vec2[] }[] = [];
+      for (const { p, path } of frontier) {
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
+          const np = { x: p.x + dx, y: p.y + dy };
+          if (!this.world.inBounds(np) || visited.has(key(np))) {
+            continue;
+          }
+          visited.add(key(np));
+          const type = this.world.getTile(np)?.type;
+          if (type === "Road" || type === "Dirt" || type === "Plaza") {
+            return [...path, np];
+          }
+          if (type === "Grass" || type === "Stump") {
+            next.push({ p: np, path: [...path, np] });
+          }
+        }
+      }
+      frontier = next;
+    }
+    return undefined;
   }
 
   /** A built building is solid except its doors; tell the world which tiles those are. */

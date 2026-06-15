@@ -54,6 +54,7 @@ const PICKAXE_STONE_COST = 10;
 const CRAFT_DURATION_SECONDS = 3;
 // A bed: built from wood inside one's home. Sleeping in a bed rests best.
 const BED_WOOD_COST = 4;
+const TABLE_WOOD_COST = 4;
 const FURNISH_DURATION_SECONDS = 3;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
@@ -596,8 +597,11 @@ export class AgentBrain {
     if (this.tryCook(agent, simulation)) {
       return true;
     }
-    // Furnish the home with a bed so nights are spent resting properly.
+    // Furnish the home with a bed (then a dining table) — comfort improvements.
     if (this.tryBuildBed(agent, simulation)) {
+      return true;
+    }
+    if (this.tryBuildTable(agent, simulation)) {
       return true;
     }
     // Specialists ply their trade once the town is organised enough to assign jobs.
@@ -818,11 +822,15 @@ export class AgentBrain {
       home && home.kind === "house"
         ? Math.max(0, simulation.occupantsOf(home.id) - simulation.houseCapacity(home))
         : 0;
+    // A furnished home (bed, dining table) is cosier — room quality lifts comfort.
+    const furniture =
+      home && home.kind === "house" ? simulation.homeFurnitureComfort(home) : 0;
     n.comfort = clampNeed(
       n.comfort -
         deltaSeconds * (NEED_DECAY.comfort + overcrowd * 0.03) +
         deltaSeconds * ambiance * AMBIANCE_COMFORT_RATE +
-        deltaSeconds * cluster * COMFORT_CLUSTER_RATE,
+        deltaSeconds * cluster * COMFORT_CLUSTER_RATE +
+        deltaSeconds * furniture,
     );
 
     // Refill while engaged in the matching activity.
@@ -1411,20 +1419,55 @@ export class AgentBrain {
     return true;
   }
 
+  /** Furnish the home with a table once it has a bed — a step toward a real room. */
+  private tryBuildTable(agent: Agent, simulation: Simulation): boolean {
+    if (!agent.home || !agent.homeBuildingId) {
+      return false;
+    }
+    const home = simulation.getBuilding(agent.homeBuildingId);
+    if (
+      !home ||
+      home.kind !== "house" ||
+      home.stage !== "built" ||
+      !simulation.hasBed(home) || // a bed comes first
+      simulation.hasTable(home)
+    ) {
+      return false;
+    }
+    if (agent.inventory.wood < TABLE_WOOD_COST) {
+      return this.fetchWood(agent, simulation, TABLE_WOOD_COST);
+    }
+    const spot = simulation.bedSpot(home); // nearest free interior floor tile
+    if (!spot) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: spot });
+    if (!path) {
+      return false;
+    }
+    agent.target = { ...spot };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFurnish");
+    return true;
+  }
+
   private furnish(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < FURNISH_DURATION_SECONDS) {
       return;
     }
-    if (agent.target) {
+    const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
+    if (agent.target && home && simulation.world.getTile(roundVec(agent.target))?.type === "Floor") {
       const pos = roundVec(agent.target);
-      if (
-        simulation.world.getTile(pos)?.type === "Floor" &&
-        agent.inventory.wood >= BED_WOOD_COST
-      ) {
+      // A bed comes first; once there's a bed, the next piece is a dining table.
+      if (!simulation.hasBed(home) && agent.inventory.wood >= BED_WOOD_COST) {
         simulation.world.setTile(pos, "Bed");
         agent.inventory.wood -= BED_WOOD_COST;
         simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 침대를 놓았다. 🛏️`), [agent]);
+      } else if (!simulation.hasTable(home) && agent.inventory.wood >= TABLE_WOOD_COST) {
+        simulation.world.setTile(pos, "Table");
+        agent.inventory.wood -= TABLE_WOOD_COST;
+        simulation.log(tr(`${agent.name} set up a dining table. 🍽️`, `${agent.name}이(가) 식탁을 놓았다. 🍽️`), [agent]);
       }
     }
     agent.target = undefined;
@@ -1558,7 +1601,7 @@ export class AgentBrain {
     agent.projectBuildingId = building.id;
     agent.target = { ...door };
     agent.path = path;
-    simulation.log(tr(`${agent.name} is planning a village ${kind}.`, `${agent.name}이(가) 마을 ${kind}을(를) 계획하고 있다.`));
+    simulation.log(tr(`${agent.name} is planning a village ${kind}.`, `${agent.name}이(가) 마을 ${buildingNameKo(kind)}을(를) 계획하고 있다.`));
     this.setState(agent, simulation, "MoveToHouseSite");
     return true;
   }
@@ -1664,7 +1707,7 @@ export class AgentBrain {
       simulation.log(
         building.kind === "house"
           ? tr(`${agent.name} marked a future home.`, `${agent.name}이(가) 미래의 보금자리 자리를 표시했다.`)
-          : tr(`${agent.name} staked out the ${building.kind}.`, `${agent.name}이(가) ${building.kind} 자리를 잡았다.`),
+          : tr(`${agent.name} staked out the ${building.kind}.`, `${agent.name}이(가) ${buildingNameKo(building.kind)} 자리를 잡았다.`),
       );
     }
     agent.target = undefined;
@@ -1688,7 +1731,7 @@ export class AgentBrain {
       simulation.log(
         building.kind === "house"
           ? tr(`${agent.name} started building a house.`, `${agent.name}이(가) 집을 짓기 시작했다.`)
-          : tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${building.kind}을(를) 짓기 시작했다.`),
+          : tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${buildingNameKo(building.kind)}을(를) 짓기 시작했다.`),
       );
     }
 
@@ -1705,7 +1748,7 @@ export class AgentBrain {
       agent.homeSite = undefined;
       simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
     } else {
-      simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${building.kind}을(를) 지었다!`), [agent]);
+      simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
     }
     agent.projectBuildingId = undefined;
     agent.target = undefined;
@@ -2025,7 +2068,7 @@ export class AgentBrain {
     const kind = animal.kind;
     const felled = simulation.strikeAnimal(animal);
     if (felled) {
-      simulation.log(tr(`${agent.name} hunted a ${kind}. +${simulation.animalFoodValue(kind)} food 🏹`, `${agent.name}이(가) ${kind}을(를) 사냥했다. +식량 ${simulation.animalFoodValue(kind)} 🏹`), [
+      simulation.log(tr(`${agent.name} hunted a ${kind}. +${simulation.animalFoodValue(kind)} food 🏹`, `${agent.name}이(가) ${animalNameKo(kind)}을(를) 사냥했다. +식량 ${simulation.animalFoodValue(kind)} 🏹`), [
         agent,
       ]);
       agent.huntTargetId = undefined;
@@ -2052,7 +2095,7 @@ export class AgentBrain {
     }
 
     if (simulation.tameAnimal(animal)) {
-      simulation.log(tr(`${agent.name} tamed a ${animal.kind} for the pasture. 🐾`, `${agent.name}이(가) 목장에 둘 ${animal.kind}을(를) 길들였다. 🐾`), [agent]);
+      simulation.log(tr(`${agent.name} tamed a ${animal.kind} for the pasture. 🐾`, `${agent.name}이(가) 목장에 둘 ${animalNameKo(animal.kind)}을(를) 길들였다. 🐾`), [agent]);
     }
     agent.huntTargetId = undefined;
     agent.target = undefined;
@@ -2623,6 +2666,28 @@ function samePos(a: Vec2, b: Vec2): boolean {
 
 function clampNeed(value: number): number {
   return value < 0 ? 0 : value > 100 ? 100 : value;
+}
+
+function buildingNameKo(kind: BuildingKind): string {
+  const names: Record<BuildingKind, string> = {
+    house: "집",
+    warehouse: "창고",
+    kitchen: "부엌",
+    church: "교회",
+    pasture: "목초지",
+    powerplant: "발전소",
+    factory: "공장",
+    station: "역",
+    cemetery: "묘지",
+    park: "공원",
+    police: "경찰서",
+    smelter: "제련소",
+  };
+  return names[kind] ?? kind;
+}
+
+function animalNameKo(kind: string): string {
+  return kind === "deer" ? "사슴" : kind === "boar" ? "멧돼지" : kind === "rabbit" ? "토끼" : kind;
 }
 
 function resourceNameKo(resource: ResourceKind): string {

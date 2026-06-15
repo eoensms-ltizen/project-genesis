@@ -518,6 +518,18 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xe6ddc8);
   }
 
+  if (type === "Table") {
+    // A wooden dining table with a couple of plates.
+    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, TILE_SIZE - 8);
+    graphics.fill(0x8a6a44);
+    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, TILE_SIZE - 8);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
+    graphics.circle(px + 6, py + 8, 1.2);
+    graphics.fill(0xe6ddc8);
+    graphics.circle(px + 10, py + 8, 1.2);
+    graphics.fill(0xe6ddc8);
+  }
+
 }
 
 function resourcePileColors(resource: ResourceKind): [number, number] {
@@ -653,15 +665,19 @@ function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
+  // Buildings are timbered, so walls read as stacked logs/planks (warm wood),
+  // not flat stone grey.
   graphics.rect(px, py, S_, S_);
-  graphics.fill(0x726a5e);
-  // Mortar courses for texture.
-  graphics.rect(px, py + S_ / 2 - 0.5, S_, 1);
-  graphics.fill({ color: 0x564f45, alpha: 0.45 });
-  const shadow = 0x332e27;
+  graphics.fill(0x7a5d3a);
+  // Plank seams: a couple of horizontal grain lines for a timbered look.
+  for (const gy of [S_ / 3, (2 * S_) / 3]) {
+    graphics.rect(px, py + gy - 0.5, S_, 1);
+    graphics.fill({ color: 0x5a4327, alpha: 0.5 });
+  }
+  const shadow = 0x3a2c19;
   if (!(mask & N)) {
     graphics.rect(px, py, S_, 2);
-    graphics.fill({ color: 0x8e8678, alpha: 0.95 });
+    graphics.fill({ color: 0xa07e4f, alpha: 0.95 });
   }
   if (!(mask & S)) {
     graphics.rect(px, py + S_ - 2.5, S_, 2.5);
@@ -1131,6 +1147,8 @@ function tileColor(type: TileType): number {
     case "Stove":
       return 0x4a3b2a;
     case "Bed":
+      return 0x4a3b2a;
+    case "Table":
       return 0x4a3b2a;
     case "Berry":
       return 0x2c4a28;

@@ -24,9 +24,10 @@ export type TileType =
   | "RockGranite"
   | "OreIron"
   | "RockFloor"
-  // Furniture inside rooms: a stove to cook at, a bed to sleep in.
+  // Furniture inside rooms: a stove to cook at, a bed to sleep in, a table to dine at.
   | "Stove"
   | "Bed"
+  | "Table"
   | "Berry"
   | "FieldEmpty"
   | "FieldGrowing"

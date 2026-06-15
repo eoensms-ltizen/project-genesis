@@ -32,6 +32,7 @@ const MOVE_COSTS: Record<TileType, number> = {
   // Furniture sits on a room floor and is walkable (you stand at / lie on it).
   Stove: 1,
   Bed: 1,
+  Table: 1,
   Berry: 2,
   FieldEmpty: 2.2,
   FieldGrowing: 2.2,
@@ -65,6 +66,7 @@ const TILE_CODES: Record<TileType, string> = {
   RockFloor: ",",
   Stove: "v",
   Bed: "b",
+  Table: "t",
   Berry: "B",
   FieldEmpty: "e",
   FieldGrowing: "c",
@@ -306,6 +308,9 @@ export class WorldMap {
         if (extraScore) {
           score += extraScore(cx, cy);
         }
+        // A little jitter so buildings don't all stack in one deterministic line —
+        // gives the neighbourhood an organic, less regimented spread.
+        score += Math.random() * 4;
 
         if (score > bestScore) {
           bestScore = score;
