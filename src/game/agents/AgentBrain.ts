@@ -25,6 +25,8 @@ const CEMETERY_WOOD_COST = 10;
 const PARK_WOOD_COST = 8;
 const POLICE_WOOD_COST = 12;
 const SMELTER_WOOD_COST = 14;
+// Each building budgets this much extra wood for its doorway(s).
+const DOOR_WOOD_COST = 2;
 const WORSHIP_RADIUS_TILES = 4;
 const TRANSPLANT_DISTANCE_TILES = 6;
 const HUNT_DURATION_SECONDS = 1.2;
@@ -205,7 +207,7 @@ export class AgentBrain {
         const building = agent.projectBuildingId
           ? simulation.getBuilding(agent.projectBuildingId)
           : undefined;
-        const cost = building ? buildCost(building.kind) : HOUSE_WOOD_COST;
+        const cost = building ? buildCost(building.kind) : buildCost("house");
         const targetTile = agent.target
           ? simulation.world.getTile(roundVec(agent.target))
           : undefined;
@@ -391,7 +393,7 @@ export class AgentBrain {
         this.setState(agent, simulation, "FindHouseSite");
         return;
       }
-      if (this.fetchWood(agent, simulation, HOUSE_WOOD_COST)) {
+      if (this.fetchWood(agent, simulation, buildCost("house"))) {
         return;
       }
       this.headToHomeSite(agent, simulation);
@@ -2633,41 +2635,26 @@ function resourceNameKo(resource: ResourceKind): string {
         : "강철";
 }
 
+const BUILDING_WOOD_COST: Record<BuildingKind, number> = {
+  house: HOUSE_WOOD_COST,
+  warehouse: WAREHOUSE_WOOD_COST,
+  kitchen: KITCHEN_WOOD_COST,
+  church: CHURCH_WOOD_COST,
+  pasture: PASTURE_WOOD_COST,
+  powerplant: POWERPLANT_WOOD_COST,
+  factory: FACTORY_WOOD_COST,
+  station: STATION_WOOD_COST,
+  cemetery: CEMETERY_WOOD_COST,
+  park: PARK_WOOD_COST,
+  police: POLICE_WOOD_COST,
+  smelter: SMELTER_WOOD_COST,
+};
+
+// Wood to build, including an allowance for the building's doorway(s). Buildings
+// can have more than one door (road-facing, by size) — that extra opening is
+// paid for here.
 function buildCost(kind: BuildingKind): number {
-  if (kind === "warehouse") {
-    return WAREHOUSE_WOOD_COST;
-  }
-  if (kind === "kitchen") {
-    return KITCHEN_WOOD_COST;
-  }
-  if (kind === "church") {
-    return CHURCH_WOOD_COST;
-  }
-  if (kind === "pasture") {
-    return PASTURE_WOOD_COST;
-  }
-  if (kind === "powerplant") {
-    return POWERPLANT_WOOD_COST;
-  }
-  if (kind === "factory") {
-    return FACTORY_WOOD_COST;
-  }
-  if (kind === "station") {
-    return STATION_WOOD_COST;
-  }
-  if (kind === "cemetery") {
-    return CEMETERY_WOOD_COST;
-  }
-  if (kind === "park") {
-    return PARK_WOOD_COST;
-  }
-  if (kind === "police") {
-    return POLICE_WOOD_COST;
-  }
-  if (kind === "smelter") {
-    return SMELTER_WOOD_COST;
-  }
-  return HOUSE_WOOD_COST;
+  return (BUILDING_WOOD_COST[kind] ?? HOUSE_WOOD_COST) + DOOR_WOOD_COST;
 }
 
 function hasAdjacentRoad(world: Simulation["world"], position: Vec2): boolean {

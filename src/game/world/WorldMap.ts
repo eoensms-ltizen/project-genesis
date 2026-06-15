@@ -265,10 +265,6 @@ export class WorldMap {
     const far = options?.far ?? false;
     const minDistance = options?.minDistance ?? 0;
     const extraScore = options?.extraScore;
-    // Cluster mode lets buildings sit shoulder-to-shoulder (a hamlet feel); the
-    // only hard rule is that the door (bottom-left, in front) stays clear so the
-    // building is never sealed in. Otherwise a one-tile gap is kept all around.
-    const cluster = options?.cluster ?? false;
 
     let best: Vec2 | undefined;
     let bestScore = Number.NEGATIVE_INFINITY;
@@ -279,10 +275,11 @@ export class WorldMap {
           continue;
         }
 
-        const ring = this.ringInfo(x, y, width, height, isBlocked);
-        if (!cluster && !ring.clear) {
+        const placement = this.placementClear(x, y, width, height, isBlocked);
+        if (!placement.ok) {
           continue;
         }
+        const ring = placement;
 
         const doorFront = { x, y: y + height };
         if (!this.isWalkable(doorFront) || isBlocked?.(doorFront)) {
@@ -339,50 +336,70 @@ export class WorldMap {
     return true;
   }
 
-  private ringInfo(
+  /**
+   * Two buildings may share/abut a wall (gap 0) or stand clearly apart (gap ≥2),
+   * but never leave an awkward 1-tile sliver between them. Water, solid rock and
+   * in-progress (claimed) footprints always keep a gap. Returns whether the site
+   * is allowed and whether it touches a path (a siting bonus).
+   */
+  private placementClear(
     x: number,
     y: number,
     width: number,
     height: number,
     isBlocked?: (position: Vec2) => boolean,
-  ): { clear: boolean; touchesPath: boolean } {
+  ): { ok: boolean; touchesPath: boolean } {
     let touchesPath = false;
-    for (let ry = y - 1; ry <= y + height; ry += 1) {
-      for (let rx = x - 1; rx <= x + width; rx += 1) {
-        const inFootprint = rx >= x && rx < x + width && ry >= y && ry < y + height;
-        if (inFootprint) {
+    let buildingAdjacent = false; // a built building flush against us (gap 0)
+    let buildingOneAway = false; // a building exactly one tile away (gap 1 — the sliver)
+    const isBuildingTile = (t: TileType): boolean =>
+      t === "Wall" ||
+      t === "Door" ||
+      t === "Floor" ||
+      t === "House" ||
+      t === "HouseSite" ||
+      t === "HouseFoundation";
+    const isObstacle = (t: TileType): boolean =>
+      t === "Water" ||
+      t === "RockSandstone" ||
+      t === "RockLimestone" ||
+      t === "RockGranite" ||
+      t === "OreIron";
+    for (let ry = y - 2; ry <= y + height + 1; ry += 1) {
+      for (let rx = x - 2; rx <= x + width + 1; rx += 1) {
+        const dx = rx < x ? x - rx : rx > x + width - 1 ? rx - (x + width - 1) : 0;
+        const dy = ry < y ? y - ry : ry > y + height - 1 ? ry - (y + height - 1) : 0;
+        const dist = Math.max(dx, dy);
+        if (dist !== 1 && dist !== 2) {
           continue;
         }
         const tile = this.getTile({ x: rx, y: ry });
         if (!tile) {
           continue;
         }
-        // Occupied neighbours that must keep a one-tile gap: water, solid rock,
-        // and any existing building — including walled rooms (Wall/Door/Floor) and
-        // claimed footprints staked the same tick. Without this, new buildings sit
-        // flush against walled rooms and their walls merge into one blob.
-        if (
-          tile.type === "Water" ||
-          tile.type === "House" ||
-          tile.type === "HouseSite" ||
-          tile.type === "HouseFoundation" ||
-          tile.type === "Wall" ||
-          tile.type === "Door" ||
-          tile.type === "Floor" ||
-          tile.type === "RockSandstone" ||
-          tile.type === "RockLimestone" ||
-          tile.type === "RockGranite" ||
-          tile.type === "OreIron" ||
-          isBlocked?.({ x: rx, y: ry })
-        ) {
-          return { clear: false, touchesPath: false };
-        }
-        if (tile.type === "Road" || tile.type === "Dirt" || tile.type === "Plaza") {
-          touchesPath = true;
+        const blocked = isBlocked?.({ x: rx, y: ry }) ?? false;
+        if (dist === 1) {
+          // Never flush against water, cliffs, or an in-progress footprint.
+          if (isObstacle(tile.type) || blocked) {
+            return { ok: false, touchesPath: false };
+          }
+          if (isBuildingTile(tile.type)) {
+            buildingAdjacent = true; // sharing a wall — allowed
+          }
+          if (tile.type === "Road" || tile.type === "Dirt" || tile.type === "Plaza") {
+            touchesPath = true;
+          }
+        } else if (isBuildingTile(tile.type) || blocked) {
+          buildingOneAway = true;
         }
       }
     }
-    return { clear: true, touchesPath };
+    // The only forbidden case is a 1-tile sliver: a building one tile away with
+    // no flush contact. Flush sharing (gap 0) and clear separation (gap ≥2) are fine.
+    if (buildingOneAway && !buildingAdjacent) {
+      return { ok: false, touchesPath };
+    }
+    return { ok: true, touchesPath };
   }
 
   serializeTiles(): string {

@@ -485,11 +485,9 @@ export class Simulation {
     door: Vec2;
     ownerId?: string;
   }): Building {
-    const computed = this.computeDoors(input.x, input.y, input.width, input.height);
-    // Small buildings get a single doorway; only genuinely large ones earn a
-    // second entrance. Two doors on a 3x3 room just looks cluttered.
-    const large = input.width >= 5 || input.height >= 5;
-    const doors = large ? computed : [computed[0]];
+    // Doors are placed as needed (road-facing, by size); each one is paid for in
+    // the building's wood cost (see buildCost's door allowance).
+    const doors = this.computeDoors(input.x, input.y, input.width, input.height);
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
