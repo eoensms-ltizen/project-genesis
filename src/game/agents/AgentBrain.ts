@@ -1439,8 +1439,9 @@ export class AgentBrain {
       4,
       (position) => simulation.isTileClaimed(position),
       {
-        // Homes may cluster into a hamlet, keeping only their doorway clear.
-        cluster: true,
+        // Keep a one-tile gap so each walled home reads as its own building and
+        // walls don't merge into a blob; proximity scoring still clusters them
+        // into a tidy neighbourhood with little alleys between.
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
       },
     );

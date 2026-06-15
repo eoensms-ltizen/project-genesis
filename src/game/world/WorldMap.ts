@@ -257,7 +257,11 @@ export class WorldMap {
       cluster?: boolean;
     },
   ): Vec2 | undefined {
-    const houseTiles: Vec2[] = this.tiles.filter((tile) => tile.type === "House");
+    // Existing buildings are now walled rooms (Wall tiles); use those to pull new
+    // buildings into a cohesive cluster (with the gap enforced by ringInfo).
+    const houseTiles: Vec2[] = this.tiles.filter(
+      (tile) => tile.type === "Wall" || tile.type === "House",
+    );
     const far = options?.far ?? false;
     const minDistance = options?.minDistance ?? 0;
     const extraScore = options?.extraScore;
@@ -353,14 +357,22 @@ export class WorldMap {
         if (!tile) {
           continue;
         }
-        // A claimed tile is another building's footprint that hasn't been typed
-        // yet (e.g. a site staked the same tick), so treat it as occupied —
-        // otherwise two buildings stake flush and seal each other's doors.
+        // Occupied neighbours that must keep a one-tile gap: water, solid rock,
+        // and any existing building — including walled rooms (Wall/Door/Floor) and
+        // claimed footprints staked the same tick. Without this, new buildings sit
+        // flush against walled rooms and their walls merge into one blob.
         if (
           tile.type === "Water" ||
           tile.type === "House" ||
           tile.type === "HouseSite" ||
           tile.type === "HouseFoundation" ||
+          tile.type === "Wall" ||
+          tile.type === "Door" ||
+          tile.type === "Floor" ||
+          tile.type === "RockSandstone" ||
+          tile.type === "RockLimestone" ||
+          tile.type === "RockGranite" ||
+          tile.type === "OreIron" ||
           isBlocked?.({ x: rx, y: ry })
         ) {
           return { clear: false, touchesPath: false };

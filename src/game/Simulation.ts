@@ -486,9 +486,10 @@ export class Simulation {
     ownerId?: string;
   }): Building {
     const computed = this.computeDoors(input.x, input.y, input.width, input.height);
-    // A home is a small walled room with a single doorway; only larger civic
-    // buildings get a second entrance.
-    const doors = input.kind === "house" ? [computed[0]] : computed;
+    // Small buildings get a single doorway; only genuinely large ones earn a
+    // second entrance. Two doors on a 3x3 room just looks cluttered.
+    const large = input.width >= 5 || input.height >= 5;
+    const doors = large ? computed : [computed[0]];
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
