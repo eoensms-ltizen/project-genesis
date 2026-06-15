@@ -1,4 +1,4 @@
-import type { Agent, AgentState, Building, BuildingKind, ResourceKind, TileType, Vec2 } from "../types";
+import type { Agent, AgentState, Building, BuildingKind, BuildPlanTile, ResourceKind, TileType, Vec2 } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
@@ -13,6 +13,19 @@ const BUILD_DURATION_SECONDS = 6;
 // one tile at a time, so this is short — the build "duration" emerges from the
 // tile count and the walking between tiles.
 const PER_TILE_BUILD_SECONDS = 0.45;
+// Materials are paid as the work is done, not in one lump: the groundwork/floor
+// when the foundation is laid, then each wall/door as it goes up. A builder
+// carries a load of wood to site (up to what they can hold) and spends it tile
+// by tile — only trekking back for more once their arms are empty.
+const FOUNDATION_WOOD = 3;
+const WALL_TILE_WOOD = 1;
+const DOOR_TILE_WOOD = 2;
+const BUILD_CARRY_WOOD = 12; // most wood a builder hauls to site at once (= HAUL_CAPACITY)
+
+/** Wood a single plan tile costs to lay (floors are covered by the foundation). */
+function tileWood(t: BuildPlanTile["t"]): number {
+  return t === "Wall" ? WALL_TILE_WOOD : t === "Door" ? DOOR_TILE_WOOD : 0;
+}
 const EAT_DURATION_SECONDS = 1.5;
 const IDLE_THINK_SECONDS = 0.4;
 const SEARCH_FAIL_BACKOFF_SECONDS = 3;
@@ -225,18 +238,25 @@ export class AgentBrain {
         const building = agent.projectBuildingId
           ? simulation.getBuilding(agent.projectBuildingId)
           : undefined;
-        const cost = building ? buildCost(building.kind) : buildCost("house");
+        // A walled room only needs the groundwork material to break ground (the
+        // rest is paid wall by wall); an open space still pays its lump cost.
+        const needed =
+          building && ROOM_BUILDING_KINDS.has(building.kind)
+            ? FOUNDATION_WOOD
+            : building
+              ? buildCost(building.kind)
+              : FOUNDATION_WOOD;
         const targetTile = agent.target
           ? simulation.world.getTile(roundVec(agent.target))
           : undefined;
         // A build already under way (foundation laid) → join in placing tiles.
         // Otherwise stake the plot first, unless we've arrived on a staked site
-        // with the wood in hand to break ground right away.
+        // with enough wood in hand to break ground right away.
         const arrival: AgentState =
           building?.stage === "foundation"
             ? "BuildHouse"
             : (targetTile?.type === "HouseSite" || targetTile?.type === "HouseFoundation") &&
-                agent.inventory.wood >= cost
+                agent.inventory.wood >= needed
               ? "BuildHouse"
               : "PlanHouse";
         this.moveAlongPath(agent, simulation, deltaSeconds, arrival);
@@ -434,11 +454,7 @@ export class AgentBrain {
             this.setState(agent, simulation, "BuildHouse");
             return;
           }
-          if (agent.inventory.wood >= buildCost(proj.kind)) {
-            this.headToProject(agent, simulation, proj.door);
-            return;
-          }
-          if (this.fetchWood(agent, simulation, buildCost(proj.kind))) {
+          if (this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
             return;
           }
           this.headToProject(agent, simulation, proj.door);
@@ -462,7 +478,8 @@ export class AgentBrain {
         this.setState(agent, simulation, "FindHouseSite");
         return;
       }
-      if (this.fetchWood(agent, simulation, buildCost("house"))) {
+      // Carry a load of wood to site, then start laying the groundwork.
+      if (this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
         return;
       }
       this.headToHomeSite(agent, simulation);
@@ -489,11 +506,10 @@ export class AgentBrain {
           this.setState(agent, simulation, "BuildHouse");
           return;
         }
-        if (agent.inventory.wood >= buildCost(building.kind)) {
-          this.headToProject(agent, simulation, building.door);
+        if (this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
           return;
         }
-        this.fetchWood(agent, simulation, buildCost(building.kind));
+        this.headToProject(agent, simulation, building.door);
         return;
       }
       agent.projectBuildingId = undefined;
@@ -1890,18 +1906,16 @@ export class AgentBrain {
       return;
     }
 
-    // Lay the foundation (and draw up the plan) the first time someone arrives.
-    // The builder who breaks ground pays the wood up front; the tiles then cost
-    // nothing to place, so multiple helpers can pitch in for free.
+    // Lay the foundation (and draw up the plan) the first time someone arrives:
+    // pay the groundwork/floor material now. If short, fetch a fresh load first.
     if (building.stage !== "foundation") {
-      const cost = buildCost(building.kind);
-      if (agent.inventory.wood < cost) {
-        if (!this.fetchWood(agent, simulation, cost)) {
+      if (agent.inventory.wood < FOUNDATION_WOOD) {
+        if (!this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
           this.backOff(agent, simulation);
         }
         return;
       }
-      agent.inventory.wood = Math.max(0, agent.inventory.wood - cost);
+      agent.inventory.wood = Math.max(0, agent.inventory.wood - FOUNDATION_WOOD);
       simulation.setBuildingStage(building, "foundation");
       simulation.log(
         building.kind === "house"
@@ -1914,6 +1928,15 @@ export class AgentBrain {
     const next = simulation.nextBuildTile(building, agent.position);
     if (!next) {
       this.finishBuilding(agent, simulation, building);
+      return;
+    }
+
+    // Out of materials for the next piece? Trek back for a full load, then carry
+    // on laying tiles — no warehouse round-trip per single tile.
+    if (agent.inventory.wood < tileWood(next.t)) {
+      if (!this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
+        this.backOff(agent, simulation);
+      }
       return;
     }
 
@@ -1956,7 +1979,13 @@ export class AgentBrain {
       (p) => p.x === agent.buildTarget!.x && p.y === agent.buildTarget!.y && !p.done,
     );
     if (tile) {
-      simulation.placeBuildTile(building, tile);
+      const need = tileWood(tile.t);
+      if (agent.inventory.wood >= need) {
+        agent.inventory.wood -= need;
+        simulation.placeBuildTile(building, tile);
+      }
+      // Short on wood (a load ran out between picking and laying): leave it for
+      // the next pass — buildHouse will send this builder to restock.
     }
     agent.buildTarget = undefined;
     agent.target = undefined;
