@@ -396,10 +396,28 @@ export class AgentBrain {
     // A homeless adult must establish a home before joining the village's
     // need-driven daily life.
     if (!agent.home) {
+      // A slot was claimed earlier and the shelter is now finished — move in.
+      if (agent.homeBuildingId) {
+        const claimed = simulation.getBuilding(agent.homeBuildingId);
+        if (claimed && claimed.kind === "house" && claimed.stage === "built") {
+          agent.home = simulation.houseInterior(claimed);
+          agent.homeSite = undefined;
+          return;
+        }
+        if (!claimed) {
+          agent.homeBuildingId = undefined;
+        }
+      }
       if (this.tryClaimEmptyHouse(agent, simulation)) {
         return;
       }
       if (this.tryHousing(agent, simulation)) {
+        return;
+      }
+      // Don't sprawl into a private hut: if a shelter is already going up with
+      // room to spare, claim a bunk there and help raise it (communal living
+      // first; private rooms come later when materials allow).
+      if (this.tryJoinSharedShelter(agent, simulation)) {
         return;
       }
       if (!agent.homeSite) {
@@ -1550,6 +1568,12 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
+    // Last check before raising a new hut: if a shelter has just gone up for
+    // staking (e.g. another newcomer started one this tick), join it instead —
+    // this stops a crowd of homeless settlers from each building their own.
+    if (this.tryJoinSharedShelter(agent, simulation)) {
+      return;
+    }
     // Homes seek pleasant surroundings: drawn to parks/church, away from
     // cemeteries, power plants, fields and stumps. The town zones itself.
     const site = simulation.world.findBuildingSite(
@@ -2435,6 +2459,39 @@ export class AgentBrain {
     agent.inventory.wood -= cost;
     simulation.levelUpHouse(house);
     this.moveInto(agent, simulation, house, tr("joined a denser household", "더 북적이는 살림에 합류했다"));
+    return true;
+  }
+
+  /**
+   * Communal-first housing: rather than each newcomer raising their own hut, a
+   * homeless resident claims a bunk in a shelter that's already going up (with
+   * room to spare) and pitches in to finish it. They move in once it's built.
+   */
+  private tryJoinSharedShelter(agent: Agent, simulation: Simulation): boolean {
+    let shelter =
+      agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
+    if (!shelter || shelter.kind !== "house" || shelter.stage === "built") {
+      shelter = simulation.buildings.find(
+        (b) =>
+          b.kind === "house" &&
+          b.stage !== "built" &&
+          simulation.occupantsOf(b.id) < simulation.houseCapacity(b),
+      );
+    }
+    if (!shelter || shelter.stage === "built") {
+      return false;
+    }
+    agent.homeBuildingId = shelter.id; // a claimed bunk counts toward capacity
+    if (!shelter.ownerId) {
+      shelter.ownerId = agent.id;
+    }
+    agent.homeSite = undefined;
+    // Pitch in to raise it, like any communal project.
+    if (agent.inventory.wood >= buildCost("house")) {
+      this.headToProject(agent, simulation, shelter.door);
+    } else {
+      this.fetchWood(agent, simulation, buildCost("house"));
+    }
     return true;
   }
 

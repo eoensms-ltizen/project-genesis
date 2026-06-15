@@ -487,9 +487,10 @@ export class Simulation {
     door: Vec2;
     ownerId?: string;
   }): Building {
-    // Doors are placed as needed (road-facing, by size); each one is paid for in
-    // the building's wood cost (see buildCost's door allowance).
-    const doors = this.computeDoors(input.x, input.y, input.width, input.height);
+    // Civic buildings get road-facing doors as needed; a home keeps a single
+    // entrance (a house with two doors wastes wall and isn't how anyone builds).
+    const computed = this.computeDoors(input.x, input.y, input.width, input.height);
+    const doors = input.kind === "house" ? [computed[0]] : computed;
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
