@@ -8,6 +8,7 @@ import type {
   Building,
   BuildingKind,
   BuildingStage,
+  BuildPlanTile,
   GameClock,
   GameLogEntry,
   ItemStack,
@@ -244,6 +245,7 @@ type SavedAgent = Omit<
   | "haulItemId"
   | "carry"
   | "bedPos"
+  | "buildTarget"
 >;
 
 type SaveData = {
@@ -511,22 +513,92 @@ export class Simulation {
     };
   }
 
-  /** Paint a finished building as a walled room: perimeter walls, doorway(s), floor. */
-  private paintWalledRoom(building: Building) {
+  /**
+   * The wall/floor/door layout of a walled room as a list of tiles. Shared by
+   * both the instant paint (paintWalledRoom) and the piecemeal construction plan
+   * so the two never disagree about where a wall or doorway belongs.
+   */
+  private roomLayout(building: Building): BuildPlanTile[] {
     const { x, y, width, height } = building;
     const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    const tiles: BuildPlanTile[] = [];
     for (let fy = 0; fy < height; fy += 1) {
       for (let fx = 0; fx < width; fx += 1) {
         const pos = { x: x + fx, y: y + fy };
-        if (doorKeys.has(`${pos.x},${pos.y}`)) {
-          this.world.setTile(pos, "Door");
-        } else if (fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1) {
-          this.world.setTile(pos, "Wall");
-        } else {
-          this.world.setTile(pos, "Floor");
-        }
+        const t: BuildPlanTile["t"] = doorKeys.has(`${pos.x},${pos.y}`)
+          ? "Door"
+          : fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1
+            ? "Wall"
+            : "Floor";
+        tiles.push({ x: pos.x, y: pos.y, t });
       }
     }
+    return tiles;
+  }
+
+  /** Paint a finished building as a walled room: perimeter walls, doorway(s), floor. */
+  private paintWalledRoom(building: Building) {
+    for (const tile of this.roomLayout(building)) {
+      this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
+    }
+  }
+
+  /**
+   * Lazily build the construction plan for a walled-room building: every wall,
+   * floor and doorway tile, none yet laid. Residents place these one at a time.
+   * Floors and doors are listed before walls so the interior is laid (and the
+   * doorway kept passable) before the perimeter closes — nobody walls themself in.
+   */
+  ensureBuildPlan(building: Building): BuildPlanTile[] {
+    if (!building.plan) {
+      const layout = this.roomLayout(building);
+      const order = (t: BuildPlanTile["t"]): number => (t === "Wall" ? 2 : t === "Door" ? 1 : 0);
+      building.plan = layout
+        .map((tile) => ({ ...tile, done: false }))
+        .sort((a, b) => order(a.t) - order(b.t));
+    }
+    return building.plan;
+  }
+
+  /** The nearest not-yet-laid plan tile to a point, floors/doors before walls. */
+  nextBuildTile(building: Building, from: Vec2): BuildPlanTile | undefined {
+    const plan = building.plan;
+    if (!plan) {
+      return undefined;
+    }
+    let best: BuildPlanTile | undefined;
+    let bestKey = Number.POSITIVE_INFINITY;
+    for (const tile of plan) {
+      if (tile.done) {
+        continue;
+      }
+      // Walls come last (category 1) so the room is enclosed only once its
+      // interior and doorway are in place.
+      const category = tile.t === "Wall" ? 1 : 0;
+      const d = (tile.x - from.x) ** 2 + (tile.y - from.y) ** 2;
+      const key = category * 1e6 + d;
+      if (key < bestKey) {
+        bestKey = key;
+        best = tile;
+      }
+    }
+    return best;
+  }
+
+  /** Lay one plan tile: stamp the real tile and mark it done. */
+  placeBuildTile(building: Building, tile: BuildPlanTile) {
+    this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
+    const entry = building.plan?.find((p) => p.x === tile.x && p.y === tile.y);
+    if (entry) {
+      entry.done = true;
+    }
+    this.refreshDoors();
+    this.notifyChanged();
+  }
+
+  /** True once every tile in the construction plan has been laid. */
+  planComplete(building: Building): boolean {
+    return !!building.plan && building.plan.every((tile) => tile.done);
   }
 
   /** The bed tile inside a home, if one has been built. */
@@ -684,10 +756,16 @@ export class Simulation {
         building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
       }
     }
+    // Walled rooms are built tile-by-tile: the moment the foundation is laid,
+    // draw up the construction plan so residents have walls/floor/door to place.
+    if (stage === "foundation" && ROOM_BUILDING_KINDS.has(building.kind)) {
+      this.ensureBuildPlan(building);
+    }
     // Finished buildings are walled rooms (perimeter walls, a doorway, a floor
     // interior). Open spaces — parks, pastures, cemeteries — stay solid/special.
     if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
       this.paintWalledRoom(building);
+      building.plan = undefined;
       // A kitchen comes with a stove to cook at, set on its interior floor.
       if (building.kind === "kitchen") {
         const interior = this.interiorTiles(building);

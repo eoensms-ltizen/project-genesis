@@ -1,4 +1,5 @@
 import type { Agent, AgentState, Building, BuildingKind, ResourceKind, TileType, Vec2 } from "../types";
+import { ROOM_BUILDING_KINDS } from "../types";
 import type { Simulation } from "../Simulation";
 import { ADULT_AGE, ELDER_AGE } from "../Simulation";
 import { findPath, roundVec } from "../world/Pathfinder";
@@ -8,6 +9,10 @@ const MOVE_SPEED_TILES_PER_SECOND = 4.5;
 const CHOP_DURATION_SECONDS = 1.8;
 const PLAN_DURATION_SECONDS = 1.4;
 const BUILD_DURATION_SECONDS = 6;
+// Time to lay a single wall/floor/door tile by hand. A whole room is now raised
+// one tile at a time, so this is short — the build "duration" emerges from the
+// tile count and the walking between tiles.
+const PER_TILE_BUILD_SECONDS = 0.45;
 const EAT_DURATION_SECONDS = 1.5;
 const IDLE_THINK_SECONDS = 0.4;
 const SEARCH_FAIL_BACKOFF_SECONDS = 3;
@@ -224,11 +229,16 @@ export class AgentBrain {
         const targetTile = agent.target
           ? simulation.world.getTile(roundVec(agent.target))
           : undefined;
+        // A build already under way (foundation laid) → join in placing tiles.
+        // Otherwise stake the plot first, unless we've arrived on a staked site
+        // with the wood in hand to break ground right away.
         const arrival: AgentState =
-          (targetTile?.type === "HouseSite" || targetTile?.type === "HouseFoundation") &&
-          agent.inventory.wood >= cost
+          building?.stage === "foundation"
             ? "BuildHouse"
-            : "PlanHouse";
+            : (targetTile?.type === "HouseSite" || targetTile?.type === "HouseFoundation") &&
+                agent.inventory.wood >= cost
+              ? "BuildHouse"
+              : "PlanHouse";
         this.moveAlongPath(agent, simulation, deltaSeconds, arrival);
         break;
       }
@@ -337,6 +347,12 @@ export class AgentBrain {
       case "Furnish":
         this.furnish(agent, simulation, deltaSeconds);
         break;
+      case "MoveToBuildTile":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "BuildTile");
+        break;
+      case "BuildTile":
+        this.buildTile(agent, simulation, deltaSeconds);
+        break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
@@ -408,6 +424,28 @@ export class AgentBrain {
           agent.homeBuildingId = undefined;
         }
       }
+      // Already breaking ground on a home (their own site or a shared shelter):
+      // keep laying tiles rather than re-deciding where to live each time a meal
+      // or nightfall interrupts the build.
+      if (agent.projectBuildingId) {
+        const proj = simulation.getBuilding(agent.projectBuildingId);
+        if (proj && proj.stage !== "built") {
+          if (proj.stage === "foundation") {
+            this.setState(agent, simulation, "BuildHouse");
+            return;
+          }
+          if (agent.inventory.wood >= buildCost(proj.kind)) {
+            this.headToProject(agent, simulation, proj.door);
+            return;
+          }
+          if (this.fetchWood(agent, simulation, buildCost(proj.kind))) {
+            return;
+          }
+          this.headToProject(agent, simulation, proj.door);
+          return;
+        }
+        agent.projectBuildingId = undefined;
+      }
       if (this.tryClaimEmptyHouse(agent, simulation)) {
         return;
       }
@@ -442,10 +480,15 @@ export class AgentBrain {
       return;
     }
 
-    // Resume an unfinished construction project (e.g., after loading a save).
+    // Resume an unfinished construction project (e.g., a civic build, or after
+    // loading a save). A foundation already laid → carry on placing its tiles.
     if (agent.projectBuildingId) {
       const building = simulation.getBuilding(agent.projectBuildingId);
       if (building && building.stage !== "built") {
+        if (building.stage === "foundation") {
+          this.setState(agent, simulation, "BuildHouse");
+          return;
+        }
         if (agent.inventory.wood >= buildCost(building.kind)) {
           this.headToProject(agent, simulation, building.door);
           return;
@@ -1824,23 +1867,143 @@ export class AgentBrain {
     this.setState(agent, simulation, "Idle");
   }
 
+  /**
+   * Drive a walled-room build tile by tile. Each visit picks the nearest tile
+   * still to be laid, walks the builder to it, and lays it — so the room rises
+   * one wall/floor/door at a time (and several residents can raise one shelter
+   * together). Open spaces (park/pasture/cemetery) keep the old timed build.
+   */
   private buildHouse(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     const building = agent.projectBuildingId
       ? simulation.getBuilding(agent.projectBuildingId)
       : undefined;
-    if (!building) {
+    if (!building || building.stage === "built") {
+      agent.buildTarget = undefined;
       agent.target = undefined;
       agent.path = undefined;
       this.setState(agent, simulation, "Idle");
       return;
     }
 
-    if (agent.actionTimer === 0 && building.stage !== "foundation") {
+    if (!ROOM_BUILDING_KINDS.has(building.kind)) {
+      this.buildOpenSpace(agent, simulation, building, deltaSeconds);
+      return;
+    }
+
+    // Lay the foundation (and draw up the plan) the first time someone arrives.
+    // The builder who breaks ground pays the wood up front; the tiles then cost
+    // nothing to place, so multiple helpers can pitch in for free.
+    if (building.stage !== "foundation") {
+      const cost = buildCost(building.kind);
+      if (agent.inventory.wood < cost) {
+        if (!this.fetchWood(agent, simulation, cost)) {
+          this.backOff(agent, simulation);
+        }
+        return;
+      }
+      agent.inventory.wood = Math.max(0, agent.inventory.wood - cost);
       simulation.setBuildingStage(building, "foundation");
       simulation.log(
         building.kind === "house"
           ? tr(`${agent.name} started building a house.`, `${agent.name}이(가) 집을 짓기 시작했다.`)
           : tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${buildingNameKo(building.kind)}을(를) 짓기 시작했다.`),
+      );
+    }
+
+    simulation.ensureBuildPlan(building);
+    const next = simulation.nextBuildTile(building, agent.position);
+    if (!next) {
+      this.finishBuilding(agent, simulation, building);
+      return;
+    }
+
+    agent.buildTarget = { x: next.x, y: next.y };
+    agent.actionTimer = 0;
+    const path = findPath(simulation.world, {
+      start: agent.position,
+      goal: agent.buildTarget,
+      stopAdjacent: true,
+    });
+    if (!path) {
+      // Can't reach it (e.g. momentarily boxed in) — lay it in place rather than
+      // deadlock, then carry on with the next tile.
+      simulation.placeBuildTile(building, next);
+      return;
+    }
+    agent.target = { ...agent.buildTarget };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToBuildTile");
+  }
+
+  /** Arrived beside a planned tile: lay it, then move on to the next. */
+  private buildTile(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const building = agent.projectBuildingId
+      ? simulation.getBuilding(agent.projectBuildingId)
+      : undefined;
+    if (!building || !agent.buildTarget || building.stage === "built") {
+      agent.buildTarget = undefined;
+      this.setState(agent, simulation, building ? "BuildHouse" : "Idle");
+      return;
+    }
+
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < PER_TILE_BUILD_SECONDS) {
+      return;
+    }
+    agent.actionTimer = 0;
+
+    const tile = building.plan?.find(
+      (p) => p.x === agent.buildTarget!.x && p.y === agent.buildTarget!.y && !p.done,
+    );
+    if (tile) {
+      simulation.placeBuildTile(building, tile);
+    }
+    agent.buildTarget = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+
+    // Carry straight on with the next tile, unless night falls or survival calls
+    // — then hand back to the planner so basic needs come first.
+    if (
+      simulation.isNight() ||
+      agent.health.hunger >= HUNGER_SEEK_THRESHOLD ||
+      agent.health.stamina < STAMINA_EXHAUSTED
+    ) {
+      this.setState(agent, simulation, "Idle");
+    } else {
+      this.setState(agent, simulation, "BuildHouse");
+    }
+  }
+
+  /** Finish a walled room: stamp it built, move in (houses) or open it (civic). */
+  private finishBuilding(agent: Agent, simulation: Simulation, building: Building) {
+    simulation.setBuildingStage(building, "built");
+    simulation.releaseBuildingFootprint(building);
+    if (building.kind === "house") {
+      agent.home = simulation.houseInterior(building);
+      agent.homeSite = undefined;
+      simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
+    } else {
+      simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
+    }
+    agent.projectBuildingId = undefined;
+    agent.buildTarget = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /** The old single-timer build, kept for open spaces (park/pasture/cemetery). */
+  private buildOpenSpace(
+    agent: Agent,
+    simulation: Simulation,
+    building: Building,
+    deltaSeconds: number,
+  ) {
+    if (agent.actionTimer === 0 && building.stage !== "foundation") {
+      simulation.setBuildingStage(building, "foundation");
+      simulation.log(
+        tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${buildingNameKo(building.kind)}을(를) 짓기 시작했다.`),
       );
     }
 
@@ -1852,13 +2015,7 @@ export class AgentBrain {
     simulation.setBuildingStage(building, "built");
     simulation.releaseBuildingFootprint(building);
     agent.inventory.wood = Math.max(0, agent.inventory.wood - buildCost(building.kind));
-    if (building.kind === "house") {
-      agent.home = simulation.houseInterior(building);
-      agent.homeSite = undefined;
-      simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
-    } else {
-      simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
-    }
+    simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
     agent.projectBuildingId = undefined;
     agent.target = undefined;
     agent.path = undefined;

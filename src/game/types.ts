@@ -91,6 +91,8 @@ export type AgentState =
   | "CraftTool" // fashioning a tool (e.g. a pickaxe) from materials
   | "MoveToFurnish" // walking home to install furniture (a bed)
   | "Furnish" // building a piece of furniture
+  | "MoveToBuildTile" // walking to a single planned wall/floor/door tile
+  | "BuildTile" // laying one structure tile by hand
   | "Wander"
   | "Rest";
 
@@ -161,6 +163,19 @@ export type Building = {
   // Redevelopment tier (1+). Higher levels pack more output/capacity into the
   // same footprint; builders raise it in place when land pressure is high.
   level?: number;
+  // Construction plan: the individual wall/floor/door tiles that make up this
+  // room, each laid by hand one at a time. Present while the building is going
+  // up (stage "foundation"); residents tick `done` true as they place each tile.
+  plan?: BuildPlanTile[];
+};
+
+// One tile of a building's construction plan — a wall, floor, or doorway that a
+// resident walks to and lays individually (RimWorld-style piecemeal building).
+export type BuildPlanTile = {
+  x: number;
+  y: number;
+  t: "Wall" | "Floor" | "Door";
+  done?: boolean;
 };
 
 // Goods that can be physically carried and stockpiled. Wood is felled; stone and
@@ -259,6 +274,8 @@ export type Agent = {
   // This resident's own bed tile — they build and sleep in it (one bed each, no
   // sharing). Transient; re-derived if missing.
   bedPos?: Vec2;
+  // The single structure tile this builder is currently walking to / laying.
+  buildTarget?: Vec2;
 };
 
 export type GameLogEntry = {

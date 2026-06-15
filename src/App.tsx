@@ -75,6 +75,8 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   CraftTool: "도구 제작",
   MoveToFurnish: "가구 놓으러 이동",
   Furnish: "가구 제작",
+  MoveToBuildTile: "자재 놓으러 이동",
+  BuildTile: "벽 쌓기",
   Wander: "배회",
   Rest: "쉬기",
 };
