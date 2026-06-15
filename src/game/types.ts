@@ -256,6 +256,9 @@ export type Agent = {
   // A load being physically carried to the warehouse (any resource). Kept apart
   // from inventory.wood, which is the wood a builder consumes on site.
   carry?: { resource: ResourceKind; amount: number };
+  // This resident's own bed tile — they build and sleep in it (one bed each, no
+  // sharing). Transient; re-derived if missing.
+  bedPos?: Vec2;
 };
 
 export type GameLogEntry = {

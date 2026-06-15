@@ -243,6 +243,7 @@ type SavedAgent = Omit<
   | "fetchAmount"
   | "haulItemId"
   | "carry"
+  | "bedPos"
 >;
 
 type SaveData = {

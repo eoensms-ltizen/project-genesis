@@ -1486,12 +1486,22 @@ export class AgentBrain {
    * A resident furnishes their home with a bed (from wood) once they have one —
    * a comfort improvement so they rest properly instead of on the bare floor.
    */
+  /** True when this resident already has their own bed (no bed-sharing). */
+  private hasOwnBed(agent: Agent, simulation: Simulation): boolean {
+    return (
+      agent.bedPos !== undefined &&
+      simulation.world.getTile(agent.bedPos)?.type === "Bed"
+    );
+  }
+
   private tryBuildBed(agent: Agent, simulation: Simulation): boolean {
     if (!agent.home || !agent.homeBuildingId) {
       return false;
     }
     const home = simulation.getBuilding(agent.homeBuildingId);
-    if (!home || home.kind !== "house" || home.stage !== "built" || simulation.hasBed(home)) {
+    // Each resident builds their OWN bed (no sharing); skip only if they already
+    // have one or the home isn't built yet.
+    if (!home || home.kind !== "house" || home.stage !== "built" || this.hasOwnBed(agent, simulation)) {
       return false;
     }
     if (agent.inventory.wood < BED_WOOD_COST) {
@@ -1551,11 +1561,12 @@ export class AgentBrain {
     const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
     if (agent.target && home && simulation.world.getTile(roundVec(agent.target))?.type === "Floor") {
       const pos = roundVec(agent.target);
-      // A bed comes first; once there's a bed, the next piece is a dining table.
-      if (!simulation.hasBed(home) && agent.inventory.wood >= BED_WOOD_COST) {
+      // The resident's own bed comes first; once they have one, a dining table.
+      if (!this.hasOwnBed(agent, simulation) && agent.inventory.wood >= BED_WOOD_COST) {
         simulation.world.setTile(pos, "Bed");
+        agent.bedPos = { ...pos }; // this bed is theirs
         agent.inventory.wood -= BED_WOOD_COST;
-        simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 침대를 놓았다. 🛏️`), [agent]);
+        simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 자기 침대를 놓았다. 🛏️`), [agent]);
       } else if (!simulation.hasTable(home) && agent.inventory.wood >= TABLE_WOOD_COST) {
         simulation.world.setTile(pos, "Table");
         agent.inventory.wood -= TABLE_WOOD_COST;
@@ -2570,17 +2581,14 @@ export class AgentBrain {
     this.setState(agent, simulation, resume ?? "Idle");
   }
 
-  /** Where a resident lies down: their bed if they have one, else home, else here. */
+  /** Where a resident lies down: their OWN bed if they have one, else home floor. */
   private sleepSpot(agent: Agent, simulation: Simulation): Vec2 | undefined {
     if (!agent.home) {
       return undefined;
     }
-    if (agent.homeBuildingId) {
-      const home = simulation.getBuilding(agent.homeBuildingId);
-      const bed = home ? simulation.bedOf(home) : undefined;
-      if (bed) {
-        return bed;
-      }
+    // Only their own bed — never pile onto someone else's.
+    if (this.hasOwnBed(agent, simulation)) {
+      return agent.bedPos;
     }
     return agent.home;
   }
