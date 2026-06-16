@@ -255,6 +255,13 @@ export class PixiRenderer {
           drawRoomMarker(this.worldGraphics, building);
           continue;
         }
+        // A walled room under construction: the world layer already paints the
+        // foundation ground and each wall/floor/door tile the moment it's laid, so
+        // the room visibly rises on its plot. Skip the solid foundation block that
+        // would otherwise hide the work in progress.
+        if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "foundation") {
+          continue;
+        }
         drawBuilding(this.worldGraphics, building, this.flatBuildings);
       }
     }

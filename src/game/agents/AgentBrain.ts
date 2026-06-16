@@ -97,6 +97,15 @@ const HUNGER_SEEK_THRESHOLD = 65;
 const HUNGER_SNACK_THRESHOLD = 40;
 const STAMINA_EXHAUSTED = 25;
 const STAMINA_TIRED = 70;
+// Night is no longer forced sleep: the well-rested may work or wander through
+// the dark. But night toil drains stamina hard (NIGHT_STAMINA_FACTOR× the day
+// rate for both passive activity and discrete labour), so once a resident dips
+// below NIGHT_REST_STAMINA the dark pulls them to bed for the rest of the night.
+const NIGHT_STAMINA_FACTOR = 3;
+const NIGHT_REST_STAMINA = 55;
+// Passive stamina cost per second while up and about (steeper at night).
+const STAMINA_DRAIN_DAY = 0.06;
+const STAMINA_DRAIN_NIGHT = 0.6;
 
 const CHAT_DURATION_SECONDS = 2.5;
 const CHAT_COOLDOWN_SECONDS = 40;
@@ -205,11 +214,20 @@ export class AgentBrain {
   update(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     const hungerRate = agent.state === "Sleep" ? 0.12 : 0.35;
     agent.health.hunger = Math.min(100, agent.health.hunger + deltaSeconds * hungerRate);
-    agent.health.stamina = Math.max(0, agent.health.stamina - deltaSeconds * 0.06);
+    // Being up and about costs stamina — far more so at night (see the night
+    // rules above). Sleeping and resting recover it, so they don't pay this.
+    const recovering = agent.state === "Sleep" || agent.state === "Rest";
+    const drainRate = !recovering && simulation.isNight() ? STAMINA_DRAIN_NIGHT : STAMINA_DRAIN_DAY;
+    agent.health.stamina = Math.max(0, agent.health.stamina - deltaSeconds * drainRate);
 
     if (agent.health.stamina < 12 && agent.state !== "Rest" && agent.state !== "Sleep") {
       this.abandonTask(agent, simulation);
-      this.setState(agent, simulation, "Rest");
+      // Running on empty after dark: turn in for the night rather than catnap.
+      if (simulation.isNight()) {
+        this.goSleep(agent, simulation);
+      } else {
+        this.setState(agent, simulation, "Rest");
+      }
     }
 
     agent.socialCooldown = Math.max(0, (agent.socialCooldown ?? 15) - deltaSeconds);
@@ -412,9 +430,11 @@ export class AgentBrain {
   }
 
   private decideNextAction(agent: Agent, simulation: Simulation) {
-    // Night and acute survival are structural: they override every soft need,
-    // including the drive to build a first home.
-    if (simulation.isNight()) {
+    // Acute survival is structural. Night no longer forces sleep outright: a
+    // resident with stamina to spare may keep working or wander the dark (it just
+    // drains them fast). Once they tire past NIGHT_REST_STAMINA, the night sends
+    // them to bed — and sleep runs until dawn.
+    if (simulation.isNight() && agent.health.stamina < NIGHT_REST_STAMINA) {
       this.goSleep(agent, simulation);
       return;
     }
@@ -1213,7 +1233,7 @@ export class AgentBrain {
       simulation.world.setTile(agent.target, "Stump");
       simulation.releaseClaim(agent.target);
     }
-    agent.health.stamina = Math.max(0, agent.health.stamina - 8);
+    agent.health.stamina = Math.max(0, agent.health.stamina - 8 * this.nightFactor(simulation));
     // Before there's a warehouse, the feller carries the log themselves (it goes
     // straight into the first homes). Once a warehouse exists, the log is left as
     // a pile on the ground for a hauler to carry in — the producer keeps felling.
@@ -1477,7 +1497,7 @@ export class AgentBrain {
         );
       }
     }
-    agent.health.stamina = Math.max(0, agent.health.stamina - 8);
+    agent.health.stamina = Math.max(0, agent.health.stamina - 8 * this.nightFactor(simulation));
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -3049,6 +3069,11 @@ export class AgentBrain {
     agent.fetchAmount = undefined;
     agent.target = undefined;
     agent.path = undefined;
+  }
+
+  /** Multiplier on labour stamina cost: night work is far more tiring. */
+  private nightFactor(simulation: Simulation): number {
+    return simulation.isNight() ? NIGHT_STAMINA_FACTOR : 1;
   }
 
   private backOff(agent: Agent, simulation: Simulation) {
