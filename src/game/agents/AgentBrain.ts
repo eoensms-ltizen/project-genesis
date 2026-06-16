@@ -1683,6 +1683,44 @@ export class AgentBrain {
     return t === "Bed" || t === "BedSite";
   }
 
+  /** Number of built beds (head tiles) inside a home. */
+  private bedCountIn(simulation: Simulation, home: Building): number {
+    return simulation
+      .interiorTiles(home)
+      .filter((t) => simulation.world.getTile(t)?.type === "Bed").length;
+  }
+
+  /**
+   * Adopt an existing bed in this home that no living resident owns (a dead
+   * occupant's bed, or one forgotten across a reload). Returns true if claimed.
+   * This is what keeps beds from multiplying: a bedless resident reuses a spare
+   * bed instead of building yet another.
+   */
+  private claimUnownedBed(agent: Agent, simulation: Simulation, home: Building): boolean {
+    const ownedKeys = new Set(
+      simulation.agents
+        .filter((a) => a !== agent && a.bedPos)
+        .map((a) => `${a.bedPos!.x},${a.bedPos!.y}`),
+    );
+    for (const tile of simulation.interiorTiles(home)) {
+      if (
+        simulation.world.getTile(tile)?.type === "Bed" &&
+        !ownedKeys.has(`${tile.x},${tile.y}`)
+      ) {
+        agent.bedPos = { ...tile };
+        // Pick up the adjoining foot tile, if this is a two-tile bed.
+        agent.bedFoot = [
+          { x: tile.x + 1, y: tile.y },
+          { x: tile.x - 1, y: tile.y },
+          { x: tile.x, y: tile.y + 1 },
+          { x: tile.x, y: tile.y - 1 },
+        ].find((p) => simulation.world.getTile(p)?.type === "BedFoot");
+        return true;
+      }
+    }
+    return false;
+  }
+
   private tryBuildBed(agent: Agent, simulation: Simulation): boolean {
     if (!agent.home || !agent.homeBuildingId) {
       return false;
@@ -1693,9 +1731,19 @@ export class AgentBrain {
     if (!home || home.kind !== "house" || home.stage !== "built" || this.hasOwnBed(agent, simulation)) {
       return false;
     }
-    // Reserve the bed plot up front so it's visible (and inspectable as a "bed
-    // site") while the resident goes off to fetch wood — you can see it coming.
     if (!this.hasBedPlot(agent, simulation)) {
+      // Before building a fresh bed, adopt an existing one with no living owner —
+      // a bed left by someone who died, or one this resident forgot (bedPos isn't
+      // persisted across reloads). This stops beds piling up to fill the room.
+      if (this.claimUnownedBed(agent, simulation, home)) {
+        return false; // they have a bed now; nothing to build
+      }
+      // Never crowd a home with more beds than it can house.
+      if (this.bedCountIn(simulation, home) >= simulation.houseCapacity(home)) {
+        return false;
+      }
+      // Reserve the bed plot up front so it's visible (and inspectable as a "bed
+      // site") while the resident goes off to fetch wood — you can see it coming.
       const plot = simulation.reserveBedPlot(home);
       if (!plot) {
         return false;
@@ -1979,7 +2027,10 @@ export class AgentBrain {
     // (park, pasture, cemetery) keep their 3x3 yard.
     const SIZES: Partial<Record<BuildingKind, [number, number]>> = {
       warehouse: [4, 4],
-      kitchen: [3, 3],
+      // A 4×4 kitchen has a 2×2 interior: the stove sits on one tile and the cook
+      // stands on the floor beside it (a 3×3 left no room — the stove WAS the
+      // whole interior, so cooks ended up standing on it).
+      kitchen: [4, 4],
       church: [3, 3],
       powerplant: [3, 3],
       factory: [3, 3],
@@ -2061,7 +2112,8 @@ export class AgentBrain {
       return false;
     }
 
-    const path = findPath(simulation.world, { start: agent.position, goal: stove });
+    // Stand beside the (solid) stove to cook, not on it.
+    const path = findPath(simulation.world, { start: agent.position, goal: stove, stopAdjacent: true });
     if (!path) {
       return false;
     }
@@ -3186,7 +3238,12 @@ export class AgentBrain {
       const replanned = findPath(simulation.world, {
         start: agent.position,
         goal: agent.target,
-        stopAdjacent: nextState === "ChopTree" || nextState === "Mine",
+        // Stop next to the goal whenever the goal tile itself can't be stood on
+        // (a tree, rock, or the solid stove) — otherwise path right onto it.
+        stopAdjacent:
+          nextState === "ChopTree" ||
+          nextState === "Mine" ||
+          !simulation.world.isWalkable(agent.target),
       });
       if (!replanned) {
         simulation.log(tr(`${agent.name} is blocked and gave up.`, `${agent.name}이(가) 길이 막혀 포기했다.`));

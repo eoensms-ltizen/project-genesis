@@ -956,8 +956,18 @@ export class Simulation {
       // A kitchen comes with a stove to cook at, set on its interior floor.
       if (building.kind === "kitchen") {
         const interior = this.interiorTiles(building);
-        if (interior.length > 0) {
-          this.world.setTile(interior[0], "Stove");
+        // The stove is solid, so set it on the interior tile FARTHEST from the
+        // doorway — that keeps the entrance and the floor beside it clear for the
+        // cook to stand on, rather than walling the room off.
+        const door = this.buildingDoors(building)[0];
+        const spot = interior
+          .slice()
+          .sort(
+            (a, b) =>
+              Math.hypot(b.x - door.x, b.y - door.y) - Math.hypot(a.x - door.x, a.y - door.y),
+          )[0];
+        if (spot) {
+          this.world.setTile(spot, "Stove");
         }
       }
     } else {

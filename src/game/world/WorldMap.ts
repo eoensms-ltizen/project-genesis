@@ -29,8 +29,9 @@ const MOVE_COSTS: Record<TileType, number> = {
   RockGranite: Number.POSITIVE_INFINITY,
   OreIron: Number.POSITIVE_INFINITY,
   RockFloor: 1,
-  // Furniture sits on a room floor and is walkable (you stand at / lie on it).
-  Stove: 1,
+  // Furniture sits on a room floor. A bed is walkable (you lie on it); a stove is
+  // solid — you cook standing beside it, not on top of it.
+  Stove: Number.POSITIVE_INFINITY,
   Bed: 1,
   BedFoot: 1,
   BedSite: 1,
