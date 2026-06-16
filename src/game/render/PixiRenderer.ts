@@ -269,6 +269,11 @@ export class PixiRenderer {
           drawDoor(g, tx, ty, wallMask(world, tx, ty));
         } else if (isRockSolid(tile.type)) {
           drawRock(g, tx, ty, tile.type, rockMask(world, tx, ty));
+        } else if (tile.type === "Bed" || tile.type === "BedFoot") {
+          // A two-tile bed is drawn as one piece: the frame wraps both tiles and
+          // the mattress runs unbroken across the seam (needs the neighbour, so
+          // it can't live in the per-tile drawTile).
+          drawBed(g, world, tx, ty, tile.type === "Bed");
         } else {
           drawTile(g, tx, ty, tile.type);
         }
@@ -484,6 +489,74 @@ export class PixiRenderer {
   }
 }
 
+/**
+ * Draw one tile of a bed so the two tiles read as a single piece of furniture: a
+ * wooden frame wraps the whole bed, the mattress runs unbroken across the seam
+ * (the shared edge has no frame), the pillow sits at the head end, and a turned-
+ * down blanket covers the foot. Falls back to a tidy one-tile bed if it has no
+ * partner (a tiny room).
+ */
+function drawBed(graphics: Graphics, world: WorldMap, x: number, y: number, isHead: boolean) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const FRAME = 0x5c3f24;
+  const MATTRESS = 0x8a5a86;
+  const PILLOW = 0xf3eede;
+  const BLANKET = 0x6a4a80;
+  const want: TileType = isHead ? "BedFoot" : "Bed";
+  // Direction to the partner tile (the rest of this bed), if any.
+  const dirs = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+  ];
+  const pd = dirs.find((d) => world.getTile({ x: x + d.x, y: y + d.y })?.type === want);
+
+  // Floor underneath, then the frame fills the tile.
+  graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+  graphics.fill(tileColor("Floor"));
+  graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+  graphics.fill(FRAME);
+
+  // Mattress inset by the frame width on every side EXCEPT the shared seam, so it
+  // meets the partner's mattress with no frame line between them.
+  const F = 2;
+  const left = pd && pd.x === -1 ? 0 : F;
+  const right = pd && pd.x === 1 ? 0 : F;
+  const top = pd && pd.y === -1 ? 0 : F;
+  const bottom = pd && pd.y === 1 ? 0 : F;
+  const mx = px + left;
+  const my = py + top;
+  const mw = TILE_SIZE - left - right;
+  const mh = TILE_SIZE - top - bottom;
+  graphics.rect(mx, my, mw, mh);
+  graphics.fill(MATTRESS);
+
+  if (isHead) {
+    // Pillow at the end away from the partner (the head of the bed).
+    let r: [number, number, number, number];
+    if (pd && pd.x === 1) r = [mx + 1, my + 1, 4, mh - 2];
+    else if (pd && pd.x === -1) r = [mx + mw - 5, my + 1, 4, mh - 2];
+    else if (pd && pd.y === -1) r = [mx + 1, my + mh - 5, mw - 2, 4];
+    else r = [mx + 1, my + 1, mw - 2, 4]; // partner below, or lone bed → pillow on top
+    graphics.roundRect(r[0], r[1], r[2], r[3], 1.5);
+    graphics.fill(PILLOW);
+  } else {
+    // Turned-down blanket over the foot, with a lighter fold edge at the seam.
+    graphics.rect(mx, my, mw, mh);
+    graphics.fill(BLANKET);
+    if (pd && pd.x !== 0) {
+      const fold = pd.x === -1 ? mx + mw - 2 : mx + 1;
+      graphics.rect(fold, my, 1.5, mh);
+    } else {
+      const fold = pd && pd.y === -1 ? my + mh - 2 : my + 1;
+      graphics.rect(mx, fold, mw, 1.5);
+    }
+    graphics.fill({ color: 0xb6a6c8, alpha: 0.7 });
+  }
+}
+
 function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
@@ -618,32 +691,6 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xe7873c);
     graphics.circle(px + 8, py + 5, 1.3);
     graphics.fill({ color: 0x8a8f99, alpha: 0.8 });
-  }
-
-  if (type === "Bed") {
-    // The head tile of a 1×2/2×1 bed: a wooden frame, a quilted mattress, and a
-    // plump pillow. The frame fills the tile edge-to-edge so it reads continuous
-    // with the adjoining foot tile.
-    graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
-    graphics.fill(0x6b4a2c); // wooden frame
-    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-    graphics.fill(0x8a5a86); // mattress (warm plum)
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, 4);
-    graphics.fill(0xf0ead8); // pillow at the head
-    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, 4);
-    graphics.stroke({ color: 0xcfc6ad, width: 0.6 });
-  }
-
-  if (type === "BedFoot") {
-    // The foot tile: matching frame + mattress, with a folded blanket across it.
-    graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
-    graphics.fill(0x6b4a2c);
-    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-    graphics.fill(0x8a5a86);
-    graphics.rect(px + 1, py + 6, TILE_SIZE - 2, TILE_SIZE - 8);
-    graphics.fill(0x6f4f86); // blanket, slightly darker
-    graphics.rect(px + 1, py + 6, TILE_SIZE - 2, 1.2);
-    graphics.fill({ color: 0xb6a6c8, alpha: 0.7 });
   }
 
   if (type === "BedSite") {

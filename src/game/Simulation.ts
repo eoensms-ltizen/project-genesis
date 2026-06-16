@@ -845,7 +845,7 @@ export class Simulation {
    * face open ground so a real road-facing door can be cut. Returns the top-left,
    * or undefined if nothing adjoins cleanly. Prefers spots nearest `origin`.
    */
-  findAdjoiningHouseSite(
+  findAdjoiningSite(
     width: number,
     height: number,
     origin: Vec2,
@@ -978,6 +978,12 @@ export class Simulation {
         t !== "Wall" &&
         t !== "Door" &&
         t !== "Floor" &&
+        // Furniture means we're looking into a neighbour's interior — not a street.
+        t !== "Stove" &&
+        t !== "Bed" &&
+        t !== "BedFoot" &&
+        t !== "BedSite" &&
+        t !== "Table" &&
         t !== "RockSandstone" &&
         t !== "RockLimestone" &&
         t !== "RockGranite" &&

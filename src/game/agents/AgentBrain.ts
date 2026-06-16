@@ -1971,7 +1971,7 @@ export class AgentBrain {
     // raising two walls back to back. Fall back to a free-standing plot when no
     // neighbour can be cleanly abutted.
     const site =
-      simulation.findAdjoiningHouseSite(5, 5, roundVec(agent.position), isClaimed) ??
+      simulation.findAdjoiningSite(5, 5, roundVec(agent.position), isClaimed) ??
       simulation.world.findBuildingSite(agent.position, 5, 5, isClaimed, {
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
       });
@@ -2052,6 +2052,12 @@ export class AgentBrain {
         : policeSpot
           ? { x: Math.round(policeSpot.x), y: Math.round(policeSpot.y) }
           : agent.position;
+    // Village-centre walled buildings (warehouse, kitchen, church, station,
+    // police) join the cluster by sharing a wall with a neighbour — one wall, not
+    // two back to back. Nuisances (power plant/factory/smelter) and the remote
+    // cemetery, and the open yards (park/pasture), keep their own placement.
+    const adjoins =
+      ROOM_BUILDING_KINDS.has(kind) && !avoidsHomes && kind !== "cemetery";
     const site =
       kind === "cemetery"
         ? simulation.world.findBuildingSite(
@@ -2061,7 +2067,10 @@ export class AgentBrain {
             isClaimed,
             { far: true, minDistance: 16 },
           )
-        : simulation.world.findBuildingSite(origin, width, height, isClaimed, {
+        : (adjoins
+            ? simulation.findAdjoiningSite(width, height, roundVec(origin), isClaimed)
+            : undefined) ??
+          simulation.world.findBuildingSite(origin, width, height, isClaimed, {
             // Power plants and factories are nuisances — steer them away from homes.
             extraScore: avoidsHomes
               ? (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT
