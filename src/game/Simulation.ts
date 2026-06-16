@@ -386,6 +386,8 @@ export class Simulation {
       this.log(tr("A new valley is ready.", "새로운 골짜기가 준비되었다."));
     }
     this.refreshDoors();
+    // Heal any rooms a past redevelopment bug had stamped into solid blocks.
+    this.repairWalledRooms();
     this.recomputeAmbiance();
   }
 
@@ -552,6 +554,49 @@ export class Simulation {
     for (const tile of this.roomLayout(building)) {
       this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
     }
+  }
+
+  /** Furniture tiles that sit on a room's interior and must survive a re-tile. */
+  private static readonly FURNITURE_TILES: ReadonlySet<TileType> = new Set([
+    "Bed",
+    "BedFoot",
+    "BedSite",
+    "Table",
+    "Stove",
+  ]);
+
+  /** Re-tile a building as a walled room without clobbering interior furniture. */
+  private repaintWalledRoomKeepingFurniture(building: Building) {
+    for (const tile of this.roomLayout(building)) {
+      // Leave a furnished interior tile (a bed, table, stove) as it is.
+      if (
+        tile.t === "Floor" &&
+        Simulation.FURNITURE_TILES.has(this.world.getTile(tile)?.type as TileType)
+      ) {
+        continue;
+      }
+      this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
+    }
+  }
+
+  /**
+   * Repair walled-room buildings that were saved as solid "House" blocks (an old
+   * redevelopment bug stamped them solid, wiping the room). Repaints any built
+   * room building whose interior shows as solid "House" back into walls/floor/
+   * door; residents re-furnish. Run once after loading a save.
+   */
+  repairWalledRooms() {
+    for (const building of this.buildings) {
+      if (building.stage !== "built" || !ROOM_BUILDING_KINDS.has(building.kind)) {
+        continue;
+      }
+      const centre = this.world.getTile(this.houseInterior(building))?.type;
+      if (centre === "House") {
+        this.repaintWalledRoomKeepingFurniture(building);
+        this.reserveEntrance(building);
+      }
+    }
+    this.refreshDoors();
   }
 
   /** Paint a pasture as a fenced paddock: rail fence around the edge, one gate,
@@ -3459,14 +3504,12 @@ export class Simulation {
         this.expandHouseFootprint(building);
       }
     }
-    // Re-tile the (possibly grown) footprint, then keep every doorway a road so
-    // the rebuilt block is never sealed in.
-    for (const position of footprintTiles(building)) {
-      this.world.setTile(position, "House");
-    }
-    for (const door of this.buildingDoors(building)) {
-      this.world.setTile(door, "Road");
-    }
+    // A redeveloped house stays a walled room (perimeter walls, a doorway, a floor
+    // interior) — not a solid block. Re-tile the (possibly grown) footprint as a
+    // room, but keep any furniture the residents placed inside (beds, table, stove)
+    // rather than wiping it. (This used to stamp solid "House" tiles, which turned
+    // a furnished room into a featureless block on every redevelopment.)
+    this.repaintWalledRoomKeepingFurniture(building);
     this.reserveEntrance(building);
     const label =
       next >= 4
