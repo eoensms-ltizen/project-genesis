@@ -90,6 +90,11 @@ export class WorldMap {
 
   // Bumped on every tile change so the renderer can skip redrawing an unchanged world.
   private changeVersion = 0;
+  // Tile indices changed since the renderer last consumed them, so it can redraw
+  // just those (chunked) instead of the whole map. `dirtyAll` forces a full
+  // redraw (first frame, or after a wholesale rebuild like load/generation).
+  private dirtyTiles = new Set<number>();
+  private dirtyAll = true;
   // Built buildings are solid except their door tile, so residents enter only
   // through the doorway. Maintained by the simulation as buildings come and go.
   private doorTiles = new Set<number>();
@@ -185,11 +190,35 @@ export class WorldMap {
     if (tile && tile.type !== type) {
       tile.type = type;
       this.changeVersion += 1;
+      if (!this.dirtyAll) {
+        this.dirtyTiles.add(position.y * this.width + position.x);
+      }
     }
   }
 
   get version(): number {
     return this.changeVersion;
+  }
+
+  /** Force the next render to redraw every tile (after a wholesale rebuild). */
+  markAllDirty() {
+    this.dirtyAll = true;
+    this.dirtyTiles.clear();
+  }
+
+  /**
+   * Hand the renderer the tiles changed since last call and reset the set.
+   * `all` true means redraw everything; otherwise `tiles` lists changed indices.
+   */
+  consumeDirty(): { all: boolean; tiles: number[] } {
+    if (this.dirtyAll) {
+      this.dirtyAll = false;
+      this.dirtyTiles.clear();
+      return { all: true, tiles: [] };
+    }
+    const tiles = [...this.dirtyTiles];
+    this.dirtyTiles.clear();
+    return { all: false, tiles };
   }
 
   inBounds(position: Vec2): boolean {

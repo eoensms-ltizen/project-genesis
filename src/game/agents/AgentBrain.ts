@@ -20,7 +20,11 @@ const PER_TILE_BUILD_SECONDS = 0.45;
 const FOUNDATION_WOOD = 3;
 const WALL_TILE_WOOD = 1;
 const DOOR_TILE_WOOD = 2;
-const BUILD_CARRY_WOOD = 12; // most wood a builder hauls to site at once (= HAUL_CAPACITY)
+const BUILD_CARRY_WOOD = 12; // a generic load a builder hauls to site at once
+// A builder gathering for a known project fetches enough to finish it in one go,
+// up to this cap — so they fell/haul a whole load at once and then lay many
+// tiles, instead of a tree-per-wall. A 5×5 house needs ~21 wood.
+const BUILD_LOAD_MAX = 30;
 
 /** Wood a single plan tile costs to lay (floors are covered by the foundation). */
 function tileWood(t: BuildPlanTile["t"]): number {
@@ -698,6 +702,12 @@ export class AgentBrain {
       return true;
     }
 
+    // A build already under way nearby pulls in spare hands — many builders raise
+    // a house together rather than one plodding through it alone.
+    if (this.tryHelpBuild(agent, simulation)) {
+      return true;
+    }
+
     // Provisioning is need-driven from the very first resident, not gated on
     // reaching a later era: raise a warehouse to stockpile goods, then farm to
     // keep the larder full so hunger is met from stores rather than foraging.
@@ -1121,6 +1131,56 @@ export class AgentBrain {
     return this.startCommunalBuilding(agent, simulation, kind) ? "started" : "none";
   }
 
+  /**
+   * Pitch in on a nearby half-built room that still needs hands — a barn-raising.
+   * Several residents converging on one site (each grabbing a different tile via
+   * the plan's reservation) raise it far faster than one builder alone. Capped per
+   * building by how much is left, so a tiny room isn't swarmed. The helper keeps
+   * their own home; only true residents move in when it's done.
+   */
+  private tryHelpBuild(agent: Agent, simulation: Simulation): boolean {
+    if (agent.projectBuildingId) {
+      return false; // already committed to a build
+    }
+    let best: Building | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const b of simulation.buildings) {
+      // Help once the groundwork is down (a plan exists); skip un-staked sites.
+      if (b.stage !== "foundation" || !ROOM_BUILDING_KINDS.has(b.kind) || !b.plan) {
+        continue;
+      }
+      const undone = b.plan.filter((t) => !t.done);
+      // Every remaining tile already spoken for — no use crowding in.
+      if (undone.length === 0 || undone.every((t) => t.claimedBy)) {
+        continue;
+      }
+      const builders = simulation.agents.filter((a) => a.projectBuildingId === b.id).length;
+      // One extra pair of hands per ~3 tiles left, up to four on a big build.
+      const cap = Math.max(1, Math.min(4, Math.ceil(undone.length / 3)));
+      if (builders >= cap) {
+        continue;
+      }
+      const d = Math.abs(b.x - agent.position.x) + Math.abs(b.y - agent.position.y);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = b;
+      }
+    }
+    if (!best) {
+      return false;
+    }
+    agent.projectBuildingId = best.id;
+    simulation.log(tr(`${agent.name} pitched in on the build. 🔨`, `${agent.name}이(가) 건축을 거들기 시작했다. 🔨`));
+    const load = this.buildLoadTarget(best, simulation);
+    if (this.fetchWood(agent, simulation, load)) {
+      return true;
+    }
+    // The build is at foundation stage, so BuildHouse drives the per-tile walk
+    // from wherever the helper stands — no need to route to a door first.
+    this.setState(agent, simulation, "BuildHouse");
+    return true;
+  }
+
   private doJobWork(agent: Agent, simulation: Simulation): boolean {
     switch (agent.job) {
       case "cook":
@@ -1234,6 +1294,23 @@ export class AgentBrain {
       simulation.releaseClaim(agent.target);
     }
     agent.health.stamina = Math.max(0, agent.health.stamina - 8 * this.nightFactor(simulation));
+    // A builder felling to supply their own project (gatherWood set) keeps the
+    // log in hand and fells again until they're holding a whole load — so they
+    // arrive with enough wood to lay many tiles, not a tree-per-wall.
+    if (agent.gatherWood !== undefined) {
+      agent.inventory.wood += 1;
+      simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
+      agent.target = undefined;
+      agent.path = undefined;
+      if (agent.inventory.wood < agent.gatherWood) {
+        // Still short of the load — go fell the next tree right away.
+        this.setState(agent, simulation, "FindTree");
+      } else {
+        agent.gatherWood = undefined; // load gathered — back to building
+        this.setState(agent, simulation, "Idle");
+      }
+      return;
+    }
     // Before there's a warehouse, the feller carries the log themselves (it goes
     // straight into the first homes). Once a warehouse exists, the log is left as
     // a pile on the ground for a hauler to carry in — the producer keeps felling.
@@ -1266,6 +1343,7 @@ export class AgentBrain {
       return false;
     }
     if (!simulation.hasAnyWarehouse()) {
+      agent.gatherWood = cost;
       this.setState(agent, simulation, "FindTree");
       return true;
     }
@@ -1282,10 +1360,13 @@ export class AgentBrain {
       }
     }
     // The warehouse can't cover it: top it up. Haul a loose wood pile if there is
-    // one, otherwise fell a fresh tree to make one.
+    // one, otherwise fell fresh trees. We're felling specifically to supply this
+    // errand, so carry the logs and keep chopping until we hold `cost` (a whole
+    // load) — not a tree, a wall, a tree, a wall.
     if (simulation.hasHaulable("wood") && this.findHaulWork(agent, simulation, "wood")) {
       return true;
     }
+    agent.gatherWood = cost;
     this.setState(agent, simulation, "FindTree");
     return true;
   }
@@ -2004,6 +2085,32 @@ export class AgentBrain {
   }
 
   /**
+   * Wood to haul on one supply run for a build: enough to finish what's left
+   * (foundation if unlaid + each remaining wall/door tile), capped at
+   * BUILD_LOAD_MAX so a builder fells/withdraws a whole load and then lays many
+   * tiles. Floors are free (covered by the foundation). With several builders
+   * sharing a room each fetches the full remainder — a little slack, but it keeps
+   * them all working rather than starved.
+   */
+  private buildLoadTarget(building: Building, simulation: Simulation): number {
+    let left = building.stage === "foundation" ? 0 : FOUNDATION_WOOD;
+    for (const tile of building.plan ?? []) {
+      if (!tile.done) {
+        left += tileWood(tile.t);
+      }
+    }
+    // Split the remaining need across everyone working this build, so three
+    // builders don't each fell a whole house's worth of timber. Solo builders
+    // still fetch the lot (capped) and finish in one or two runs.
+    const builders = Math.max(
+      1,
+      simulation.agents.filter((a) => a.projectBuildingId === building.id).length,
+    );
+    const share = Math.ceil(left / builders);
+    return Math.max(FOUNDATION_WOOD, Math.min(BUILD_LOAD_MAX, share));
+  }
+
+  /**
    * Drive a walled-room build tile by tile. Each visit picks the nearest tile
    * still to be laid, walks the builder to it, and lays it — so the room rises
    * one wall/floor/door at a time (and several residents can raise one shelter
@@ -2026,11 +2133,16 @@ export class AgentBrain {
       return;
     }
 
+    // How much wood to haul per supply run: enough to finish this building in one
+    // trip (capped), so a builder fells/withdraws a whole load and then lays many
+    // tiles, rather than fetching a tree's worth per wall.
+    const load = this.buildLoadTarget(building, simulation);
+
     // Lay the foundation (and draw up the plan) the first time someone arrives:
     // pay the groundwork/floor material now. If short, fetch a fresh load first.
     if (building.stage !== "foundation") {
       if (agent.inventory.wood < FOUNDATION_WOOD) {
-        if (!this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
+        if (!this.fetchWood(agent, simulation, load)) {
           this.backOff(agent, simulation);
         }
         return;
@@ -2045,7 +2157,7 @@ export class AgentBrain {
     }
 
     simulation.ensureBuildPlan(building);
-    const next = simulation.nextBuildTile(building, agent.position);
+    const next = simulation.nextBuildTile(building, agent.position, agent.id);
     if (!next) {
       this.finishBuilding(agent, simulation, building);
       return;
@@ -2054,7 +2166,8 @@ export class AgentBrain {
     // Out of materials for the next piece? Trek back for a full load, then carry
     // on laying tiles — no warehouse round-trip per single tile.
     if (agent.inventory.wood < tileWood(next.t)) {
-      if (!this.fetchWood(agent, simulation, BUILD_CARRY_WOOD)) {
+      simulation.releaseBuildClaims(building, agent.id); // free our tile while away
+      if (!this.fetchWood(agent, simulation, load)) {
         this.backOff(agent, simulation);
       }
       return;
@@ -2135,9 +2248,15 @@ export class AgentBrain {
       this.relocateBedInto(agent, simulation, building);
       simulation.log(tr(`${agent.name} finished a private bedroom. 🛏️`, `${agent.name}이(가) 개인 침실을 완성했다. 🛏️`), [agent]);
     } else if (building.kind === "house") {
-      agent.home = simulation.houseInterior(building);
-      agent.homeSite = undefined;
-      simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
+      // Whoever lays the last tile finishes it — but only the house's own
+      // residents move in. A neighbour who just pitched in keeps their own home.
+      if (!agent.home || agent.homeBuildingId === building.id) {
+        agent.home = simulation.houseInterior(building);
+        agent.homeSite = undefined;
+        simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
+      } else {
+        simulation.log(tr(`${agent.name} helped finish a house. 🔨`, `${agent.name}이(가) 이웃의 집을 같이 완성했다. 🔨`), [agent]);
+      }
     } else {
       simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
     }
@@ -2809,11 +2928,16 @@ export class AgentBrain {
       shelter.ownerId = agent.id;
     }
     agent.homeSite = undefined;
+    // Actually join the build crew: own the project so the build state machine
+    // (and tile reservation) puts this resident to work laying tiles too —
+    // several hands raise the shelter together.
+    agent.projectBuildingId = shelter.id;
     // Pitch in to raise it, like any communal project.
-    if (agent.inventory.wood >= buildCost("house")) {
+    const load = this.buildLoadTarget(shelter, simulation);
+    if (agent.inventory.wood >= load) {
       this.headToProject(agent, simulation, shelter.door);
     } else {
-      this.fetchWood(agent, simulation, buildCost("house"));
+      this.fetchWood(agent, simulation, load);
     }
     return true;
   }
@@ -3066,6 +3190,12 @@ export class AgentBrain {
     if (agent.state === "MoveToCraft" || agent.state === "CraftTool") {
       simulation.pickaxeInProgress = false;
     }
+    // Free any build tile they'd claimed so another builder can take it.
+    if (agent.projectBuildingId) {
+      simulation.releaseBuildClaims(simulation.getBuilding(agent.projectBuildingId), agent.id);
+    }
+    agent.buildTarget = undefined;
+    agent.gatherWood = undefined;
     agent.fetchAmount = undefined;
     agent.target = undefined;
     agent.path = undefined;

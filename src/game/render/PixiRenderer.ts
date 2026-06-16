@@ -4,6 +4,9 @@ import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
 const TILE_SIZE = 16;
+// Terrain is drawn in square blocks of this many tiles, each a separate Graphics,
+// so changing one tile only rebuilds its block (8×8 = 64 tiles) instead of all.
+const CHUNK = 8;
 
 type RendererOptions = {
   onTileClick: (position: Vec2) => void;
@@ -17,12 +20,20 @@ export class PixiRenderer {
   private readonly agentLayer = new Container();
   // Graphics are created once and reused: recreating them every frame leaks
   // GPU geometry (removeChildren does not destroy) and crashes mobile browsers.
-  private readonly worldGraphics = new Graphics();
+  // The terrain is split into CHUNK×CHUNK-tile blocks, each its own Graphics, so a
+  // single tile change (e.g. a wall laid mid-build) only rebuilds its chunk and
+  // its neighbours — not all 4096 tiles. Building bodies sit in their own layer,
+  // rebuilt only when the building set changes.
+  private readonly terrainLayer = new Container();
+  private chunkGraphics: Graphics[] = [];
+  private chunkCols = 0;
+  private chunkRows = 0;
+  private readonly buildingGraphics = new Graphics();
   private readonly overlayGraphics = new Graphics();
   private readonly agentGraphics = new Graphics();
   private readonly nightLayer = new Container();
   private readonly nightGraphics = new Graphics();
-  private lastWorldVersion = -1;
+  private lastBuildingsKey = "";
   private flatBuildings = false;
   private initialized = false;
   // Cached lamp tile centres, refreshed only when the world changes.
@@ -57,7 +68,10 @@ export class PixiRenderer {
     this.app.stage.addChild(this.worldLayer);
     this.app.stage.addChild(this.agentLayer);
     this.app.stage.addChild(this.nightLayer);
-    this.worldLayer.addChild(this.worldGraphics);
+    // z-order within the world: terrain chunks, then building bodies above them
+    // (so a raised 2.5D body overlaps the terrain behind it), then loose overlays.
+    this.worldLayer.addChild(this.terrainLayer);
+    this.worldLayer.addChild(this.buildingGraphics);
     this.worldLayer.addChild(this.overlayGraphics);
     this.agentLayer.addChild(this.agentGraphics);
     this.nightLayer.addChild(this.nightGraphics);
@@ -196,13 +210,70 @@ export class PixiRenderer {
     this.panY = 0;
   }
 
-  /** Toggle the 2.5D building "lids" on/off; forces a world redraw. */
+  /** Toggle the 2.5D building "lids" on/off; forces the building layer to redraw. */
   setFlatBuildings(flat: boolean) {
     if (this.flatBuildings === flat) {
       return;
     }
     this.flatBuildings = flat;
-    this.lastWorldVersion = -1; // force the world layer to redraw
+    this.lastBuildingsKey = ""; // force the building layer to redraw next frame
+  }
+
+  /** Create one Graphics per CHUNK×CHUNK block of tiles, once we know the size. */
+  private ensureChunks(world: WorldMap) {
+    const cols = Math.ceil(world.width / CHUNK);
+    const rows = Math.ceil(world.height / CHUNK);
+    if (this.chunkCols === cols && this.chunkRows === rows && this.chunkGraphics.length > 0) {
+      return;
+    }
+    for (const g of this.chunkGraphics) {
+      g.destroy();
+    }
+    this.terrainLayer.removeChildren();
+    this.chunkCols = cols;
+    this.chunkRows = rows;
+    this.chunkGraphics = [];
+    for (let i = 0; i < cols * rows; i += 1) {
+      const g = new Graphics();
+      this.chunkGraphics.push(g);
+      this.terrainLayer.addChild(g);
+    }
+  }
+
+  /** Chunk index containing tile (tx,ty), or -1 if out of bounds. */
+  private chunkAt(tx: number, ty: number): number {
+    if (tx < 0 || ty < 0 || tx >= this.chunkCols * CHUNK || ty >= this.chunkRows * CHUNK) {
+      return -1;
+    }
+    return Math.floor(ty / CHUNK) * this.chunkCols + Math.floor(tx / CHUNK);
+  }
+
+  /** Redraw every tile of one chunk into its own Graphics. */
+  private drawChunk(world: WorldMap, ci: number) {
+    const g = this.chunkGraphics[ci];
+    if (!g) {
+      return;
+    }
+    g.clear();
+    const cx = (ci % this.chunkCols) * CHUNK;
+    const cy = Math.floor(ci / this.chunkCols) * CHUNK;
+    for (let ty = cy; ty < cy + CHUNK && ty < world.height; ty += 1) {
+      for (let tx = cx; tx < cx + CHUNK && tx < world.width; tx += 1) {
+        const tile = world.getTile({ x: tx, y: ty });
+        if (!tile) {
+          continue;
+        }
+        if (tile.type === "Wall") {
+          drawWall(g, tx, ty, wallMask(world, tx, ty));
+        } else if (tile.type === "Door") {
+          drawDoor(g, tx, ty, wallMask(world, tx, ty));
+        } else if (isRockSolid(tile.type)) {
+          drawRock(g, tx, ty, tile.type, rockMask(world, tx, ty));
+        } else {
+          drawTile(g, tx, ty, tile.type);
+        }
+      }
+    }
   }
 
   render(
@@ -222,21 +293,14 @@ export class PixiRenderer {
     }
 
     this.layoutWorld(world);
+    this.ensureChunks(world);
 
-    if (world.version !== this.lastWorldVersion) {
-      this.lastWorldVersion = world.version;
-      this.worldGraphics.clear();
+    // Terrain: redraw only the chunks whose tiles changed since last frame (plus
+    // neighbours, so wall/rock autotiling seams across chunk borders stay right).
+    const dirty = world.consumeDirty();
+    if (dirty.all) {
       this.lampCenters = [];
       for (const tile of world.tiles) {
-        if (tile.type === "Wall") {
-          drawWall(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
-        } else if (tile.type === "Door") {
-          drawDoor(this.worldGraphics, tile.x, tile.y, wallMask(world, tile.x, tile.y));
-        } else if (isRockSolid(tile.type)) {
-          drawRock(this.worldGraphics, tile.x, tile.y, tile.type, rockMask(world, tile.x, tile.y));
-        } else {
-          drawTile(this.worldGraphics, tile.x, tile.y, tile.type);
-        }
         if (tile.type === "Lamp") {
           this.lampCenters.push({
             x: tile.x * TILE_SIZE + TILE_SIZE / 2,
@@ -244,25 +308,51 @@ export class PixiRenderer {
           });
         }
       }
+      for (let ci = 0; ci < this.chunkGraphics.length; ci += 1) {
+        this.drawChunk(world, ci);
+      }
+    } else if (dirty.tiles.length > 0) {
+      const chunks = new Set<number>();
+      for (const index of dirty.tiles) {
+        const tx = index % world.width;
+        const ty = Math.floor(index / world.width);
+        // The tile's own chunk, plus any neighbour chunk (autotile reads the 8
+        // surrounding tiles, so a border change can alter a neighbour's seams).
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const ci = this.chunkAt(tx + dx, ty + dy);
+            if (ci >= 0) {
+              chunks.add(ci);
+            }
+          }
+        }
+      }
+      for (const ci of chunks) {
+        this.drawChunk(world, ci);
+      }
+    }
+
+    // Building bodies live in their own layer, rebuilt only when the building set
+    // or stages change — construction tile changes never touch this.
+    const buildingsKey =
+      (this.flatBuildings ? "f" : "r") +
+      buildings.map((b) => `${b.id}:${b.stage}:${b.level ?? 0}`).join("|");
+    if (dirty.all || buildingsKey !== this.lastBuildingsKey) {
+      this.lastBuildingsKey = buildingsKey;
+      this.buildingGraphics.clear();
       // Draw north-to-south so a building's raised body overlaps the one behind
-      // it (a simple 2.5D depth order). A finished home is drawn from its wall/
-      // floor/door tiles instead of a solid block, so skip it here.
+      // it (a simple 2.5D depth order). A finished room is drawn from its wall/
+      // floor/door tiles (in the terrain layer), so it only gets an emblem here;
+      // a room under construction shows its rising tiles and gets no block.
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
-        // Finished buildings are drawn from their wall/floor/door tiles; a small
-        // emblem on the floor marks what each room is for. Open spaces still draw
-        // as their own shapes.
         if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "built") {
-          drawRoomMarker(this.worldGraphics, building);
+          drawRoomMarker(this.buildingGraphics, building);
           continue;
         }
-        // A walled room under construction: the world layer already paints the
-        // foundation ground and each wall/floor/door tile the moment it's laid, so
-        // the room visibly rises on its plot. Skip the solid foundation block that
-        // would otherwise hide the work in progress.
         if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "foundation") {
           continue;
         }
-        drawBuilding(this.worldGraphics, building, this.flatBuildings);
+        drawBuilding(this.buildingGraphics, building, this.flatBuildings);
       }
     }
 

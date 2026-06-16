@@ -246,6 +246,7 @@ type SavedAgent = Omit<
   | "carry"
   | "bedPos"
   | "buildTarget"
+  | "gatherWood"
 >;
 
 type SaveData = {
@@ -569,8 +570,13 @@ export class Simulation {
     return building.plan;
   }
 
-  /** The nearest not-yet-laid plan tile to a point, floors/doors before walls. */
-  nextBuildTile(building: Building, from: Vec2): BuildPlanTile | undefined {
+  /**
+   * The nearest not-yet-laid plan tile to a point, floors/doors before walls.
+   * Tiles another builder has already claimed (is walking to) are skipped, and
+   * the chosen tile is claimed for `builderId` — so several builders raising one
+   * room each grab a different tile instead of all converging on the same one.
+   */
+  nextBuildTile(building: Building, from: Vec2, builderId?: string): BuildPlanTile | undefined {
     const plan = building.plan;
     if (!plan) {
       return undefined;
@@ -579,6 +585,10 @@ export class Simulation {
     let bestKey = Number.POSITIVE_INFINITY;
     for (const tile of plan) {
       if (tile.done) {
+        continue;
+      }
+      // Leave tiles another builder is already on their way to lay.
+      if (tile.claimedBy && tile.claimedBy !== builderId) {
         continue;
       }
       // Walls come last (category 1) so the room is enclosed only once its
@@ -591,7 +601,28 @@ export class Simulation {
         best = tile;
       }
     }
+    if (best && builderId) {
+      // Release any other tile this builder had claimed, then claim this one.
+      for (const tile of plan) {
+        if (tile.claimedBy === builderId && tile !== best) {
+          tile.claimedBy = undefined;
+        }
+      }
+      best.claimedBy = builderId;
+    }
     return best;
+  }
+
+  /** Drop every build-tile claim held by a builder (e.g. when they down tools). */
+  releaseBuildClaims(building: Building | undefined, builderId: string) {
+    if (!building?.plan) {
+      return;
+    }
+    for (const tile of building.plan) {
+      if (tile.claimedBy === builderId) {
+        tile.claimedBy = undefined;
+      }
+    }
   }
 
   /** Lay one plan tile: stamp the real tile and mark it done. */
@@ -600,6 +631,7 @@ export class Simulation {
     const entry = building.plan?.find((p) => p.x === tile.x && p.y === tile.y);
     if (entry) {
       entry.done = true;
+      entry.claimedBy = undefined;
     }
     this.refreshDoors();
     this.notifyChanged();

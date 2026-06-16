@@ -184,6 +184,9 @@ export type BuildPlanTile = {
   y: number;
   t: "Wall" | "Floor" | "Door";
   done?: boolean;
+  // Id of the builder currently walking to lay this tile, so several builders can
+  // raise one room at once without two of them converging on the same tile.
+  claimedBy?: string;
 };
 
 // Goods that can be physically carried and stockpiled. Wood is felled; stone and
@@ -284,6 +287,10 @@ export type Agent = {
   bedPos?: Vec2;
   // The single structure tile this builder is currently walking to / laying.
   buildTarget?: Vec2;
+  // While set, this builder is on a felling errand for their project: they keep
+  // chopping (carrying the logs) until holding this much wood, then go build —
+  // so they fell a whole load at once instead of a tree-per-wall. Transient.
+  gatherWood?: number;
 };
 
 export type GameLogEntry = {
