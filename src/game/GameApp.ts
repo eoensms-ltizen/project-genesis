@@ -101,6 +101,8 @@ export class GameApp {
       structureTile === "Door" ||
       structureTile === "Floor" ||
       structureTile === "Bed" ||
+      structureTile === "BedFoot" ||
+      structureTile === "BedSite" ||
       structureTile === "Table" ||
       structureTile === "Stove"
     ) {

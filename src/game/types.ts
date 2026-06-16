@@ -26,7 +26,12 @@ export type TileType =
   | "RockFloor"
   // Furniture inside rooms: a stove to cook at, a bed to sleep in, a table to dine at.
   | "Stove"
+  // A bed spans two tiles: the head (pillow end, where the sleeper lies) and the
+  // foot. "BedSite" is a reserved-but-unbuilt bed plot — marked ahead of time so
+  // it reads as a planned bed, then replaced by Bed+BedFoot once built.
   | "Bed"
+  | "BedFoot"
+  | "BedSite"
   | "Table"
   | "Berry"
   | "FieldEmpty"
@@ -282,9 +287,11 @@ export type Agent = {
   // A load being physically carried to the warehouse (any resource). Kept apart
   // from inventory.wood, which is the wood a builder consumes on site.
   carry?: { resource: ResourceKind; amount: number };
-  // This resident's own bed tile — they build and sleep in it (one bed each, no
-  // sharing). Transient; re-derived if missing.
+  // This resident's own bed — head tile (where they sleep) and foot tile of the
+  // 1×2/2×1 bed. While the plot is reserved both tiles are "BedSite"; once built
+  // bedPos is "Bed" and bedFoot is "BedFoot". Transient; re-derived if missing.
   bedPos?: Vec2;
+  bedFoot?: Vec2;
   // The single structure tile this builder is currently walking to / laying.
   buildTarget?: Vec2;
   // While set, this builder is on a felling errand for their project: they keep

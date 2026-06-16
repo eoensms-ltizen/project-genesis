@@ -245,6 +245,7 @@ type SavedAgent = Omit<
   | "haulItemId"
   | "carry"
   | "bedPos"
+  | "bedFoot"
   | "buildTarget"
   | "gatherWood"
 >;
@@ -673,6 +674,63 @@ export class Simulation {
         Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y),
     );
     return ordered.find((tile) => this.world.getTile(tile)?.type === "Floor");
+  }
+
+  /**
+   * A plot for a 1×2/2×1 bed inside a home: two adjacent free floor tiles (head +
+   * foot) with a third free tile beside them to build from (so the builder stands
+   * next to the bed, not on it). Falls back to a single tile (head only) when the
+   * room is too small for a full bed — e.g. a one-tile private annex. Tiles are
+   * ranked toward the room's centre. Returns nothing if no buildable spot exists.
+   */
+  reserveBedPlot(
+    building: Building,
+  ): { head: Vec2; foot?: Vec2; stand: Vec2 } | undefined {
+    const home = this.houseInterior(building);
+    const free = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    const interior = this.interiorTiles(building)
+      .filter(free)
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y),
+      );
+    const DIRS = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ];
+    // Prefer a real two-tile bed: head + an adjacent foot, plus a separate free
+    // tile to stand on while building (not one of the bed tiles).
+    for (const head of interior) {
+      for (const d of DIRS) {
+        const foot = { x: head.x + d.x, y: head.y + d.y };
+        if (!free(foot)) {
+          continue;
+        }
+        const stand = [head, foot]
+          .flatMap((t) => DIRS.map((s) => ({ x: t.x + s.x, y: t.y + s.y })))
+          .find(
+            (s) =>
+              this.world.isWalkable(s) &&
+              !(s.x === head.x && s.y === head.y) &&
+              !(s.x === foot.x && s.y === foot.y),
+          );
+        if (stand) {
+          return { head, foot, stand };
+        }
+      }
+    }
+    // Fallback: a single-tile bed where two won't fit (tiny rooms / annexes).
+    for (const head of interior) {
+      const stand = DIRS.map((s) => ({ x: head.x + s.x, y: head.y + s.y })).find(
+        (s) => this.world.isWalkable(s) && !(s.x === head.x && s.y === head.y),
+      );
+      if (stand) {
+        return { head, stand };
+      }
+    }
+    return undefined;
   }
 
   /** The interior (non-wall, non-door) floor tiles of a walled room. */

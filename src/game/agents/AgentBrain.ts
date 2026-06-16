@@ -1664,12 +1664,19 @@ export class AgentBrain {
    * A resident furnishes their home with a bed (from wood) once they have one —
    * a comfort improvement so they rest properly instead of on the bare floor.
    */
-  /** True when this resident already has their own bed (no bed-sharing). */
+  /** True when this resident already has their own (built) bed. */
   private hasOwnBed(agent: Agent, simulation: Simulation): boolean {
     return (
       agent.bedPos !== undefined &&
       simulation.world.getTile(agent.bedPos)?.type === "Bed"
     );
+  }
+
+  /** True when this resident has reserved a bed plot (the site is staked, maybe
+   * not yet built) — used so they don't reserve a second one. */
+  private hasBedPlot(agent: Agent, simulation: Simulation): boolean {
+    const t = agent.bedPos ? simulation.world.getTile(agent.bedPos)?.type : undefined;
+    return t === "Bed" || t === "BedSite";
   }
 
   private tryBuildBed(agent: Agent, simulation: Simulation): boolean {
@@ -1682,21 +1689,60 @@ export class AgentBrain {
     if (!home || home.kind !== "house" || home.stage !== "built" || this.hasOwnBed(agent, simulation)) {
       return false;
     }
+    // Reserve the bed plot up front so it's visible (and inspectable as a "bed
+    // site") while the resident goes off to fetch wood — you can see it coming.
+    if (!this.hasBedPlot(agent, simulation)) {
+      const plot = simulation.reserveBedPlot(home);
+      if (!plot) {
+        return false;
+      }
+      agent.bedPos = { ...plot.head };
+      agent.bedFoot = plot.foot ? { ...plot.foot } : undefined;
+      simulation.world.setTile(plot.head, "BedSite");
+      if (plot.foot) {
+        simulation.world.setTile(plot.foot, "BedSite");
+      }
+    }
     if (agent.inventory.wood < BED_WOOD_COST) {
       return this.fetchWood(agent, simulation, BED_WOOD_COST);
     }
-    const spot = simulation.bedSpot(home);
-    if (!spot) {
+    // Walk to a tile beside the plot (not onto it) and raise the bed from there,
+    // the way a wall is laid from an adjacent tile.
+    const stand = this.bedBuildSpot(agent, simulation);
+    if (!stand) {
       return false;
     }
-    const path = findPath(simulation.world, { start: agent.position, goal: spot });
+    const path = findPath(simulation.world, { start: agent.position, goal: stand });
     if (!path) {
       return false;
     }
-    agent.target = { ...spot };
+    agent.target = { ...stand };
     agent.path = path;
     this.setState(agent, simulation, "MoveToFurnish");
     return true;
+  }
+
+  /** A walkable tile beside the resident's reserved bed plot to build it from. */
+  private bedBuildSpot(agent: Agent, simulation: Simulation): Vec2 | undefined {
+    if (!agent.bedPos) {
+      return undefined;
+    }
+    const plotTiles = [agent.bedPos, agent.bedFoot].filter(Boolean) as Vec2[];
+    const isPlot = (p: Vec2) => plotTiles.some((t) => t.x === p.x && t.y === p.y);
+    for (const t of plotTiles) {
+      for (const d of [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ]) {
+        const s = { x: t.x + d.x, y: t.y + d.y };
+        if (!isPlot(s) && simulation.world.isWalkable(s)) {
+          return s;
+        }
+      }
+    }
+    return undefined;
   }
 
   /** Furnish the home with a table once it has a bed — a step toward a real room. */
@@ -1737,19 +1783,27 @@ export class AgentBrain {
       return;
     }
     const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
-    if (agent.target && home && simulation.world.getTile(roundVec(agent.target))?.type === "Floor") {
-      const pos = roundVec(agent.target);
-      // The resident's own bed comes first; once they have one, a dining table.
-      if (!this.hasOwnBed(agent, simulation) && agent.inventory.wood >= BED_WOOD_COST) {
-        simulation.world.setTile(pos, "Bed");
-        agent.bedPos = { ...pos }; // this bed is theirs
-        agent.inventory.wood -= BED_WOOD_COST;
-        simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 자기 침대를 놓았다. 🛏️`), [agent]);
-      } else if (!simulation.hasTable(home) && agent.inventory.wood >= TABLE_WOOD_COST) {
-        simulation.world.setTile(pos, "Table");
-        agent.inventory.wood -= TABLE_WOOD_COST;
-        simulation.log(tr(`${agent.name} set up a dining table. 🍽️`, `${agent.name}이(가) 식탁을 놓았다. 🍽️`), [agent]);
+    // A reserved bed plot (the resident walked to a tile beside it) → raise the
+    // bed on its staked tiles from where they stand. Otherwise it's a dining table.
+    const onBedSite =
+      agent.bedPos !== undefined && simulation.world.getTile(agent.bedPos)?.type === "BedSite";
+    if (home && onBedSite && agent.inventory.wood >= BED_WOOD_COST) {
+      simulation.world.setTile(agent.bedPos!, "Bed");
+      if (agent.bedFoot) {
+        simulation.world.setTile(agent.bedFoot, "BedFoot");
       }
+      agent.inventory.wood -= BED_WOOD_COST;
+      simulation.log(tr(`${agent.name} built a bed at home. 🛏️`, `${agent.name}이(가) 집에 자기 침대를 놓았다. 🛏️`), [agent]);
+    } else if (
+      home &&
+      agent.target &&
+      simulation.world.getTile(roundVec(agent.target))?.type === "Floor" &&
+      !simulation.hasTable(home) &&
+      agent.inventory.wood >= TABLE_WOOD_COST
+    ) {
+      simulation.world.setTile(roundVec(agent.target), "Table");
+      agent.inventory.wood -= TABLE_WOOD_COST;
+      simulation.log(tr(`${agent.name} set up a dining table. 🍽️`, `${agent.name}이(가) 식탁을 놓았다. 🍽️`), [agent]);
     }
     agent.target = undefined;
     agent.path = undefined;
@@ -1762,12 +1816,26 @@ export class AgentBrain {
    * they had no bed yet, this simply gives them one in the new room.
    */
   private relocateBedInto(agent: Agent, simulation: Simulation, room: Building) {
-    const spot = simulation.bedSpot(room) ?? simulation.houseInterior(room);
-    if (agent.bedPos && simulation.world.getTile(agent.bedPos)?.type === "Bed") {
-      simulation.world.setTile(agent.bedPos, "Floor");
+    // Lift the old bed (head + foot) back to bare floor.
+    for (const old of [agent.bedPos, agent.bedFoot]) {
+      if (old) {
+        const t = simulation.world.getTile(old)?.type;
+        if (t === "Bed" || t === "BedFoot" || t === "BedSite") {
+          simulation.world.setTile(old, "Floor");
+        }
+      }
     }
-    simulation.world.setTile(spot, "Bed");
-    agent.bedPos = { ...spot };
+    // Lay a fresh bed in the new room (two tiles if it fits, else one).
+    const plot = simulation.reserveBedPlot(room);
+    const head = plot ? plot.head : simulation.houseInterior(room);
+    simulation.world.setTile(head, "Bed");
+    agent.bedPos = { ...head };
+    if (plot?.foot) {
+      simulation.world.setTile(plot.foot, "BedFoot");
+      agent.bedFoot = { ...plot.foot };
+    } else {
+      agent.bedFoot = undefined;
+    }
   }
 
   /** True once this resident already owns a private bedroom annex. */

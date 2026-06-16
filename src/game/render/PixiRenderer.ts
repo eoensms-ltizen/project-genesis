@@ -621,13 +621,40 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
   }
 
   if (type === "Bed") {
-    // A mattress with a pillow at the head.
-    graphics.rect(px + 2, py + 3, TILE_SIZE - 4, TILE_SIZE - 6);
-    graphics.fill(0x5a6e88);
-    graphics.rect(px + 2, py + 3, TILE_SIZE - 4, TILE_SIZE - 6);
-    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
-    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, 3);
-    graphics.fill(0xe6ddc8);
+    // The head tile of a 1×2/2×1 bed: a wooden frame, a quilted mattress, and a
+    // plump pillow. The frame fills the tile edge-to-edge so it reads continuous
+    // with the adjoining foot tile.
+    graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+    graphics.fill(0x6b4a2c); // wooden frame
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.fill(0x8a5a86); // mattress (warm plum)
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, 4);
+    graphics.fill(0xf0ead8); // pillow at the head
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, 4);
+    graphics.stroke({ color: 0xcfc6ad, width: 0.6 });
+  }
+
+  if (type === "BedFoot") {
+    // The foot tile: matching frame + mattress, with a folded blanket across it.
+    graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+    graphics.fill(0x6b4a2c);
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.fill(0x8a5a86);
+    graphics.rect(px + 1, py + 6, TILE_SIZE - 2, TILE_SIZE - 8);
+    graphics.fill(0x6f4f86); // blanket, slightly darker
+    graphics.rect(px + 1, py + 6, TILE_SIZE - 2, 1.2);
+    graphics.fill({ color: 0xb6a6c8, alpha: 0.7 });
+  }
+
+  if (type === "BedSite") {
+    // A planned bed: a dashed ghost outline so the spot reads as "a bed goes here"
+    // before it's built.
+    graphics.rect(px + 1.5, py + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
+    graphics.fill({ color: 0x8a5a86, alpha: 0.18 });
+    graphics.rect(px + 1.5, py + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
+    graphics.stroke({ color: 0xb98ab2, width: 1, alpha: 0.85 });
+    graphics.circle(px + TILE_SIZE / 2, py + TILE_SIZE / 2, 1.4);
+    graphics.fill({ color: 0xb98ab2, alpha: 0.7 });
   }
 
   if (type === "Table") {
@@ -1278,6 +1305,10 @@ function tileColor(type: TileType): number {
       return 0x4a3b2a;
     case "Bed":
       return 0x4a3b2a;
+    case "BedFoot":
+      return 0x4a3b2a;
+    case "BedSite":
+      return 0x4a3b2a; // floor tone; the ghost outline is drawn on top
     case "Table":
       return 0x4a3b2a;
     case "Berry":
