@@ -83,13 +83,6 @@ function surroundings(ambiance: number): string {
   return tr("grim 🏭", "삭막함 🏭");
 }
 
-function houseTier(level: number): string {
-  if (level >= 4) return tr("tower", "타워");
-  if (level >= 3) return tr("apartment", "아파트");
-  if (level >= 2) return tr("villa", "빌라");
-  return tr("house", "집");
-}
-
 function lifeStage(age: number): string {
   if (age < 4) return tr("Baby", "아기");
   if (age < 12) return tr("Child", "아이");
@@ -346,15 +339,6 @@ function BuildingInfo({ building, agents }: { building?: Building; agents: Agent
           <>
             <dt>{tr("Built", "건립")}</dt>
             <dd>{tr(`Year ${builtYear}, Day ${builtDay}`, `${builtYear}년 ${builtDay}일`)}</dd>
-          </>
-        )}
-        {building.kind === "house" && (
-          <>
-            <dt>{tr("Type", "유형")}</dt>
-            <dd>
-              {houseTier(building.level ?? 1)} · L{building.level ?? 1} ·{" "}
-              {tr(`${building.capacity ?? 1} residents`, `${building.capacity ?? 1}명 거주`)}
-            </dd>
           </>
         )}
         {building.durability !== undefined && (

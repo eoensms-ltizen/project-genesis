@@ -56,8 +56,6 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   Hunt: "사냥",
   MoveToTame: "가축으로 이동",
   Tame: "길들이기",
-  MoveToRedevelop: "재건축지로 이동",
-  Redevelop: "재건축",
   MoveToPark: "공원으로 이동",
   Relax: "휴식",
   MoveToClean: "청소지로 이동",

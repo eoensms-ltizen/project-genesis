@@ -198,8 +198,6 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
   "Hunt",
   "MoveToTame",
   "Tame",
-  "MoveToRedevelop",
-  "Redevelop",
   "MoveToClean",
   "Clean",
   "Patrol",
@@ -339,12 +337,6 @@ export class AgentBrain {
         break;
       case "Tame":
         this.tame(agent, simulation, deltaSeconds);
-        break;
-      case "MoveToRedevelop":
-        this.moveAlongPath(agent, simulation, deltaSeconds, "Redevelop");
-        break;
-      case "Redevelop":
-        this.redevelop(agent, simulation, deltaSeconds);
         break;
       case "MoveToPark":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Relax");
@@ -699,12 +691,6 @@ export class AgentBrain {
   }
 
   private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
-    // Shelter upgrades only matter once a town has filled out, so redeveloping
-    // taller stays gated on a grown settlement.
-    if (simulation.era >= 1 && this.tryRedevelop(agent, simulation)) {
-      return true;
-    }
-
     // Provisioning is need-driven from the very first resident, not gated on
     // reaching a later era: raise a warehouse to stockpile goods, then farm to
     // keep the larder full so hunger is met from stores rather than foraging.
@@ -799,72 +785,9 @@ export class AgentBrain {
   }
 
   /**
-   * Land pressure made actionable: when housing is nearly full and there is no
-   * room to sprawl, a worker rebuilds a central house one tier taller. Gathers
-   * wood first if short, like a communal project.
-   */
-  private tryRedevelop(agent: Agent, simulation: Simulation): boolean {
-    if (!simulation.shouldRedevelopHousing()) {
-      return false;
-    }
-    const house = simulation.findRedevelopableHouse();
-    if (!house) {
-      return false;
-    }
-    if (agent.inventory.wood < simulation.redevelopCost(house)) {
-      this.fetchWood(agent, simulation, simulation.redevelopCost(house));
-      return true;
-    }
-    const path = findPath(simulation.world, { start: agent.position, goal: house.door });
-    if (!path) {
-      return false;
-    }
-    agent.projectBuildingId = house.id;
-    agent.target = { ...house.door };
-    agent.path = path;
-    this.setState(agent, simulation, "MoveToRedevelop");
-    return true;
-  }
-
-  private redevelop(agent: Agent, simulation: Simulation, deltaSeconds: number) {
-    const house = agent.projectBuildingId
-      ? simulation.getBuilding(agent.projectBuildingId)
-      : undefined;
-    // The target may have been claimed, levelled, or removed while en route.
-    if (
-      !house ||
-      house.kind !== "house" ||
-      house.stage !== "built" ||
-      simulation.houseLevel(house) >= 4
-    ) {
-      agent.projectBuildingId = undefined;
-      agent.target = undefined;
-      agent.path = undefined;
-      this.setState(agent, simulation, "Idle");
-      return;
-    }
-
-    if (agent.actionTimer === 0) {
-      simulation.log(tr(`${agent.name} began redeveloping a house.`, `${agent.name}이(가) 집을 재개발하기 시작했다.`), [agent]);
-    }
-    agent.actionTimer += deltaSeconds;
-    if (agent.actionTimer < BUILD_DURATION_SECONDS) {
-      return;
-    }
-
-    agent.inventory.wood = Math.max(0, agent.inventory.wood - simulation.redevelopCost(house));
-    simulation.levelUpHouse(house);
-    agent.projectBuildingId = undefined;
-    agent.target = undefined;
-    agent.path = undefined;
-    this.setState(agent, simulation, "Idle");
-  }
-
-  /**
-   * A single grown-up strikes out on their own when the town is full and can't
-   * simply build taller — so the settlement grows by spreading into a new home
-   * (a hamlet of houses) rather than stalling. When apartments are possible
-   * (steel) the village redevelops upward instead, so no one needs to move out.
+   * A single grown-up strikes out on their own when their home is overcrowded —
+   * houses no longer grow taller, so the settlement spreads into a new home (a
+   * hamlet of houses) rather than packing more in.
    */
   private shouldMoveOut(agent: Agent, simulation: Simulation): boolean {
     if (agent.spouseId || !agent.homeBuildingId) {
@@ -881,13 +804,8 @@ export class AgentBrain {
     if (!home || home.kind !== "house" || home.ownerId === agent.id) {
       return false;
     }
-    // Only when the home is overcrowded AND can't be built any taller right now
-    // (no steel for apartments): then the grown-up spreads out into a new home.
-    // When apartments are possible the village redevelops upward instead.
-    if (simulation.occupantsOf(home.id) <= simulation.houseCapacity(home)) {
-      return false;
-    }
-    return simulation.houseLevel(home) >= simulation.maxRedevelopLevel();
+    // Move out only once the home is genuinely overcrowded.
+    return simulation.occupantsOf(home.id) > simulation.houseCapacity(home);
   }
 
   /** Lifestage idle for children and elders: company if lonely, else a stroll. */
@@ -3012,29 +2930,14 @@ export class AgentBrain {
    * central house (house -> villa -> apartment) and move in.
    */
   private tryHousing(agent: Agent, simulation: Simulation): boolean {
+    // Move into a house with a spare slot if there is one; otherwise spread out
+    // and raise a new home (houses no longer densify into taller tiers).
     const spare = simulation.findHouseWithSpareCapacity();
     if (spare) {
       this.moveInto(agent, simulation, spare, tr("moved into shared housing", "공동 주택에 들어갔다"));
       return true;
     }
-
-    if (!simulation.isLandTight()) {
-      return false; // open land nearby — build a fresh house (sprawl).
-    }
-
-    const house = simulation.findDensifiableHouse();
-    if (!house) {
-      return false; // nothing left to densify — allow distant sprawl.
-    }
-    const cost = simulation.redevelopCost(house);
-    if (agent.inventory.wood < cost) {
-      this.fetchWood(agent, simulation, cost);
-      return true;
-    }
-    agent.inventory.wood -= cost;
-    simulation.levelUpHouse(house);
-    this.moveInto(agent, simulation, house, tr("joined a denser household", "더 북적이는 살림에 합류했다"));
-    return true;
+    return false;
   }
 
   /**

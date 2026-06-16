@@ -107,7 +107,6 @@ const FACTORY_FOOD_PER_TICK = 3;
 const FACTORY_STEEL_PER_TICK = 2;
 // A smelter forges this much iron ore into steel each nature tick.
 const SMELT_ORE_PER_BATCH = 2;
-const REDEVELOP_STEEL_COST = 10;
 const TRAIN_SPEED = 9;
 const TRAIN_DELIVER_FOOD = 8;
 
@@ -133,22 +132,10 @@ const TILE_STACK_CAP = 50;
 // How far a new building will reach to connect its doorway to an existing path.
 const APPROACH_MAX_TILES = 7;
 
-// Land pressure: when the nearest open plot to the village centre is farther
-// than this, residents densify existing housing instead of sprawling.
-const SPRAWL_LIMIT = 9;
-// Houses redevelop in place up the tier ladder, packing more residents into the
-// same footprint: cottage -> villa -> apartment -> tower. Capacity counts
-// individual residents (a family shares a home), so it can be compared directly
-// against how many people actually live there.
-const HOUSE_MAX_LEVEL = 4;
-const HOUSE_CAPACITY_BY_LEVEL = [0, 3, 6, 12, 24];
-// Building taller is a steeply escalating investment, so stacking is never the
-// cheap default — the village is nudged to spread outward instead. Indexed by
-// the target level (the level being upgraded TO).
-const REDEVELOP_COST_BY_LEVEL = [0, 0, 16, 30, 50];
-// Builders proactively rebuild taller once the village has at most this many
-// spare beds — crowding, not distant empty land, is what drives growing upward.
-const REDEVELOP_HEADROOM = 2;
+// Houses no longer redevelop into taller tiers — with physical walled rooms the
+// town grows by spreading into more homes (spread-out, not stack). Every house
+// shelters this many residents (a family shares a home).
+const HOUSE_CAPACITY = 3;
 // Roads/paths with no recent traffic weather back toward nature — kept very
 // slow for now so infrastructure (e.g. the road out to the cemetery) persists
 // and decay is barely noticeable.
@@ -350,11 +337,7 @@ export class Simulation {
         this.animals.push({ ...animal, path: undefined });
       }
       for (const building of saved.buildings) {
-        // Older saves predate the tier ladder; recover the level from capacity.
-        if (building.kind === "house" && building.stage === "built" && !building.level) {
-          building.level = this.houseLevel(building);
-          building.capacity = this.houseCapacity(building);
-        }
+        // Tiers are gone; a saved house's old level/capacity is simply ignored.
         this.buildings.push(building);
         if (building.stage !== "built") {
           this.claimBuildingFootprint(building);
@@ -1185,10 +1168,6 @@ export class Simulation {
         (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
       );
       building.durability = 100;
-      if (building.kind === "house" && !building.level) {
-        building.level = 1;
-        building.capacity = HOUSE_CAPACITY_BY_LEVEL[1];
-      }
     }
     // Walled rooms are built tile-by-tile: the moment the foundation is laid,
     // draw up the construction plan so residents have walls/floor/door to place.
@@ -1712,12 +1691,6 @@ export class Simulation {
   /** Once residents have died, the village needs a place to lay them to rest. */
   needsCemetery(): boolean {
     return this.deaths > 0 && !this.hasAnyCemetery();
-  }
-
-  /** Wood needed to redevelop a house to its next tier (escalates by level). */
-  redevelopCost(building: Building): number {
-    const next = Math.min(this.houseLevel(building) + 1, HOUSE_MAX_LEVEL);
-    return REDEVELOP_COST_BY_LEVEL[next] ?? REDEVELOP_COST_BY_LEVEL[HOUSE_MAX_LEVEL];
   }
 
   hasAnyPark(): boolean {
@@ -3241,17 +3214,8 @@ export class Simulation {
     return this.agents.filter((agent) => agent.homeBuildingId === buildingId).length;
   }
 
-  houseLevel(building: Building): number {
-    if (building.level) {
-      return building.level;
-    }
-    // Older saves stored only capacity; recover the tier from it.
-    const cap = building.capacity ?? 1;
-    return cap >= 24 ? 4 : cap >= 12 ? 3 : cap >= 6 ? 2 : 1;
-  }
-
-  houseCapacity(building: Building): number {
-    return HOUSE_CAPACITY_BY_LEVEL[this.houseLevel(building)] ?? 1;
+  houseCapacity(_building: Building): number {
+    return HOUSE_CAPACITY;
   }
 
   /** Total residents the built houses can shelter. */
@@ -3315,60 +3279,10 @@ export class Simulation {
     return occupied;
   }
 
-  /** Spare resident slots across all built houses. */
-  housingHeadroom(): number {
-    return this.housingCapacity() - this.housedCount();
-  }
-
   /** 0 = roomy, 1 = full. Surfaced in the inspector as housing pressure. */
   housingPressure(): number {
     const capacity = this.housingCapacity();
     return capacity === 0 ? 0 : Math.min(1, this.housedCount() / capacity);
-  }
-
-  /**
-   * The driving force: when land is tight and housing is nearly full, the
-   * village should grow upward (redevelop) rather than sprawl outward.
-   */
-  shouldRedevelopHousing(): boolean {
-    return this.housingHeadroom() <= REDEVELOP_HEADROOM;
-  }
-
-  /** A central, upgradeable house no one is already rebuilding. */
-  findRedevelopableHouse(): Building | undefined {
-    const inProgress = new Set(
-      this.agents
-        .filter((a) => a.state === "MoveToRedevelop" || a.state === "Redevelop")
-        .map((a) => a.projectBuildingId),
-    );
-    const center = this.villageCenter();
-    const max = this.maxRedevelopLevel();
-    return this.buildings
-      .filter(
-        (b) =>
-          b.kind === "house" &&
-          b.stage === "built" &&
-          this.houseLevel(b) < max &&
-          !inProgress.has(b.id),
-      )
-      .sort(
-        (a, b) =>
-          Math.hypot(a.x - center.x, a.y - center.y) -
-          Math.hypot(b.x - center.x, b.y - center.y),
-      )[0];
-  }
-
-  /** Is there an open building plot near the village centre? */
-  hasOpenPlotNear(radius: number): boolean {
-    const center = this.villageCenter();
-    const site = this.world.findBuildingSite(center, 2, 2, (position) =>
-      this.isTileClaimed(position),
-    );
-    if (!site) {
-      return false;
-    }
-    const d = Math.hypot(site.x + 1 - center.x, site.y + 1 - center.y);
-    return d <= radius;
   }
 
   /** A built house with room for another household, nearest the centre. */
@@ -3388,30 +3302,6 @@ export class Simulation {
       )[0];
   }
 
-  /**
-   * The tallest tier a house may currently reach. Villas (level 2) are wood; an
-   * apartment or tower (level 3+) needs steel, so without a steel supply growth
-   * stays low-rise and spreads outward instead.
-   */
-  maxRedevelopLevel(): number {
-    return this.stockOf("steel") >= REDEVELOP_STEEL_COST ? HOUSE_MAX_LEVEL : 2;
-  }
-
-  /** A built house that can still be upgraded to a denser tier. */
-  findDensifiableHouse(): Building | undefined {
-    const center = this.villageCenter();
-    const max = this.maxRedevelopLevel();
-    return this.buildings
-      .filter(
-        (b) => b.kind === "house" && b.stage === "built" && this.houseLevel(b) < max,
-      )
-      .sort(
-        (a, b) =>
-          Math.hypot(a.x - center.x, a.y - center.y) -
-          Math.hypot(b.x - center.x, b.y - center.y),
-      )[0];
-  }
-
   /** The building whose footprint covers a tile, if any. */
   private buildingAt(position: Vec2): Building | undefined {
     return this.buildings.find(
@@ -3421,109 +3311,6 @@ export class Simulation {
         position.y >= b.y &&
         position.y < b.y + b.height,
     );
-  }
-
-  /** Tear down a house and turn its residents back out to find new homes. */
-  private demolishHouse(building: Building) {
-    for (const agent of this.agents) {
-      if (agent.homeBuildingId === building.id) {
-        agent.home = undefined;
-        agent.homeBuildingId = undefined;
-        agent.homeSite = undefined;
-      }
-      if (agent.projectBuildingId === building.id) {
-        agent.projectBuildingId = undefined;
-      }
-    }
-    this.removeBuilding(building);
-  }
-
-  /**
-   * Grow a house's footprint upward to 2x3 (apartments need more room than a
-   * cottage). The door stays on the bottom row. Roads, trees and neighbouring
-   * houses on the new row are cleared to make space; critical infrastructure is
-   * left alone, in which case the block stays its current size.
-   */
-  private expandHouseFootprint(building: Building): boolean {
-    const { x, y, width, height } = building;
-    const doors = this.buildingDoors(building);
-    // Candidate sides; never grow over a side that holds a door (it would seal
-    // that doorway), so the building grows into a doorless edge.
-    const sides = [
-      { has: doors.some((d) => d.y === y), strip: row(x, width, y - 1), apply: () => { building.y -= 1; building.height += 1; } },
-      { has: doors.some((d) => d.y === y + height - 1), strip: row(x, width, y + height), apply: () => { building.height += 1; } },
-      { has: doors.some((d) => d.x === x), strip: col(y, height, x - 1), apply: () => { building.x -= 1; building.width += 1; } },
-      { has: doors.some((d) => d.x === x + width - 1), strip: col(y, height, x + width), apply: () => { building.width += 1; } },
-    ];
-    for (const side of sides) {
-      if (side.has) {
-        continue;
-      }
-      let clear = true;
-      for (const p of side.strip) {
-        const tile = this.world.getTile(p);
-        if (!tile || tile.type === "Water") {
-          clear = false;
-          break;
-        }
-        const occ = this.buildingAt(p);
-        if (occ && occ !== building && occ.kind !== "house") {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) {
-        continue;
-      }
-      for (const p of side.strip) {
-        const occ = this.buildingAt(p);
-        if (occ && occ !== building && occ.kind === "house") {
-          this.demolishHouse(occ);
-          this.log(tr("A house was cleared to make way for an apartment block. 🏗️", "아파트 단지가 들어설 자리를 내주려 집 한 채를 헐었다. 🏗️"));
-        }
-        if (this.world.getTile(p)?.type === "Tree") {
-          this.world.setTile(p, "Grass");
-        }
-      }
-      side.apply();
-      return true;
-    }
-    return false;
-  }
-
-  /** Redevelop a house one tier taller, packing more households per tile. */
-  levelUpHouse(building: Building) {
-    const next = Math.min(this.houseLevel(building) + 1, this.maxRedevelopLevel());
-    building.level = next;
-    building.capacity = HOUSE_CAPACITY_BY_LEVEL[next];
-    building.durability = 100;
-    // Apartments and towers consume steel and need a larger 2x3 footprint.
-    if (next >= 3) {
-      this.withdraw("steel", REDEVELOP_STEEL_COST);
-      if (building.height < 3) {
-        this.expandHouseFootprint(building);
-      }
-    }
-    // A redeveloped house stays a walled room (perimeter walls, a doorway, a floor
-    // interior) — not a solid block. Re-tile the (possibly grown) footprint as a
-    // room, but keep any furniture the residents placed inside (beds, table, stove)
-    // rather than wiping it. (This used to stamp solid "House" tiles, which turned
-    // a furnished room into a featureless block on every redevelopment.)
-    this.repaintWalledRoomKeepingFurniture(building);
-    this.reserveEntrance(building);
-    const label =
-      next >= 4
-        ? tr("A block was rebuilt into a residential tower. 🗼", "한 블록이 주거용 타워로 다시 지어졌다. 🗼")
-        : next === 3
-          ? tr("A house grew into an apartment block. 🏢", "집 한 채가 아파트 단지로 자라났다. 🏢")
-          : tr("A house was extended into a villa. 🏘️", "집 한 채가 빌라로 증축되었다. 🏘️");
-    this.log(label);
-    this.refreshDoors();
-    this.notifyChanged();
-  }
-
-  isLandTight(): boolean {
-    return !this.hasOpenPlotNear(SPRAWL_LIMIT + Math.sqrt(this.agents.length));
   }
 
   private decayInfrastructure() {
@@ -3655,14 +3442,6 @@ function loadSaveData(): SaveData | undefined {
 
 function claimKey(position: Vec2): string {
   return `${position.x},${position.y}`;
-}
-
-function row(x: number, width: number, y: number): Vec2[] {
-  return Array.from({ length: width }, (_, i) => ({ x: x + i, y }));
-}
-
-function col(y: number, height: number, x: number): Vec2[] {
-  return Array.from({ length: height }, (_, i) => ({ x, y: y + i }));
 }
 
 export function footprintTiles(building: Building): Vec2[] {
