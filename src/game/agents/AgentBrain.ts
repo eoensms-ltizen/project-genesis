@@ -1965,20 +1965,16 @@ export class AgentBrain {
     if (this.tryJoinSharedShelter(agent, simulation)) {
       return;
     }
-    // Homes seek pleasant surroundings: drawn to parks/church, away from
-    // cemeteries, power plants, fields and stumps. The town zones itself.
-    const site = simulation.world.findBuildingSite(
-      agent.position,
-      5,
-      5,
-      (position) => simulation.isTileClaimed(position),
-      {
-        // Keep a one-tile gap so each walled home reads as its own building and
-        // walls don't merge into a blob; proximity scoring still clusters them
-        // into a tidy neighbourhood with little alleys between.
+    const isClaimed = (position: Vec2) => simulation.isTileClaimed(position);
+    // Prefer terraced housing: a spot that shares a whole wall with an existing
+    // building, so the wall is built once (saving material and space) instead of
+    // raising two walls back to back. Fall back to a free-standing plot when no
+    // neighbour can be cleanly abutted.
+    const site =
+      simulation.findAdjoiningHouseSite(5, 5, roundVec(agent.position), isClaimed) ??
+      simulation.world.findBuildingSite(agent.position, 5, 5, isClaimed, {
         extraScore: (cx, cy) => simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT,
-      },
-    );
+      });
     if (!site) {
       simulation.log(tr(`${agent.name} could not find a house site.`, `${agent.name}이(가) 집 지을 자리를 찾지 못했다.`));
       this.backOff(agent, simulation);

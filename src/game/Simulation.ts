@@ -837,6 +837,97 @@ export class Simulation {
   }
 
   /**
+   * A site for a width×height room that shares a whole wall with an existing
+   * walled building instead of standing apart with its own — terraced housing
+   * that saves wall material and space (the shared wall is built once; the new
+   * room's plan skips it). The new footprint overlaps the neighbour's wall line
+   * on one side; every other tile must be open ground, and a non-shared side must
+   * face open ground so a real road-facing door can be cut. Returns the top-left,
+   * or undefined if nothing adjoins cleanly. Prefers spots nearest `origin`.
+   */
+  findAdjoiningHouseSite(
+    width: number,
+    height: number,
+    origin: Vec2,
+    isBlocked?: (p: Vec2) => boolean,
+  ): { x: number; y: number } | undefined {
+    const isGrass = (p: Vec2): boolean =>
+      this.world.getTile(p)?.type === "Grass" && !this.isTileClaimed(p) && !(isBlocked?.(p) ?? false);
+    const isWall = (p: Vec2): boolean => this.world.getTile(p)?.type === "Wall";
+    // A side has a usable doorway if some tile just outside it is open ground that
+    // can reach a street (so the terraced house isn't sealed in).
+    const openApproach = (p: Vec2): boolean => {
+      const t = this.world.getTile(p)?.type;
+      return t === "Grass" || t === "Dirt" || t === "Road" || t === "Plaza" || t === "Stump";
+    };
+
+    type Side = "E" | "W" | "S" | "N";
+    let best: { x: number; y: number; score: number } | undefined;
+
+    const consider = (ax: number, ay: number, shared: Side) => {
+      const fresh: Vec2[] = [];
+      let sharedOk = true;
+      for (let fy = 0; fy < height; fy += 1) {
+        for (let fx = 0; fx < width; fx += 1) {
+          const p = { x: ax + fx, y: ay + fy };
+          if (!this.world.inBounds(p)) {
+            return;
+          }
+          const onShared =
+            (shared === "W" && fx === 0) ||
+            (shared === "E" && fx === width - 1) ||
+            (shared === "N" && fy === 0) ||
+            (shared === "S" && fy === height - 1);
+          if (onShared) {
+            if (!isWall(p)) {
+              sharedOk = false;
+            }
+          } else {
+            fresh.push(p);
+          }
+        }
+      }
+      if (!sharedOk || !fresh.every(isGrass)) {
+        return;
+      }
+      // At least one non-shared edge must open onto reachable ground for a door.
+      const edges: { side: Side; approach: Vec2 }[] = [
+        { side: "S", approach: { x: ax + Math.floor(width / 2), y: ay + height } },
+        { side: "N", approach: { x: ax + Math.floor(width / 2), y: ay - 1 } },
+        { side: "E", approach: { x: ax + width, y: ay + Math.floor(height / 2) } },
+        { side: "W", approach: { x: ax - 1, y: ay + Math.floor(height / 2) } },
+      ];
+      if (!edges.some((e) => e.side !== shared && openApproach(e.approach))) {
+        return;
+      }
+      const cx = ax + width / 2;
+      const cy = ay + height / 2;
+      const score = -(Math.abs(cx - origin.x) + Math.abs(cy - origin.y)) + Math.random() * 2;
+      if (!best || score > best.score) {
+        best = { x: ax, y: ay, score };
+      }
+    };
+
+    for (const b of this.buildings) {
+      if (b.stage !== "built" || !ROOM_BUILDING_KINDS.has(b.kind)) {
+        continue;
+      }
+      const { x: bx, y: by, width: bw, height: bh } = b;
+      // Share the east wall of b: new house sits to the right, its west column on
+      // b's east wall column. Slide vertically so the shared column stays on wall.
+      for (let ay = by - (height - bh); ay <= by + (bh - 1); ay += 1) {
+        consider(bx + bw - 1, ay, "W"); // new house's west edge = b's east wall
+        consider(bx - width + 1, ay, "E"); // new house's east edge = b's west wall
+      }
+      for (let ax = bx - (width - bw); ax <= bx + (bw - 1); ax += 1) {
+        consider(ax, by + bh - 1, "N"); // new house's north edge = b's south wall
+        consider(ax, by - height + 1, "S"); // new house's south edge = b's north wall
+      }
+    }
+    return best ? { x: best.x, y: best.y } : undefined;
+  }
+
+  /**
    * Entrances facing the nearest streets. Each candidate side's door sits on the
    * footprint edge with its approach tile just outside; sides are ranked by how
    * close they are to an actual road, and only sides whose approach is open
