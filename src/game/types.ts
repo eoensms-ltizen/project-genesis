@@ -33,6 +33,10 @@ export type TileType =
   | "BedFoot"
   | "BedSite"
   | "Table"
+  // A pasture is fenced like a walled room: solid fence rails pen the herd in,
+  // with a gate people can walk through but animals cannot.
+  | "Fence"
+  | "FenceGate"
   | "Berry"
   | "FieldEmpty"
   | "FieldGrowing"

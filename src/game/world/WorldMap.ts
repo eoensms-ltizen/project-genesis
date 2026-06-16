@@ -38,6 +38,10 @@ const MOVE_COSTS: Record<TileType, number> = {
   BedFoot: Number.POSITIVE_INFINITY,
   BedSite: 1,
   Table: 1,
+  // A fence rail is solid; its gate is passable for people (animals are kept in
+  // by the animal-movement logic, which refuses to step onto fence or gate).
+  Fence: Number.POSITIVE_INFINITY,
+  FenceGate: 1.3,
   Berry: 2,
   FieldEmpty: 2.2,
   FieldGrowing: 2.2,
@@ -74,6 +78,8 @@ const TILE_CODES: Record<TileType, string> = {
   BedFoot: "f",
   BedSite: "m",
   Table: "t",
+  Fence: "x",
+  FenceGate: "j",
   Berry: "B",
   FieldEmpty: "e",
   FieldGrowing: "c",

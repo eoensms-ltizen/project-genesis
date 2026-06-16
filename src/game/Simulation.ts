@@ -40,7 +40,6 @@ const MAX_PARK_SIDE = 8;
 const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
-const BERRY_CAP = 140;
 // Forests are slow to recover so wood is a deliberate resource, not free and
 // instant — this is what pushes the colony toward stone and ore over time.
 const TREE_CAP = 240;
@@ -79,9 +78,11 @@ const SAVE_VERSION = 10;
 export const ADULT_AGE = 12;
 export const ELDER_AGE = 60;
 const COUPLE_BIRTH_COOLDOWN_SECONDS = 90;
-// Stumps take a long while to grow back into trees (was 0.03 ≈ ~3 min; now an
-// order of magnitude slower) so felling has lasting consequence.
-const STUMP_REGROW_CHANCE = 0.003;
+// A felled stump takes ~5 years to grow back into a tree, so clearing forest is a
+// lasting commitment. regrowNature runs every NATURE_TICK_SECONDS; a year is
+// DAY_LENGTH_SECONDS×DAYS_PER_YEAR sim-seconds, so the per-tick chance for a mean
+// of 5 years is NATURE_TICK_SECONDS / (5 × 6000) ≈ 0.000167.
+const STUMP_REGROW_CHANCE = 0.000167;
 const DURABILITY_DECAY_PER_TICK = 0.012;
 const EPISODE_CAP = 15;
 
@@ -500,7 +501,10 @@ export class Simulation {
     // entrance (a house with two doors wastes wall and isn't how anyone builds).
     // An annex passes its internal doorway in explicitly.
     const computed = input.doors ?? this.computeDoors(input.x, input.y, input.width, input.height);
-    const doors = input.doors ? input.doors : input.kind === "house" ? [computed[0]] : computed;
+    // A house keeps one door; a pasture keeps one gate. Other civic buildings may
+    // take the extra road-facing entrance computeDoors offers.
+    const single = input.kind === "house" || input.kind === "pasture";
+    const doors = input.doors ? input.doors : single ? [computed[0]] : computed;
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
@@ -548,6 +552,38 @@ export class Simulation {
     for (const tile of this.roomLayout(building)) {
       this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
     }
+  }
+
+  /** Paint a pasture as a fenced paddock: rail fence around the edge, one gate,
+   * open grass inside for the herd. */
+  private paintFencedYard(building: Building) {
+    const { x, y, width, height } = building;
+    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    for (let fy = 0; fy < height; fy += 1) {
+      for (let fx = 0; fx < width; fx += 1) {
+        const pos = { x: x + fx, y: y + fy };
+        const edge = fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1;
+        const type: TileType = doorKeys.has(`${pos.x},${pos.y}`)
+          ? "FenceGate"
+          : edge
+            ? "Fence"
+            : "Grass"; // open pasture to graze
+        this.world.setTile(pos, type);
+      }
+    }
+  }
+
+  /** A free interior grass tile of a pasture to drop a tamed animal onto. */
+  pastureGrazeSpot(building: Building): Vec2 | undefined {
+    for (let fy = 1; fy < building.height - 1; fy += 1) {
+      for (let fx = 1; fx < building.width - 1; fx += 1) {
+        const pos = { x: building.x + fx, y: building.y + fy };
+        if (this.world.getTile(pos)?.type === "Grass") {
+          return pos;
+        }
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -1116,7 +1152,11 @@ export class Simulation {
     }
     // Finished buildings are walled rooms (perimeter walls, a doorway, a floor
     // interior). Open spaces — parks, pastures, cemeteries — stay solid/special.
-    if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
+    if (stage === "built" && building.kind === "pasture") {
+      // A pasture is a fenced paddock: rail fence around the edge, a gate, open
+      // grass inside for the herd to graze.
+      this.paintFencedYard(building);
+    } else if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
       this.paintWalledRoom(building);
       building.plan = undefined;
       // A kitchen comes with a stove to cook at, set on its interior floor.
@@ -1160,9 +1200,9 @@ export class Simulation {
     }
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
-        // Walled rooms keep a Door tile to walk through; open spaces (park,
-        // pasture, cemetery) pave their doorway instead.
-        if (!ROOM_BUILDING_KINDS.has(building.kind)) {
+        // Walled rooms keep a Door tile and a pasture keeps its gate; other open
+        // spaces (park, cemetery) pave their doorway instead.
+        if (!ROOM_BUILDING_KINDS.has(building.kind) && building.kind !== "pasture") {
           this.world.setTile(door, "Road");
         }
       }
@@ -1513,13 +1553,9 @@ export class Simulation {
       return;
     }
 
-    if (berries.length < BERRY_CAP) {
-      for (const berry of berries) {
-        if (Math.random() < 0.06) {
-          this.spreadTile(berry, "Berry");
-        }
-      }
-    }
+    // Berry bushes no longer creep across the valley: a picked bush is gone for
+    // good. A fresh cluster only seeds when the valley has none left (above), so
+    // there's always some forage without a spreading carpet of berries.
 
     if (trees.length > 0 && trees.length < TREE_CAP) {
       for (const tree of trees) {
@@ -2975,6 +3011,12 @@ export class Simulation {
     animal.state = "tamed";
     animal.penId = pasture.id;
     animal.path = undefined;
+    // The herder leads it in through the gate; settle it on the grass inside the
+    // fence (animals can't open the gate themselves, so place it within).
+    const spot = this.pastureGrazeSpot(pasture);
+    if (spot) {
+      animal.position = { ...spot };
+    }
     this.notifyChanged();
     return true;
   }
@@ -3036,6 +3078,13 @@ export class Simulation {
     }
   }
 
+  /** Where an animal may walk: any walkable tile that isn't a fence or its gate —
+   * a fence pens the herd in, and animals can't work the gate latch. */
+  private animalCanEnter(p: Vec2): boolean {
+    const t = this.world.getTile(p)?.type;
+    return this.world.isWalkable(p) && t !== "Fence" && t !== "FenceGate";
+  }
+
   private stepWildAnimal(animal: Animal) {
     // Flee from the nearest hunter, otherwise wander.
     let flee: Vec2 | undefined;
@@ -3070,7 +3119,7 @@ export class Simulation {
     }
 
     const next = { x: animal.position.x + dir.x, y: animal.position.y + dir.y };
-    if (this.world.isWalkable(next)) {
+    if (this.animalCanEnter(next)) {
       animal.position = next;
       this.notifyChanged();
     }
@@ -3104,7 +3153,7 @@ export class Simulation {
       dir = steps[Math.floor(Math.random() * steps.length)];
     }
     const next = { x: animal.position.x + dir.x, y: animal.position.y + dir.y };
-    if (this.world.isWalkable(next)) {
+    if (this.animalCanEnter(next)) {
       animal.position = next;
       this.notifyChanged();
     }

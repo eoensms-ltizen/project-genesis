@@ -20,6 +20,9 @@ const PER_TILE_BUILD_SECONDS = 0.45;
 const FOUNDATION_WOOD = 3;
 const WALL_TILE_WOOD = 1;
 const DOOR_TILE_WOOD = 2;
+// Felling one tree yields this much wood — a tree is a meaningful haul, so fewer
+// trees fall to raise a building (and the slow ~5-year regrowth bites less).
+const WOOD_PER_TREE = 4;
 const BUILD_CARRY_WOOD = 12; // a generic load a builder hauls to site at once
 // A builder gathering for a known project fetches enough to finish it in one go,
 // up to this cap — so they fell/haul a whole load at once and then lay many
@@ -1302,8 +1305,8 @@ export class AgentBrain {
     // log in hand and fells again until they're holding a whole load — so they
     // arrive with enough wood to lay many tiles, not a tree-per-wall.
     if (agent.gatherWood !== undefined) {
-      agent.inventory.wood += 1;
-      simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
+      agent.inventory.wood += WOOD_PER_TREE;
+      simulation.log(tr(`${agent.name} chopped wood. +${WOOD_PER_TREE} wood`, `${agent.name}이(가) 나무를 베었다. +나무 ${WOOD_PER_TREE}`));
       agent.target = undefined;
       agent.path = undefined;
       if (agent.inventory.wood < agent.gatherWood) {
@@ -1319,11 +1322,11 @@ export class AgentBrain {
     // straight into the first homes). Once a warehouse exists, the log is left as
     // a pile on the ground for a hauler to carry in — the producer keeps felling.
     if (stump && simulation.hasAnyWarehouse()) {
-      simulation.dropWood(stump, 1);
-      simulation.log(tr(`${agent.name} felled a tree, leaving the log to be hauled. 🪵`, `${agent.name}이(가) 나무를 베어 통나무를 운반용으로 남겼다. 🪵`));
+      simulation.dropWood(stump, WOOD_PER_TREE);
+      simulation.log(tr(`${agent.name} felled a tree, leaving the logs to be hauled. 🪵`, `${agent.name}이(가) 나무를 베어 통나무를 운반용으로 남겼다. 🪵`));
     } else {
-      agent.inventory.wood += 1;
-      simulation.log(tr(`${agent.name} chopped wood. +1 wood`, `${agent.name}이(가) 나무를 베었다. +나무 1`));
+      agent.inventory.wood += WOOD_PER_TREE;
+      simulation.log(tr(`${agent.name} chopped wood. +${WOOD_PER_TREE} wood`, `${agent.name}이(가) 나무를 베었다. +나무 ${WOOD_PER_TREE}`));
     }
     agent.target = undefined;
     agent.path = undefined;
@@ -2033,7 +2036,8 @@ export class AgentBrain {
       station: [3, 3],
       police: [3, 3],
       smelter: [3, 3],
-      pasture: [3, 3],
+      // A roomy paddock: a 6×6 fence with a 4×4 grass interior for the herd.
+      pasture: [6, 6],
       cemetery: [3, 3],
       park: [3, 3],
     };

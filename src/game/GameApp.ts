@@ -104,7 +104,9 @@ export class GameApp {
       structureTile === "BedFoot" ||
       structureTile === "BedSite" ||
       structureTile === "Table" ||
-      structureTile === "Stove"
+      structureTile === "Stove" ||
+      structureTile === "Fence" ||
+      structureTile === "FenceGate"
     ) {
       return { kind: "tile", position: { ...position } };
     }

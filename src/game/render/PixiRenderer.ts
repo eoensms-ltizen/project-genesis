@@ -360,6 +360,11 @@ export class PixiRenderer {
         if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "foundation") {
           continue;
         }
+        // A finished pasture is drawn from its fence/gate/grass tiles in the
+        // terrain layer, like a walled room — no solid body here.
+        if (building.kind === "pasture" && building.stage === "built") {
+          continue;
+        }
         drawBuilding(this.buildingGraphics, building, this.flatBuildings);
       }
     }
@@ -747,6 +752,31 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xe6ddc8);
     graphics.circle(px + 10, py + 8, 1.2);
     graphics.fill(0xe6ddc8);
+  }
+
+  if (type === "Fence") {
+    // A post-and-rail fence on the pasture's grass.
+    const rail = 0x8a6a44;
+    const post = 0x6b4a2c;
+    graphics.rect(px, py + 5, TILE_SIZE, 2);
+    graphics.fill(rail);
+    graphics.rect(px, py + 10, TILE_SIZE, 2);
+    graphics.fill(rail);
+    graphics.rect(px + TILE_SIZE / 2 - 1.5, py + 2, 3, TILE_SIZE - 4);
+    graphics.fill(post);
+  }
+
+  if (type === "FenceGate") {
+    // A lighter swing gate set in the fence line — people pass, animals don't.
+    const post = 0x6b4a2c;
+    graphics.rect(px + 1, py + 2, 2.5, TILE_SIZE - 4);
+    graphics.fill(post);
+    graphics.rect(px + TILE_SIZE - 3.5, py + 2, 2.5, TILE_SIZE - 4);
+    graphics.fill(post);
+    graphics.rect(px + 2, py + 6, TILE_SIZE - 4, 1.5);
+    graphics.fill({ color: 0xb89a6a, alpha: 0.9 });
+    graphics.rect(px + 2, py + 10, TILE_SIZE - 4, 1.5);
+    graphics.fill({ color: 0xb89a6a, alpha: 0.9 });
   }
 
 }
@@ -1391,6 +1421,10 @@ function tileColor(type: TileType): number {
       return 0x4a3b2a; // floor tone; the ghost outline is drawn on top
     case "Table":
       return 0x4a3b2a;
+    case "Fence":
+      return 0x3f5a26; // pasture grass under the rails
+    case "FenceGate":
+      return 0x3f5a26;
     case "Berry":
       return 0x2c4a28;
     case "FieldEmpty":

@@ -178,6 +178,8 @@ const TILE_NAMES: Partial<Record<TileType, () => string>> = {
   BedFoot: () => tr("Bed", "침대"),
   BedSite: () => tr("Planned bed", "침대 터 (제작 예정)"),
   Table: () => tr("Dining table", "식탁"),
+  Fence: () => tr("Fence", "울타리"),
+  FenceGate: () => tr("Gate", "울타리 문"),
   Berry: () => tr("Berry bush", "베리 덤불"),
   FieldEmpty: () => tr("Field", "밭"),
   FieldGrowing: () => tr("Growing field", "자라는 밭"),
