@@ -702,12 +702,6 @@ export class AgentBrain {
       return true;
     }
 
-    // A build already under way nearby pulls in spare hands — many builders raise
-    // a house together rather than one plodding through it alone.
-    if (this.tryHelpBuild(agent, simulation)) {
-      return true;
-    }
-
     // Provisioning is need-driven from the very first resident, not gated on
     // reaching a later era: raise a warehouse to stockpile goods, then farm to
     // keep the larder full so hunger is met from stores rather than foraging.
@@ -715,6 +709,13 @@ export class AgentBrain {
     // its advanced civic buildings remain gated by their own era checks inside.
     const communal = this.communalProject(agent, simulation);
     if (communal === "started") {
+      return true;
+    }
+    // Set up one's own bed early: it's a quick, one-time comfort (each resident
+    // builds a single bed), so it comes before endless farming and before pitching
+    // in on neighbours' builds — otherwise it never gets a turn and folk sleep on
+    // the floor forever.
+    if (this.tryBuildBed(agent, simulation)) {
       return true;
     }
     // Farm whenever the food stores sit below target — a standing guard against
@@ -727,10 +728,7 @@ export class AgentBrain {
     if (this.tryCook(agent, simulation)) {
       return true;
     }
-    // Furnish the home with a bed (then a dining table) — comfort improvements.
-    if (this.tryBuildBed(agent, simulation)) {
-      return true;
-    }
+    // A dining table once the bed's in and food is handled — a further comfort.
     if (this.tryBuildTable(agent, simulation)) {
       return true;
     }
@@ -738,6 +736,12 @@ export class AgentBrain {
     // bedroom onto it (sharing a wall), then move your bed in — privacy emerges
     // from crowding + surplus, no player drawing required.
     if (this.tryBuildPrivateRoom(agent, simulation)) {
+      return true;
+    }
+    // Spare hands pitch in on a neighbour's half-built room — a barn-raising — but
+    // only after one's own provisioning and bed are seen to, so helping never
+    // starves the basics (this used to run first and nothing else got done).
+    if (this.tryHelpBuild(agent, simulation)) {
       return true;
     }
     // Specialists ply their trade once the town is organised enough to assign jobs.
