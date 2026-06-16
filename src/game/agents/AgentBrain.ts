@@ -73,6 +73,11 @@ const CRAFT_DURATION_SECONDS = 3;
 // A bed: built from wood inside one's home. Sleeping in a bed rests best.
 const BED_WOOD_COST = 4;
 const TABLE_WOOD_COST = 4;
+// Once the warehouse holds at least this much wood, a resident sharing a communal
+// house may spend the surplus annexing a private bedroom (privacy without
+// starving the village of building material). Tuned above a house's full cost so
+// expansion only happens from genuine surplus, never the last of the stores.
+const PRIVATE_ROOM_WOOD_SURPLUS = 40;
 const FURNISH_DURATION_SECONDS = 3;
 const COOK_DURATION_SECONDS = 3;
 const COOK_RAW_COST = 2;
@@ -699,6 +704,12 @@ export class AgentBrain {
     if (this.tryBuildTable(agent, simulation)) {
       return true;
     }
+    // Sharing a communal house grates once there's wood to spare: annex a private
+    // bedroom onto it (sharing a wall), then move your bed in — privacy emerges
+    // from crowding + surplus, no player drawing required.
+    if (this.tryBuildPrivateRoom(agent, simulation)) {
+      return true;
+    }
     // Specialists ply their trade once the town is organised enough to assign jobs.
     if (simulation.era >= 1 && this.doJobWork(agent, simulation)) {
       return true;
@@ -821,6 +832,13 @@ export class AgentBrain {
   private shouldMoveOut(agent: Agent, simulation: Simulation): boolean {
     if (agent.spouseId || !agent.homeBuildingId) {
       return false;
+    }
+    // Don't abandon a home mid-annex: finish the private bedroom first.
+    if (agent.projectBuildingId) {
+      const proj = simulation.getBuilding(agent.projectBuildingId);
+      if (proj?.kind === "bedroom" && proj.stage !== "built") {
+        return false;
+      }
     }
     const home = simulation.getBuilding(agent.homeBuildingId);
     if (!home || home.kind !== "house" || home.ownerId === agent.id) {
@@ -1637,6 +1655,88 @@ export class AgentBrain {
     this.setState(agent, simulation, "Idle");
   }
 
+  /**
+   * Move a resident's bed into a finished room: lift their old bed (back to bare
+   * floor) and lay one on the new room's interior, retargeting their bedPos. If
+   * they had no bed yet, this simply gives them one in the new room.
+   */
+  private relocateBedInto(agent: Agent, simulation: Simulation, room: Building) {
+    const spot = simulation.bedSpot(room) ?? simulation.houseInterior(room);
+    if (agent.bedPos && simulation.world.getTile(agent.bedPos)?.type === "Bed") {
+      simulation.world.setTile(agent.bedPos, "Floor");
+    }
+    simulation.world.setTile(spot, "Bed");
+    agent.bedPos = { ...spot };
+  }
+
+  /** True once this resident already owns a private bedroom annex. */
+  private hasPrivateRoom(agent: Agent, simulation: Simulation): boolean {
+    return simulation.buildings.some(
+      (b) => b.kind === "bedroom" && b.ownerId === agent.id,
+    );
+  }
+
+  /**
+   * A resident sharing a communal house annexes their own bedroom onto it once
+   * the village has wood to spare. The new room shares one of the house's walls
+   * (no double wall) and opens onto it through an internal door. Their bed moves
+   * in when it's done. Returns true if the resident took up (or is fetching wood
+   * for) the project.
+   */
+  private tryBuildPrivateRoom(agent: Agent, simulation: Simulation): boolean {
+    // Don't start a second project, and don't expand if you already have privacy.
+    if (agent.projectBuildingId || !agent.home || !agent.homeBuildingId) {
+      return false;
+    }
+    if (this.hasPrivateRoom(agent, simulation)) {
+      return false;
+    }
+    const home = simulation.getBuilding(agent.homeBuildingId);
+    if (!home || home.kind !== "house" || home.stage !== "built") {
+      return false;
+    }
+    // Privacy only matters when the house is actually shared — a lone occupant
+    // already has the place to themselves.
+    if (simulation.occupantsOf(home.id) < 2) {
+      return false;
+    }
+    // Only from genuine surplus, so annexing never starves construction/heating.
+    if (simulation.stockOf("wood") < PRIVATE_ROOM_WOOD_SURPLUS) {
+      return false;
+    }
+    // Need the groundwork load in hand before breaking ground; go top up first.
+    if (agent.inventory.wood < FOUNDATION_WOOD) {
+      return this.fetchWood(agent, simulation, BUILD_CARRY_WOOD);
+    }
+    const site = simulation.findAnnexSite(home);
+    if (!site) {
+      return false;
+    }
+    const bedroom = simulation.registerBuilding({
+      kind: "bedroom",
+      x: site.x,
+      y: site.y,
+      width: site.width,
+      height: site.height,
+      door: site.door,
+      doors: [site.door],
+      ownerId: agent.id,
+      annexOf: home.id,
+    });
+    simulation.claimBuildingFootprint(bedroom);
+    // Break ground immediately so the build is never left dangling at "site"
+    // (whose resume path routes to a road-facing door an annex doesn't have).
+    agent.inventory.wood = Math.max(0, agent.inventory.wood - FOUNDATION_WOOD);
+    simulation.setBuildingStage(bedroom, "foundation");
+    agent.projectBuildingId = bedroom.id;
+    agent.buildTarget = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    simulation.log(tr(`${agent.name} started a private bedroom. 🚪`, `${agent.name}이(가) 개인 침실을 증축하기 시작했다. 🚪`), [agent]);
+    this.setState(agent, simulation, "BuildHouse");
+    return true;
+  }
+
   private findHouseSite(agent: Agent, simulation: Simulation) {
     // Last check before raising a new hut: if a shelter has just gone up for
     // staking (e.g. another newcomer started one this tick), join it instead —
@@ -2008,7 +2108,13 @@ export class AgentBrain {
   private finishBuilding(agent: Agent, simulation: Simulation, building: Building) {
     simulation.setBuildingStage(building, "built");
     simulation.releaseBuildingFootprint(building);
-    if (building.kind === "house") {
+    if (building.kind === "bedroom") {
+      // A private annex: keep living in the communal house, but move the bed into
+      // the new room so the resident sleeps in privacy from now on.
+      building.ownerId = agent.id;
+      this.relocateBedInto(agent, simulation, building);
+      simulation.log(tr(`${agent.name} finished a private bedroom. 🛏️`, `${agent.name}이(가) 개인 침실을 완성했다. 🛏️`), [agent]);
+    } else if (building.kind === "house") {
       agent.home = simulation.houseInterior(building);
       agent.homeSite = undefined;
       simulation.log(tr(`${agent.name} finished their house.`, `${agent.name}이(가) 집을 완성했다.`), [agent]);
@@ -2996,6 +3102,7 @@ function clampNeed(value: number): number {
 function buildingNameKo(kind: BuildingKind): string {
   const names: Record<BuildingKind, string> = {
     house: "집",
+    bedroom: "침실",
     warehouse: "창고",
     kitchen: "부엌",
     church: "교회",
@@ -3027,6 +3134,9 @@ function resourceNameKo(resource: ResourceKind): string {
 
 const BUILDING_WOOD_COST: Record<BuildingKind, number> = {
   house: HOUSE_WOOD_COST,
+  // Annexes are built piecemeal (per-tile), so this lump figure is only a
+  // fallback; their real cost is the foundation plus each wall/door tile.
+  bedroom: FOUNDATION_WOOD,
   warehouse: WAREHOUSE_WOOD_COST,
   kitchen: KITCHEN_WOOD_COST,
   church: CHURCH_WOOD_COST,

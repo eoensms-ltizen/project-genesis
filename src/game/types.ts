@@ -114,6 +114,10 @@ export type AgentJob =
 
 export type BuildingKind =
   | "house"
+  // A private bedroom annexed onto a communal house, sharing one of its walls.
+  // Not a home in its own right — its owner still lives in the parent house and
+  // only sleeps here, so it never counts toward housing capacity/occupancy.
+  | "bedroom"
   | "warehouse"
   | "kitchen"
   | "church"
@@ -134,6 +138,7 @@ export type BuildingStage = "site" | "foundation" | "built";
 // spaces and keep their own look.
 export const ROOM_BUILDING_KINDS: ReadonlySet<BuildingKind> = new Set([
   "house",
+  "bedroom",
   "warehouse",
   "kitchen",
   "church",
@@ -167,6 +172,9 @@ export type Building = {
   // room, each laid by hand one at a time. Present while the building is going
   // up (stage "foundation"); residents tick `done` true as they place each tile.
   plan?: BuildPlanTile[];
+  // For a "bedroom" annex: the id of the communal house it's attached to (it
+  // shares one wall with that house and opens onto it through an internal door).
+  annexOf?: string;
 };
 
 // One tile of a building's construction plan — a wall, floor, or doorway that a

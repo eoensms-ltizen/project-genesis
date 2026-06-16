@@ -489,11 +489,16 @@ export class Simulation {
     height: number;
     door: Vec2;
     ownerId?: string;
+    annexOf?: string;
+    // Explicit entrance(s) — used by an annex, whose door is internal (it opens
+    // onto its parent house, not a street) and so can't be auto-sited by road.
+    doors?: Vec2[];
   }): Building {
     // Civic buildings get road-facing doors as needed; a home keeps a single
     // entrance (a house with two doors wastes wall and isn't how anyone builds).
-    const computed = this.computeDoors(input.x, input.y, input.width, input.height);
-    const doors = input.kind === "house" ? [computed[0]] : computed;
+    // An annex passes its internal doorway in explicitly.
+    const computed = input.doors ?? this.computeDoors(input.x, input.y, input.width, input.height);
+    const doors = input.doors ? input.doors : input.kind === "house" ? [computed[0]] : computed;
     const building: Building = {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
@@ -554,7 +559,11 @@ export class Simulation {
       const layout = this.roomLayout(building);
       const order = (t: BuildPlanTile["t"]): number => (t === "Wall" ? 2 : t === "Door" ? 1 : 0);
       building.plan = layout
-        .map((tile) => ({ ...tile, done: false }))
+        // A tile already showing its target type needs no laying. This is what
+        // lets an annex share its parent's wall: those tiles are already Wall, so
+        // they start done — only the genuinely new structure (and the doorway
+        // punched through the shared wall) is built and paid for.
+        .map((tile) => ({ ...tile, done: this.world.getTile(tile)?.type === tile.t }))
         .sort((a, b) => order(a.t) - order(b.t));
     }
     return building.plan;
@@ -647,6 +656,94 @@ export class Simulation {
       }
     }
     return tiles;
+  }
+
+  /**
+   * A spot for a private 3×3 bedroom annexed onto `parent`, sharing one of its
+   * walls (no double wall). The annex's footprint overlaps the parent's wall line
+   * on one side; an internal doorway is punched through that shared wall, opening
+   * onto the parent's interior. Returns the annex rectangle and that doorway, or
+   * undefined if no side has clear ground for one. Tries each side, then offsets.
+   */
+  findAnnexSite(
+    parent: Building,
+  ): { x: number; y: number; width: number; height: number; door: Vec2 } | undefined {
+    const { x: px, y: py, width: pw, height: ph } = parent;
+    const A = 3; // annex side length (1×1 interior)
+    const isGrass = (p: Vec2): boolean =>
+      this.world.getTile(p)?.type === "Grass" && !this.isTileClaimed(p);
+    const isFloor = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    const isWall = (p: Vec2): boolean => this.world.getTile(p)?.type === "Wall";
+
+    type Cand = { ax: number; ay: number; door: Vec2; sharedTiles: Vec2[]; newTiles: Vec2[] };
+    const build = (
+      ax: number,
+      ay: number,
+      door: Vec2,
+      parentNeighbor: Vec2,
+      sharedAxis: "col" | "row",
+      sharedAt: number,
+    ): Cand | undefined => {
+      // The doorway must open onto an actual interior floor tile of the parent.
+      if (!isFloor(parentNeighbor)) {
+        return undefined;
+      }
+      const shared: Vec2[] = [];
+      const fresh: Vec2[] = [];
+      for (let fy = 0; fy < A; fy += 1) {
+        for (let fx = 0; fx < A; fx += 1) {
+          const p = { x: ax + fx, y: ay + fy };
+          if (!this.world.inBounds(p)) {
+            return undefined;
+          }
+          const onShared = sharedAxis === "col" ? p.x === sharedAt : p.y === sharedAt;
+          if (onShared) {
+            shared.push(p);
+          } else {
+            fresh.push(p);
+          }
+        }
+      }
+      // The shared edge must lie on the parent's standing wall; every other tile
+      // must be open ground we can build on.
+      if (!shared.every(isWall) || !fresh.every(isGrass)) {
+        return undefined;
+      }
+      return { ax, ay, door, sharedTiles: shared, newTiles: fresh };
+    };
+
+    const candidates: (Cand | undefined)[] = [];
+    // Each side shares the parent's outer wall line; slide the annex along that
+    // side so its 1-tile interior lines up with a parent interior row/column.
+    for (let off = 0; off <= ph - A; off += 1) {
+      const ay = py + off;
+      const mid = ay + 1;
+      // East: shared column = parent's right wall.
+      candidates.push(
+        build(px + pw - 1, ay, { x: px + pw - 1, y: mid }, { x: px + pw - 2, y: mid }, "col", px + pw - 1),
+      );
+      // West: shared column = parent's left wall.
+      candidates.push(
+        build(px - A + 1, ay, { x: px, y: mid }, { x: px + 1, y: mid }, "col", px),
+      );
+    }
+    for (let off = 0; off <= pw - A; off += 1) {
+      const ax = px + off;
+      const mid = ax + 1;
+      // South: shared row = parent's bottom wall.
+      candidates.push(
+        build(ax, py + ph - 1, { x: mid, y: py + ph - 1 }, { x: mid, y: py + ph - 2 }, "row", py + ph - 1),
+      );
+      // North: shared row = parent's top wall.
+      candidates.push(
+        build(ax, py - A + 1, { x: mid, y: py }, { x: mid, y: py + 1 }, "row", py),
+      );
+    }
+    const chosen = candidates.find((c): c is Cand => c !== undefined);
+    if (!chosen) {
+      return undefined;
+    }
+    return { x: chosen.ax, y: chosen.ay, width: A, height: A, door: chosen.door };
   }
 
   /**
@@ -777,12 +874,24 @@ export class Simulation {
       const tileType: TileType =
         stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
       for (const position of footprintTiles(building)) {
+        // Never stamp over a finished wall or doorway: an annex's footprint
+        // overlaps its parent house's shared wall, which must stay standing while
+        // the annex is staked and raised. Only fresh ground gets the site/floor.
+        const existing = this.world.getTile(position)?.type;
+        if (existing === "Wall" || existing === "Door") {
+          continue;
+        }
         this.world.setTile(position, tileType);
       }
     }
+    // An annex's only door is internal — it opens onto its parent house's
+    // interior, not a street — so it needs no road approach reserved or paved.
+    const annex = building.kind === "bedroom";
     // Every entrance keeps a clear approach: the tile in front of each door
     // becomes Road, so a building can never be sealed in by neighbours.
-    this.reserveEntrance(building);
+    if (!annex) {
+      this.reserveEntrance(building);
+    }
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
         // Walled rooms keep a Door tile to walk through; open spaces (park,
@@ -792,7 +901,7 @@ export class Simulation {
         }
       }
     }
-    if (stage === "built") {
+    if (stage === "built" && !annex) {
       this.paveApproach(building);
     }
     if (stage === "built" && building.kind === "station") {

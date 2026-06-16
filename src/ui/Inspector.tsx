@@ -118,6 +118,7 @@ function jobName(job: Agent["job"]): string {
 
 const KIND_NAMES: Record<Building["kind"], () => string> = {
   house: () => tr("house", "집"),
+  bedroom: () => tr("bedroom", "침실"),
   warehouse: () => tr("warehouse", "창고"),
   kitchen: () => tr("kitchen", "부엌"),
   church: () => tr("church", "교회"),

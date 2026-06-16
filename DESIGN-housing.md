@@ -69,11 +69,18 @@
 - 빌더 상태머신: `AgentBrain.ts` — `buildHouse`(per-tile 드라이버: 기초 비용→타일별 자재 체크→`MoveToBuildTile`), `buildTile`(자재 차감+배치), `finishBuilding`, `buildOpenSpace`(공원/목장/묘지용 구 타이머 빌드). 자재 상수 `FOUNDATION_WOOD/WALL_TILE_WOOD/DOOR_TILE_WOOD/BUILD_CARRY_WOOD`, `tileWood()`. 노숙/재개( resume) 분기와 `MoveToHouseSite` 도착 로직이 foundation 단계면 곧장 타일 시공으로 라우팅.
 - 타입: `BuildPlanTile`, `Building.plan`, `Agent.buildTarget`(저장 제외), 상태 `MoveToBuildTile`/`BuildTile`.
 
-**다음 작업 = "벽 공유 증축"(Stage 2, 사용자 명시 우선순위):**
-자재 여유가 생기면 공용 주택에 **개인 침실을 한 칸 증축**하되 **기존 벽 한 줄을 공유**(이중벽 X). 필요 사항:
-1. 배치: 신축 방 푸트프린트가 **기존 벽 위에 겹치도록** 허용(현재 `placementClear`는 잔디 위만 → 항상 이중벽). 공유벽 1줄.
-2. **내부 문**: 공용방↔개인방을 잇는 문 한 칸(plan에 Door로). `computeDoors`는 외벽/도로용이므로 내부 문은 별도 로직.
-3. **방 소유권**: 개인 침실에 owner 지정, 그 주민의 `bedPos`를 거기로 이전. 공용 막사 침대 → 개인방으로 이동.
-4. 발현 조건: 무드/프라이버시(현재 cramp comfort 페널티) 또는 자재 여유가 임계 넘으면 증축 결정(needs-driven, 유저가 안 그림).
+**Stage 2 "벽 공유 증축" 완료 (이번 세션):**
+공용 주택을 공유하는 주민이 자재 여유가 생기면 **개인 침실(3×3, 내부 1칸)을 한 칸 증축**한다. 기존 벽 한 줄을 공유(이중벽 X)하고, 그 공유벽에 **내부 문 한 칸**을 뚫어 공용방으로만 통한다.
+- 새 건물 종류 `"bedroom"`(`ROOM_BUILDING_KINDS`에 포함, `Building.annexOf`로 부모 집과 연결). 집 점유/수용량 enumeration은 `kind === "house"`라 침실은 자동 제외 — 수용량/거주자 수에 안 잡힘.
+- 배치: `Simulation.findAnnexSite(parent)` — 4면×오프셋을 훑어, 공유 엣지가 **실제 부모 벽(Wall)** 위에 있고 문의 부모쪽 이웃이 **내부 Floor**인 자리를 찾음(없으면 undefined). 신규 타일은 잔디·미점유여야.
+- 내부 문: `registerBuilding`에 `doors`/`annexOf` 명시 인자 추가(외벽/도로용 `computeDoors` 우회). 침실은 `setBuildingStage`에서 도로 예약/포장 스킵, 푸트프린트 페인트가 **기존 Wall/Door를 덮지 않음**(공유벽 보존).
+- 자재 절약: `ensureBuildPlan`이 **이미 목표 타일과 같은 칸은 done 처리** → 공유벽은 다시 안 깖/안 냄, 문(공유벽 Wall→Door)과 신규 구조만 시공.
+- 발현/소유권: `AgentBrain.tryBuildPrivateRoom`(doProductiveWork, 침대·식탁 다음). 조건 = 공용 주택 거주(occupants≥2) + 창고 wood ≥ `PRIVATE_ROOM_WOOD_SURPLUS(40)` + 본인 침실 미보유. 기초 자재(`FOUNDATION_WOOD`) 손에 없으면 먼저 fetchWood. 등록 즉시 foundation까지 깔고 BuildHouse로 — "site"에 머물러 부모-도로 문으로 라우팅되는 버그 회피. 완공 시 `finishBuilding`의 bedroom 분기가 owner 지정 + `relocateBedInto`로 침대를 공용방→개인방 이전(homeBuildingId는 공용집 유지).
+- 검증 완료(preview 스크립트): 공유벽 1줄·내부 문·이중벽 없음, 침실은 공용집을 통해서만 도달(7스텝), 수용량/거주자 불변, save/load 라운드트립(kind·annexOf·문 타일), 실제 brain 35스텝 만에 자가 증축 + 침대 이전. tsc/build 클린.
+
+**다음 작업 후보 (Stage 3 — 멘탈/무드, DESIGN §M3):**
+- 무드 = 방 품질(넓이/분리/청결/장식) + 사건, era/부유도로 가중 점증. 개인 침실 보유가 프라이버시 무드 보너스를 주도록 연결(현재 cramp comfort 페널티와 짝).
+- 기능 합방 페널티(M2): 침실+주방+창고 한 방이면 약한 불편 — flood-fill 방 감지 도입 시.
+- 침실 소유자 사망 시 빈 침실 정리/재배정, 부모 집 재개발 시 침실 처리(현재 미처리, 엣지).
 
 참고: 검사 중 "새 세계"가 눌려 localStorage 자동저장이 새 골짜기로 초기화됨(동작 정상, 기존 마을은 소실).

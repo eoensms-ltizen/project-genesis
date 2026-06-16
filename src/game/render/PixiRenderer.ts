@@ -756,6 +756,7 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
   // by what's inside — no emblem needed.
   if (
     building.kind === "house" ||
+    building.kind === "bedroom" || // a bedroom shows its bed inside, like a house
     building.kind === "warehouse" ||
     building.kind === "kitchen"
   ) {
