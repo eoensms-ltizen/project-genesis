@@ -3146,21 +3146,31 @@ export class AgentBrain {
     this.setState(agent, simulation, resume ?? "Idle");
   }
 
-  /** Where a resident lies down: their OWN bed if they have one, else home floor. */
-  private sleepSpot(agent: Agent, simulation: Simulation): Vec2 | undefined {
-    if (!agent.home) {
-      return undefined;
-    }
-    // Only their own bed — never pile onto someone else's.
-    if (this.hasOwnBed(agent, simulation)) {
-      return agent.bedPos;
-    }
-    return agent.home;
-  }
-
   private goSleep(agent: Agent, simulation: Simulation) {
-    const spot = this.sleepSpot(agent, simulation);
-    if (spot && !samePos(roundVec(agent.position), spot)) {
+    const rp = roundVec(agent.position);
+    // A bed is solid: you climb onto it from an adjacent tile. Walk up beside the
+    // bed, and the Sleep state mounts it. If already on/beside it, sleep now.
+    if (this.hasOwnBed(agent, simulation) && agent.bedPos) {
+      const bed = agent.bedPos;
+      if (samePos(rp, bed) || isAdjacent(rp, bed)) {
+        this.setState(agent, simulation, "Sleep");
+        return;
+      }
+      const path = findPath(simulation.world, {
+        start: agent.position,
+        goal: bed,
+        stopAdjacent: true, // stop beside the (solid) bed, then mount in Sleep
+      });
+      if (path) {
+        agent.target = { ...bed };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveHome");
+        return;
+      }
+      // Bed unreachable (boxed in) — fall through to sleeping on the home floor.
+    }
+    const spot = agent.home;
+    if (spot && !samePos(rp, spot)) {
       const path = findPath(simulation.world, { start: agent.position, goal: spot });
       if (path) {
         agent.target = { ...spot };
@@ -3173,6 +3183,17 @@ export class AgentBrain {
   }
 
   private sleep(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    // Climb onto one's own bed when standing right beside it (the bed is solid, so
+    // we step onto it here instead of letting the pathfinder route onto it).
+    if (
+      this.hasOwnBed(agent, simulation) &&
+      agent.bedPos &&
+      isAdjacent(roundVec(agent.position), agent.bedPos)
+    ) {
+      agent.position = { ...agent.bedPos };
+      agent.path = undefined;
+      agent.target = undefined;
+    }
     // A bed rests best, one's own home next, rough sleeping outside the least.
     const onBed = simulation.world.getTile(roundVec(agent.position))?.type === "Bed";
     const atHome = Boolean(agent.home && samePos(roundVec(agent.position), agent.home));
@@ -3382,6 +3403,11 @@ function squaredDistance(a: Vec2, b: Vec2): number {
 
 function samePos(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y;
+}
+
+/** Orthogonally adjacent (sharing an edge) — used to mount a bed from beside it. */
+function isAdjacent(a: Vec2, b: Vec2): boolean {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
 }
 
 function clampNeed(value: number): number {

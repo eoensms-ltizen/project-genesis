@@ -29,11 +29,13 @@ const MOVE_COSTS: Record<TileType, number> = {
   RockGranite: Number.POSITIVE_INFINITY,
   OreIron: Number.POSITIVE_INFINITY,
   RockFloor: 1,
-  // Furniture sits on a room floor. A bed is walkable (you lie on it); a stove is
-  // solid — you cook standing beside it, not on top of it.
+  // Furniture is solid for transit — you don't walk through it. A bed can be
+  // climbed onto from an adjacent tile to sleep (handled by the sleep logic), but
+  // pathfinding never routes through it; a stove is cooked at from beside it. A
+  // reserved bed site is still bare floor until built, so it stays walkable.
   Stove: Number.POSITIVE_INFINITY,
-  Bed: 1,
-  BedFoot: 1,
+  Bed: Number.POSITIVE_INFINITY,
+  BedFoot: Number.POSITIVE_INFINITY,
   BedSite: 1,
   Table: 1,
   Berry: 2,

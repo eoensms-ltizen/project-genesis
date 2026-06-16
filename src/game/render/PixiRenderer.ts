@@ -274,6 +274,9 @@ export class PixiRenderer {
           // the mattress runs unbroken across the seam (needs the neighbour, so
           // it can't live in the per-tile drawTile).
           drawBed(g, world, tx, ty, tile.type === "Bed");
+        } else if (tile.type === "BedSite") {
+          // The reserved plot likewise reads as one ghost bed, not two squares.
+          drawBedSite(g, world, tx, ty);
         } else {
           drawTile(g, tx, ty, tile.type);
         }
@@ -557,6 +560,46 @@ function drawBed(graphics: Graphics, world: WorldMap, x: number, y: number, isHe
   }
 }
 
+/**
+ * A reserved bed plot drawn as one ghost bed: a translucent outline spanning both
+ * site tiles (no line down the middle), marking "a bed goes here" before it's
+ * built. Mirrors drawBed's seam handling so it reads as a single piece.
+ */
+function drawBedSite(graphics: Graphics, world: WorldMap, x: number, y: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const dirs = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+  ];
+  const pd = dirs.find((d) => world.getTile({ x: x + d.x, y: y + d.y })?.type === "BedSite");
+  graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+  graphics.fill(tileColor("Floor"));
+  // Translucent fill, flush on the seam so the two halves merge into one shape.
+  const F = 1.5;
+  const left = pd && pd.x === -1 ? 0 : F;
+  const right = pd && pd.x === 1 ? 0 : F;
+  const top = pd && pd.y === -1 ? 0 : F;
+  const bottom = pd && pd.y === 1 ? 0 : F;
+  graphics.rect(px + left, py + top, TILE_SIZE - left - right, TILE_SIZE - top - bottom);
+  graphics.fill({ color: 0x8a5a86, alpha: 0.18 });
+  // Outline only the non-shared edges so the box wraps the whole plot.
+  const edge = (x1: number, y1: number, x2: number, y2: number) => {
+    graphics.moveTo(px + x1, py + y1);
+    graphics.lineTo(px + x2, py + y2);
+  };
+  const T = TILE_SIZE;
+  if (!(pd && pd.y === -1)) edge(left, top, T - right, top);
+  if (!(pd && pd.y === 1)) edge(left, T - bottom, T - right, T - bottom);
+  if (!(pd && pd.x === -1)) edge(left, top, left, T - bottom);
+  if (!(pd && pd.x === 1)) edge(T - right, top, T - right, T - bottom);
+  graphics.stroke({ color: 0xb98ab2, width: 1, alpha: 0.85 });
+  graphics.circle(px + T / 2, py + T / 2, 1.4);
+  graphics.fill({ color: 0xb98ab2, alpha: 0.7 });
+}
+
 function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
@@ -693,16 +736,6 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill({ color: 0x8a8f99, alpha: 0.8 });
   }
 
-  if (type === "BedSite") {
-    // A planned bed: a dashed ghost outline so the spot reads as "a bed goes here"
-    // before it's built.
-    graphics.rect(px + 1.5, py + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
-    graphics.fill({ color: 0x8a5a86, alpha: 0.18 });
-    graphics.rect(px + 1.5, py + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
-    graphics.stroke({ color: 0xb98ab2, width: 1, alpha: 0.85 });
-    graphics.circle(px + TILE_SIZE / 2, py + TILE_SIZE / 2, 1.4);
-    graphics.fill({ color: 0xb98ab2, alpha: 0.7 });
-  }
 
   if (type === "Table") {
     // A wooden dining table with a couple of plates.

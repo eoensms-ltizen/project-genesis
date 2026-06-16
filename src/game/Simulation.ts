@@ -688,11 +688,13 @@ export class Simulation {
   ): { head: Vec2; foot?: Vec2; stand: Vec2 } | undefined {
     const home = this.houseInterior(building);
     const free = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    // Place beds toward the edges/corners first, leaving the centre tile clear as
+    // an aisle and the home anchor (which must stay walkable) — beds are solid.
     const interior = this.interiorTiles(building)
       .filter(free)
       .sort(
         (a, b) =>
-          Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y),
+          Math.hypot(b.x - home.x, b.y - home.y) - Math.hypot(a.x - home.x, a.y - home.y),
       );
     const DIRS = [
       { x: 1, y: 0 },
@@ -700,22 +702,85 @@ export class Simulation {
       { x: 0, y: 1 },
       { x: 0, y: -1 },
     ];
-    // Prefer a real two-tile bed: head + an adjacent foot, plus a separate free
-    // tile to stand on while building (not one of the bed tiles).
+    const key = (p: Vec2) => `${p.x},${p.y}`;
+    const doors = this.buildingDoors(building);
+    // Every interior cell plus the doorways — the room's navigable space.
+    const inRoom = new Set([
+      ...this.interiorTiles(building).map(key),
+      ...doors.map(key),
+    ]);
+    // Beds are solid, so a new bed mustn't cut the room: with `block` tiles treated
+    // as walls, every remaining free-floor tile (and the build/mount tile) must
+    // still be reachable from a doorway. Returns the reachable set, or null if the
+    // placement would strand a tile or seal the door.
+    const reachableWith = (block: Vec2[]): Set<string> | null => {
+      const blocked = new Set(block.map(key));
+      const seen = new Set<string>();
+      const stack: Vec2[] = [];
+      for (const d of doors) {
+        if (this.world.isWalkable(d) && !blocked.has(key(d))) {
+          seen.add(key(d));
+          stack.push(d);
+        }
+      }
+      // A reserved-but-unbuilt bed (BedSite) is treated as a planned solid bed.
+      const planned = (p: Vec2): boolean => this.world.getTile(p)?.type === "BedSite";
+      while (stack.length) {
+        const p = stack.pop()!;
+        for (const s of DIRS) {
+          const np = { x: p.x + s.x, y: p.y + s.y };
+          const k = key(np);
+          if (
+            seen.has(k) ||
+            !inRoom.has(k) ||
+            blocked.has(k) ||
+            planned(np) ||
+            !this.world.isWalkable(np)
+          ) {
+            continue;
+          }
+          seen.add(k);
+          stack.push(np);
+        }
+      }
+      for (const t of this.interiorTiles(building)) {
+        if (blocked.has(key(t))) {
+          continue;
+        }
+        const ty = this.world.getTile(t)?.type;
+        // No free floor tile may be cut off...
+        if (ty === "Floor" && !seen.has(key(t))) {
+          return null;
+        }
+        // ...and every existing or planned bed must keep a reachable tile beside
+        // it to climb on from, so a new bed never boxes another one in.
+        if (ty === "Bed" || ty === "BedFoot" || ty === "BedSite") {
+          const mountable = DIRS.some((s) => seen.has(key({ x: t.x + s.x, y: t.y + s.y })));
+          if (!mountable) {
+            return null;
+          }
+        }
+      }
+      return seen;
+    };
+
+    // Prefer a real two-tile bed: head + an adjacent foot, with a reachable tile
+    // beside the HEAD to build from / climb onto (and the room stays connected,
+    // and no existing bed gets boxed in).
     for (const head of interior) {
       for (const d of DIRS) {
         const foot = { x: head.x + d.x, y: head.y + d.y };
         if (!free(foot)) {
           continue;
         }
-        const stand = [head, foot]
-          .flatMap((t) => DIRS.map((s) => ({ x: t.x + s.x, y: t.y + s.y })))
-          .find(
-            (s) =>
-              this.world.isWalkable(s) &&
-              !(s.x === head.x && s.y === head.y) &&
-              !(s.x === foot.x && s.y === foot.y),
-          );
+        const reach = reachableWith([head, foot]);
+        if (!reach) {
+          continue;
+        }
+        // The mount tile must sit beside the head (where the sleeper lies).
+        const stand = DIRS.map((s) => ({ x: head.x + s.x, y: head.y + s.y })).find(
+          (s) => reach.has(key(s)) && !(s.x === foot.x && s.y === foot.y),
+        );
         if (stand) {
           return { head, foot, stand };
         }
@@ -723,8 +788,12 @@ export class Simulation {
     }
     // Fallback: a single-tile bed where two won't fit (tiny rooms / annexes).
     for (const head of interior) {
+      const reach = reachableWith([head]);
+      if (!reach) {
+        continue;
+      }
       const stand = DIRS.map((s) => ({ x: head.x + s.x, y: head.y + s.y })).find(
-        (s) => this.world.isWalkable(s) && !(s.x === head.x && s.y === head.y),
+        (s) => reach.has(key(s)),
       );
       if (stand) {
         return { head, stand };
