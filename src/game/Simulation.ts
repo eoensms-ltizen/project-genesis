@@ -32,11 +32,6 @@ const PATH_WEAR_THRESHOLD = 4;
 const ROAD_WEAR_THRESHOLD = 9;
 
 
-// Parks scale with the town: green space area grows with population, but the
-// village prefers enlarging one park (a bigger park reaches farther) over
-// scattering many. A park may grow up to MAX_PARK_SIDE tiles on a side.
-const PARK_AREA_PER_CAPITA = 0.7;
-const MAX_PARK_SIDE = 8;
 const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
@@ -371,6 +366,8 @@ export class Simulation {
     this.refreshDoors();
     // Heal any rooms a past redevelopment bug had stamped into solid blocks.
     this.repairWalledRooms();
+    // Parks and plazas are retired — clear any an older save laid down.
+    this.removeParksAndPlazas();
     this.recomputeAmbiance();
   }
 
@@ -405,7 +402,6 @@ export class Simulation {
       this.checkEraPromotion();
       this.assignJobs();
       this.ageResidents();
-      this.updatePlaza();
       this.spawnAnimals();
       this.runFactories();
       this.runSmelters();
@@ -414,7 +410,6 @@ export class Simulation {
       this.relocateMisplacedWork();
       this.spawnLitter();
       this.updateUnrest();
-      this.updateParks();
     }
 
     this.autosaveTimer += deltaSeconds;
@@ -1693,10 +1688,6 @@ export class Simulation {
     return this.deaths > 0 && !this.hasAnyCemetery();
   }
 
-  hasAnyPark(): boolean {
-    return this.buildings.some((building) => building.kind === "park");
-  }
-
   /** Built houses within `radius` tiles of a point — a local crowding measure. */
   localHouseDensity(position: Vec2, radius: number): number {
     let count = 0;
@@ -1728,118 +1719,6 @@ export class Simulation {
       }
     }
     return best;
-  }
-
-  /**
-   * Green space scales with the population. Rather than dotting the town with
-   * many small parks, the village grows ONE park bigger — a larger park reaches
-   * farther — and only lays a fresh one when its parks are already at full size.
-   * Growing can pave over the avenue between two parks, merging them.
-   */
-  private updateParks() {
-    if (this.era < 1 || this.agents.length < 6 || !this.hasMayor()) {
-      return;
-    }
-    const parks = this.buildings.filter((b) => b.kind === "park" && b.stage === "built");
-    const area = parks.reduce((sum, p) => sum + p.width * p.height, 0);
-    if (area >= this.agents.length * PARK_AREA_PER_CAPITA) {
-      return;
-    }
-    const growable = parks
-      .filter((p) => Math.max(p.width, p.height) < MAX_PARK_SIDE)
-      .sort((a, b) => b.width * b.height - a.width * a.height);
-    for (const park of growable) {
-      if (this.expandPark(park)) {
-        return;
-      }
-    }
-    this.foundPark();
-  }
-
-  /** Found a fresh small park near the village centre, off the avenue grid. */
-  private foundPark() {
-    const center = this.villageCenter();
-    const site = this.world.findBuildingSite(
-      { x: Math.round(center.x), y: Math.round(center.y) },
-      3,
-      3,
-      (p) => this.isTileClaimed(p),
-    );
-    if (!site) {
-      return;
-    }
-    const park = this.registerBuilding({
-      kind: "park",
-      x: site.x,
-      y: site.y,
-      width: 3,
-      height: 3,
-      door: { x: site.x + 1, y: site.y + 2 },
-    });
-    this.setBuildingStage(park, "built");
-    this.log(tr("The town laid out a new park. 🌳", "마을에 새 공원이 들어섰다. 🌳"));
-  }
-
-  /**
-   * Grow a park by one row/column on a side whose strip is clearable (grass,
-   * roads, stumps — and an adjacent park, which it absorbs to merge into one
-   * bigger park). Won't bulldoze houses, civic buildings, water or farmland.
-   */
-  private expandPark(park: Building): boolean {
-    const strips: Vec2[][] = [
-      Array.from({ length: park.width }, (_, i) => ({ x: park.x + i, y: park.y - 1 })),
-      Array.from({ length: park.width }, (_, i) => ({ x: park.x + i, y: park.y + park.height })),
-      Array.from({ length: park.height }, (_, i) => ({ x: park.x - 1, y: park.y + i })),
-      Array.from({ length: park.height }, (_, i) => ({ x: park.x + park.width, y: park.y + i })),
-    ];
-    for (let s = 0; s < strips.length; s += 1) {
-      const strip = strips[s];
-      let ok = true;
-      const parksToMerge: Building[] = [];
-      for (const p of strip) {
-        const tile = this.world.getTile(p);
-        if (!tile) {
-          ok = false;
-          break;
-        }
-        if (tile.type === "Water" || tile.type.startsWith("Field")) {
-          ok = false;
-          break;
-        }
-        const occ = this.buildingAt(p);
-        if (occ && occ !== park) {
-          if (occ.kind === "park") {
-            parksToMerge.push(occ);
-          } else {
-            ok = false;
-            break;
-          }
-        }
-      }
-      if (!ok) {
-        continue;
-      }
-      for (const other of parksToMerge) {
-        this.removeBuilding(other);
-      }
-      if (s === 0) {
-        park.y -= 1;
-        park.height += 1;
-      } else if (s === 1) {
-        park.height += 1;
-      } else if (s === 2) {
-        park.x -= 1;
-        park.width += 1;
-      } else {
-        park.width += 1;
-      }
-      for (const position of footprintTiles(park)) {
-        this.world.setTile(position, "House");
-      }
-      this.notifyChanged();
-      return true;
-    }
-    return false;
   }
 
   /** Net pleasantness of a spot: positive near amenities, negative near nuisances. */
@@ -2321,53 +2200,21 @@ export class Simulation {
   }
 
   /**
-   * A square plaza at the central avenue crossing — the grid's civic hub. It is
-   * a clean square (not an absorbing blob) centred on the grid intersection
-   * nearest the village centre, growing with the population, with a fountain at
-   * its heart, a statue, and lamps at the corners.
+   * Parks and plazas have been retired. Heal any a past version had laid down:
+   * remove park buildings (their footprint reverts to grass) and turn plaza
+   * tiles — and the fountain/statue/lamps that framed them — back into ground.
+   * Run once on load.
    */
-  private updatePlaza() {
-    if (this.era < 2 || !this.hasMayor()) {
-      return;
+  removeParksAndPlazas() {
+    for (const park of this.buildings.filter((b) => b.kind === "park")) {
+      this.removeBuilding(park);
     }
-    const world = this.world;
-    const center = this.villageCenter();
-    const hubX = Math.round(center.x);
-    const hubY = Math.round(center.y);
-    if (hubX < 2 || hubY < 2 || hubX > world.width - 3 || hubY > world.height - 3) {
-      return;
-    }
-    const radius = Math.min(2, 1 + Math.floor(this.agents.length / 24));
-    const first = world.countType("Plaza") === 0;
-
-    for (let dy = -radius; dy <= radius; dy += 1) {
-      for (let dx = -radius; dx <= radius; dx += 1) {
-        const p = { x: hubX + dx, y: hubY + dy };
-        const type = world.getTile(p)?.type;
-        if (type === "Road" || type === "Grass" || type === "Dirt" || type === "Lamp") {
-          world.setTile(p, "Plaza");
-        }
+    for (const tile of this.world.tiles) {
+      if (tile.type === "Plaza") {
+        this.world.setTile(tile, "Road");
+      } else if (tile.type === "Fountain" || tile.type === "Statue" || tile.type === "Lamp") {
+        this.world.setTile(tile, "Grass");
       }
-    }
-    // Fountain at the heart; statue and lamps frame it.
-    if (world.getTile({ x: hubX, y: hubY })?.type === "Plaza") {
-      world.setTile({ x: hubX, y: hubY }, "Fountain");
-    }
-    for (const [dx, dy] of [
-      [-radius, -radius],
-      [radius, radius],
-      [-radius, radius],
-      [radius, -radius],
-    ]) {
-      if (world.getTile({ x: hubX + dx, y: hubY + dy })?.type === "Plaza") {
-        world.setTile({ x: hubX + dx, y: hubY + dy }, "Lamp");
-      }
-    }
-    if (radius >= 2 && world.getTile({ x: hubX, y: hubY - radius })?.type === "Plaza") {
-      world.setTile({ x: hubX, y: hubY - radius }, "Statue");
-    }
-    if (first && world.countType("Plaza") > 0) {
-      this.log(tr("A village plaza was laid out at the town's heart! ⛲", "마을 한복판에 광장이 들어섰다! ⛲"));
     }
   }
 

@@ -905,40 +905,47 @@ function wallMask(world: WorldMap, x: number, y: number): number {
   return mask;
 }
 
-/**
- * A solid stone wall cell. Edge light/shadow is drawn only on sides with no
- * adjacent wall, so a run of wall cells merges into one shape with a single
- * outline and corners read as clean Ls — RimWorld's connected-wall look.
- */
+// Thin timbered wall: a slim central band with arms reaching only toward
+// neighbouring wall/door tiles, so straight runs read as one thin line and
+// corners (L/ㄱ) and junctions (T/+) link up cleanly without a tile-edge seam.
+const WALL_THICK = 6;
+const WALL_INSET = (TILE_SIZE - WALL_THICK) / 2; // 5
+
 function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
-  // Buildings are timbered, so walls read as stacked logs/planks (warm wood),
-  // not flat stone grey.
-  graphics.rect(px, py, S_, S_);
-  graphics.fill(0x7a5d3a);
-  // Plank seams: a couple of horizontal grain lines for a timbered look.
-  for (const gy of [S_ / 3, (2 * S_) / 3]) {
-    graphics.rect(px, py + gy - 0.5, S_, 1);
-    graphics.fill({ color: 0x5a4327, alpha: 0.5 });
+  const T = WALL_THICK;
+  const C = WALL_INSET;
+  const wood = 0x7a5d3a;
+  const edge = 0x231a0e;
+  const lite = 0x9c7a48;
+  // A horizontal bar gets its dark outline on top/bottom (its long sides) and a
+  // light top edge; a vertical bar gets it on left/right. The connecting ends
+  // run flush to the tile border, so a neighbour's bar meets it without a seam.
+  const horiz = (gx: number, gw: number) => {
+    graphics.rect(gx, py + C, gw, T);
+    graphics.fill(edge);
+    graphics.rect(gx, py + C + 1, gw, T - 2);
+    graphics.fill(wood);
+    graphics.rect(gx, py + C + 1, gw, 1.2);
+    graphics.fill({ color: lite, alpha: 0.7 });
+  };
+  const vert = (gy: number, gh: number) => {
+    graphics.rect(px + C, gy, T, gh);
+    graphics.fill(edge);
+    graphics.rect(px + C + 1, gy, T - 2, gh);
+    graphics.fill(wood);
+  };
+  const linkV = Boolean(mask & N) || Boolean(mask & S);
+  const linkH = Boolean(mask & E) || Boolean(mask & W);
+  // Vertical run first, then the horizontal run over it, so crosses and L/ㄱ
+  // corners knit together at the central post.
+  if (linkV || !linkH) {
+    vert(mask & N ? py : py + C, (mask & S ? py + S_ : py + C + T) - (mask & N ? py : py + C));
   }
-  const shadow = 0x3a2c19;
-  if (!(mask & N)) {
-    graphics.rect(px, py, S_, 2);
-    graphics.fill({ color: 0xa07e4f, alpha: 0.95 });
-  }
-  if (!(mask & S)) {
-    graphics.rect(px, py + S_ - 2.5, S_, 2.5);
-    graphics.fill({ color: shadow, alpha: 0.55 });
-  }
-  if (!(mask & W)) {
-    graphics.rect(px, py, 2, S_);
-    graphics.fill({ color: shadow, alpha: 0.3 });
-  }
-  if (!(mask & E)) {
-    graphics.rect(px + S_ - 2, py, 2, S_);
-    graphics.fill({ color: shadow, alpha: 0.3 });
+  if (linkH) {
+    horiz(mask & W ? px : px + C, (mask & E ? px + S_ : px + C + T) - (mask & W ? px : px + C));
   }
 }
 
