@@ -54,3 +54,26 @@
 - **벽·문·바닥은 선택 가능한 구조물 오브젝트:** 집 푸트프린트 안이라도 클릭하면 건물이 아니라 그 타일(벽/문/바닥)을 인스펙트.
 - 문: M1은 자동 통과(비용만), 개방 상태/페널티는 M3 무드와 함께.
 - 무드 점증: 실시간이 아닌 **era/부유도 연동**(결정적·의미적).
+
+## 6. 진행 현황 & 다음 세션 핸드오프 (2026-06-16 기준)
+
+이 아크에서 완료된 커밋(최신순):
+- `957d14c` **자재 선지불→시공중 지불**: 기초는 `FOUNDATION_WOOD(3)`, 벽=1·문=2·바닥=0. 빌더가 한 짐(`BUILD_CARRY_WOOD=12`, 운반 한도)을 챙겨와 칸칸이 소비하고, 떨어지면 보충하러 감(타일마다 창고 왕복 X).
+- `1f746bf` **한 칸씩 건설(piecemeal)**: 건물을 통째로 스탬프하지 않고 `Building.plan`(벽/바닥/문 타일 목록)을 만들어, 빌더가 각 타일로 걸어가 손으로 깖(`MoveToBuildTile`/`BuildTile`, ~0.45s). **바닥·문 먼저, 벽 마지막**(자기 가두기 방지, 문은 항상 통행 가능). 여러 명이 한 집을 동시 시공 가능. 기초 위로 벽이 한 칸씩 올라감.
+- `b87645a` **1인 1침대**(`agent.bedPos`): 공유 없음, 공용 주택=막사(침대 여러 개).
+- `0db4321` **공동 주택 우선**(`tryJoinSharedShelter`): 신규 노숙자는 짓는 중인 집에 합류, 단일 문.
+- `a425083` 무드 v1.
+
+핵심 구현 위치:
+- 계획/시공 API: `Simulation.ts` — `roomLayout`/`ensureBuildPlan`/`nextBuildTile`/`placeBuildTile`/`planComplete`, `setBuildingStage(foundation)`에서 plan 생성·built에서 paint+plan clear.
+- 빌더 상태머신: `AgentBrain.ts` — `buildHouse`(per-tile 드라이버: 기초 비용→타일별 자재 체크→`MoveToBuildTile`), `buildTile`(자재 차감+배치), `finishBuilding`, `buildOpenSpace`(공원/목장/묘지용 구 타이머 빌드). 자재 상수 `FOUNDATION_WOOD/WALL_TILE_WOOD/DOOR_TILE_WOOD/BUILD_CARRY_WOOD`, `tileWood()`. 노숙/재개( resume) 분기와 `MoveToHouseSite` 도착 로직이 foundation 단계면 곧장 타일 시공으로 라우팅.
+- 타입: `BuildPlanTile`, `Building.plan`, `Agent.buildTarget`(저장 제외), 상태 `MoveToBuildTile`/`BuildTile`.
+
+**다음 작업 = "벽 공유 증축"(Stage 2, 사용자 명시 우선순위):**
+자재 여유가 생기면 공용 주택에 **개인 침실을 한 칸 증축**하되 **기존 벽 한 줄을 공유**(이중벽 X). 필요 사항:
+1. 배치: 신축 방 푸트프린트가 **기존 벽 위에 겹치도록** 허용(현재 `placementClear`는 잔디 위만 → 항상 이중벽). 공유벽 1줄.
+2. **내부 문**: 공용방↔개인방을 잇는 문 한 칸(plan에 Door로). `computeDoors`는 외벽/도로용이므로 내부 문은 별도 로직.
+3. **방 소유권**: 개인 침실에 owner 지정, 그 주민의 `bedPos`를 거기로 이전. 공용 막사 침대 → 개인방으로 이동.
+4. 발현 조건: 무드/프라이버시(현재 cramp comfort 페널티) 또는 자재 여유가 임계 넘으면 증축 결정(needs-driven, 유저가 안 그림).
+
+참고: 검사 중 "새 세계"가 눌려 localStorage 자동저장이 새 골짜기로 초기화됨(동작 정상, 기존 마을은 소실).
