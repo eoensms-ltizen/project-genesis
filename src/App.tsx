@@ -124,6 +124,7 @@ export default function App() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [selection, setSelection] = useState<InspectionTarget | null>(null);
+  const [followId, setFollowId] = useState<string | null>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
@@ -205,6 +206,13 @@ export default function App() {
       gameRef.current = null;
     };
   }, []);
+
+  // Drop follow mode if the tracked resident is no longer with us.
+  useEffect(() => {
+    if (followId && !agents.some((a) => a.id === followId)) {
+      setFollowId(null);
+    }
+  }, [agents, followId]);
 
   const addRandomAgent = () => {
     gameRef.current?.addRandomAgent(defaultSpawn);
@@ -360,6 +368,15 @@ export default function App() {
                 const home = agents.find((a) => a.id === selection.agentId)?.home;
                 return home ? gameRef.current?.simulation.ambianceAt(home) : undefined;
               })()}
+              following={selection.kind === "agent" && followId === selection.agentId}
+              onToggleFollow={() => {
+                if (selection.kind !== "agent") {
+                  return;
+                }
+                const next = followId === selection.agentId ? null : selection.agentId;
+                setFollowId(next);
+                gameRef.current?.followAgent(next);
+              }}
               onClose={() => setSelection(null)}
             />
           </div>

@@ -368,6 +368,8 @@ export class Simulation {
     this.repairWalledRooms();
     // Parks and plazas are retired — clear any an older save laid down.
     this.removeParksAndPlazas();
+    // Shift any stockpile overflow an older save dropped onto a warehouse door.
+    this.relocateDoorwayPiles();
     this.recomputeAmbiance();
   }
 
@@ -877,8 +879,9 @@ export class Simulation {
   }
 
   /**
-   * A spot for a private 3×3 bedroom annexed onto `parent`, sharing one of its
-   * walls (no double wall). The annex's footprint overlaps the parent's wall line
+   * A spot for a private 4×4 bedroom annexed onto `parent`, sharing one of its
+   * walls (no double wall). Its 2×2 interior fits a proper two-tile bed (no lone
+   * single-tile beds). The annex's footprint overlaps the parent's wall line
    * on one side; an internal doorway is punched through that shared wall, opening
    * onto the parent's interior. Returns the annex rectangle and that doorway, or
    * undefined if no side has clear ground for one. Tries each side, then offsets.
@@ -887,7 +890,7 @@ export class Simulation {
     parent: Building,
   ): { x: number; y: number; width: number; height: number; door: Vec2 } | undefined {
     const { x: px, y: py, width: pw, height: ph } = parent;
-    const A = 3; // annex side length (1×1 interior)
+    const A = 4; // annex side length (2×2 interior — room for a full two-tile bed)
     const isGrass = (p: Vec2): boolean =>
       this.world.getTile(p)?.type === "Grass" && !this.isTileClaimed(p);
     const isFloor = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
@@ -2232,7 +2235,12 @@ export class Simulation {
 
   /** Drop a material on the ground at a tile, merging into a like pile there. */
   dropItem(position: Vec2, resource: ResourceKind, amount = 1) {
-    const tile = { x: Math.round(position.x), y: Math.round(position.y) };
+    let tile = { x: Math.round(position.x), y: Math.round(position.y) };
+    // Never leave a load in a doorway — it blocks the threshold and looks wrong.
+    // Settle it on the nearest walkable, non-door tile instead.
+    if (!this.isDroppableTile(tile)) {
+      tile = this.nearestDroppableTile(tile) ?? tile;
+    }
     const existing = this.items.find(
       (stack) =>
         stack.resource === resource && stack.position.x === tile.x && stack.position.y === tile.y,
@@ -2248,6 +2256,42 @@ export class Simulation {
       });
     }
     this.notifyChanged();
+  }
+
+  /** A loose pile may sit here: it's walkable ground and not a doorway. */
+  private isDroppableTile(tile: Vec2): boolean {
+    const t = this.world.getTile(tile)?.type;
+    return t !== undefined && t !== "Door" && this.world.isWalkable(tile);
+  }
+
+  /** Nearest tile a loose pile may rest on, searched in widening rings. */
+  private nearestDroppableTile(from: Vec2): Vec2 | undefined {
+    for (let r = 1; r <= 4; r += 1) {
+      for (let dy = -r; dy <= r; dy += 1) {
+        for (let dx = -r; dx <= r; dx += 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) {
+            continue; // only the new ring's perimeter
+          }
+          const p = { x: from.x + dx, y: from.y + dy };
+          if (this.isDroppableTile(p)) {
+            return p;
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** Move any pile an older save left sitting in a doorway off the threshold. */
+  relocateDoorwayPiles() {
+    for (const stack of this.items) {
+      if (this.world.getTile(stack.position)?.type === "Door") {
+        const spot = this.nearestDroppableTile(stack.position);
+        if (spot) {
+          stack.position = { ...spot };
+        }
+      }
+    }
   }
 
   /** Drop wood (shorthand used by felling). */

@@ -254,6 +254,34 @@ button[data-active="true"] {
   text-transform: capitalize;
 }
 
+.inspector-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.follow-button {
+  padding: 3px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #4a5a3e;
+  background: #2b3326;
+  color: #d6dccf;
+}
+
+.follow-button:hover {
+  border-color: #6f8a57;
+}
+
+.follow-button[data-active="true"] {
+  background: #5c7a3a;
+  border-color: #87b04f;
+  color: #f3eadb;
+}
+
 .inspector-body dl {
   display: grid;
   grid-template-columns: auto 1fr;

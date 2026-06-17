@@ -3124,7 +3124,35 @@ export class AgentBrain {
   }
 
   private goRest(agent: Agent, simulation: Simulation) {
-    if (agent.home && !samePos(roundVec(agent.position), agent.home)) {
+    const rp = roundVec(agent.position);
+    // Rest on one's own bed, not on the house-centre floor. Claim a free bed at
+    // home if we don't have one (beds aren't saved across reloads), then head to
+    // it — exactly like turning in at night, but a daytime power-nap.
+    if (!this.hasOwnBed(agent, simulation) && agent.homeBuildingId) {
+      const home = simulation.getBuilding(agent.homeBuildingId);
+      if (home && home.kind === "house" && home.stage === "built") {
+        this.claimUnownedBed(agent, simulation, home);
+      }
+    }
+    if (this.hasOwnBed(agent, simulation) && agent.bedPos) {
+      const bed = agent.bedPos;
+      if (samePos(rp, bed) || isAdjacent(rp, bed)) {
+        this.setState(agent, simulation, "Rest");
+        return;
+      }
+      const path = findPath(simulation.world, {
+        start: agent.position,
+        goal: bed,
+        stopAdjacent: true, // stop beside the solid bed, then climb on in Rest
+      });
+      if (path) {
+        agent.target = { ...bed };
+        agent.path = path;
+        this.setState(agent, simulation, "MoveHome");
+        return;
+      }
+    }
+    if (agent.home && !samePos(rp, agent.home)) {
       const path = findPath(simulation.world, { start: agent.position, goal: agent.home });
       if (path) {
         agent.target = { ...agent.home };
@@ -3137,8 +3165,21 @@ export class AgentBrain {
   }
 
   private rest(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    // Climb onto one's own bed when standing right beside it (the bed is solid),
+    // so a daytime rest happens in bed rather than on the floor next to it.
+    if (
+      this.hasOwnBed(agent, simulation) &&
+      agent.bedPos &&
+      isAdjacent(roundVec(agent.position), agent.bedPos)
+    ) {
+      agent.position = { ...agent.bedPos };
+      agent.path = undefined;
+      agent.target = undefined;
+    }
     agent.actionTimer += deltaSeconds;
-    const atHome = Boolean(agent.home && samePos(roundVec(agent.position), agent.home));
+    const onBed = simulation.world.getTile(roundVec(agent.position))?.type === "Bed";
+    const atHome =
+      onBed || Boolean(agent.home && samePos(roundVec(agent.position), agent.home));
     const regenRate = atHome ? 16 : 9;
     agent.health.stamina = Math.min(100, agent.health.stamina + deltaSeconds * regenRate);
 

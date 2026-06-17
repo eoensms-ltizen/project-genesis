@@ -129,6 +129,16 @@ export class GameApp {
     this.renderer.resetCamera();
   }
 
+  /** Lock the camera onto a resident, or pass null to stop following. */
+  followAgent(agentId: string | null) {
+    this.renderer.setFollowAgent(agentId);
+    this.render();
+  }
+
+  isFollowing(agentId: string): boolean {
+    return this.renderer.isFollowing(agentId);
+  }
+
   setFlatBuildings(flat: boolean) {
     this.renderer.setFlatBuildings(flat);
   }

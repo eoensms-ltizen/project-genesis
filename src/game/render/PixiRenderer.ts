@@ -7,6 +7,8 @@ const TILE_SIZE = 16;
 // Terrain is drawn in square blocks of this many tiles, each a separate Graphics,
 // so changing one tile only rebuilds its block (8×8 = 64 tiles) instead of all.
 const CHUNK = 8;
+// Zoom the camera snaps to when you start following a resident, so they're framed.
+const FOLLOW_ZOOM = 2.6;
 
 type RendererOptions = {
   onTileClick: (position: Vec2) => void;
@@ -46,6 +48,9 @@ export class PixiRenderer {
   private baseScale = 1;
   private baseLeft = 0;
   private baseTop = 0;
+  // When set, the camera keeps this resident centred each frame (follow mode).
+  private followAgentId: string | null = null;
+  private followTarget: { x: number; y: number } | null = null;
   private readonly activePointers = new Map<number, { x: number; y: number }>();
   private dragStart: { x: number; y: number; panX: number; panY: number } | null = null;
   private dragMoved = false;
@@ -124,6 +129,7 @@ export class PixiRenderer {
         const dy = event.clientY - this.dragStart.y;
         if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) {
           this.dragMoved = true;
+          this.followAgentId = null; // a manual pan breaks out of follow mode
         }
         this.panX = this.dragStart.panX + dx;
         this.panY = this.dragStart.panY + dy;
@@ -208,6 +214,22 @@ export class PixiRenderer {
     this.userZoom = 1;
     this.panX = 0;
     this.panY = 0;
+    this.followAgentId = null;
+  }
+
+  /** Lock the camera onto a resident (or pass null to stop following). */
+  setFollowAgent(agentId: string | null) {
+    this.followAgentId = agentId;
+    // At base zoom the whole valley already fits the screen, so there's no room
+    // to recentre. Zoom in when following begins so the resident is actually
+    // framed and the camera can track them around the map.
+    if (agentId && this.userZoom < FOLLOW_ZOOM) {
+      this.userZoom = FOLLOW_ZOOM;
+    }
+  }
+
+  isFollowing(agentId: string): boolean {
+    return this.followAgentId === agentId;
   }
 
   /** Toggle the 2.5D building "lids" on/off; forces the building layer to redraw. */
@@ -298,6 +320,18 @@ export class PixiRenderer {
   ) {
     if (!this.initialized) {
       return;
+    }
+
+    // Resolve the follow target (if any) before laying out the camera. If the
+    // followed resident is gone, drop follow mode.
+    if (this.followAgentId) {
+      const followed = agents.find((a) => a.id === this.followAgentId);
+      this.followTarget = followed ? followed.position : null;
+      if (!followed) {
+        this.followAgentId = null;
+      }
+    } else {
+      this.followTarget = null;
     }
 
     this.layoutWorld(world);
@@ -493,6 +527,14 @@ export class PixiRenderer {
     this.baseTop = Math.max(0, (this.app.screen.height - worldPixelHeight * this.baseScale) / 2);
 
     const scale = this.baseScale * this.userZoom;
+    // Follow mode: recompute the pan so the tracked resident sits at screen centre.
+    if (this.followTarget) {
+      const cx = (this.followTarget.x + 0.5) * TILE_SIZE * scale;
+      const cy = (this.followTarget.y + 0.5) * TILE_SIZE * scale;
+      this.panX = this.app.screen.width / 2 - this.baseLeft - cx;
+      this.panY = this.app.screen.height / 2 - this.baseTop - cy;
+      this.clampPan();
+    }
     const left = this.baseLeft + this.panX;
     const top = this.baseTop + this.panY;
 

@@ -20,6 +20,8 @@ type InspectorProps = {
   tileType?: TileType;
   tileTraffic?: number;
   homeAmbiance?: number;
+  following?: boolean;
+  onToggleFollow?: () => void;
   onClose: () => void;
 };
 
@@ -33,6 +35,8 @@ export function Inspector({
   tileType,
   tileTraffic,
   homeAmbiance,
+  following,
+  onToggleFollow,
   onClose,
 }: InspectorProps) {
   return (
@@ -49,6 +53,8 @@ export function Inspector({
           agents={agents}
           episodes={episodes}
           homeAmbiance={homeAmbiance}
+          following={following}
+          onToggleFollow={onToggleFollow}
         />
       )}
       {selection.kind === "building" && (
@@ -356,11 +362,15 @@ function AgentInfo({
   agents,
   episodes,
   homeAmbiance,
+  following,
+  onToggleFollow,
 }: {
   agent?: Agent;
   agents: Agent[];
   episodes: GameLogEntry[];
   homeAmbiance?: number;
+  following?: boolean;
+  onToggleFollow?: () => void;
 }) {
   if (!agent) {
     return <p className="muted">{tr("This resident is no longer with us.", "이 주민은 더 이상 없습니다.")}</p>;
@@ -372,7 +382,19 @@ function AgentInfo({
 
   return (
     <div className="inspector-body">
-      <strong>{agent.name}</strong>
+      <div className="inspector-name-row">
+        <strong>{agent.name}</strong>
+        {onToggleFollow && (
+          <button
+            type="button"
+            className="follow-button"
+            data-active={following ? "true" : undefined}
+            onClick={onToggleFollow}
+          >
+            {following ? tr("📷 Following", "📷 따라가는 중") : tr("📷 Follow", "📷 따라가기")}
+          </button>
+        )}
+      </div>
       <dl>
         <dt>{tr("Doing", "하는 일")}</dt>
         <dd>{activityLabel(agent)}</dd>
