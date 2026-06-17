@@ -923,12 +923,12 @@ function drawWall(graphics: Graphics, world: WorldMap, x: number, y: number) {
   const lite = 0xb18a4e; // lit top edge
   const shade = 0x6f5230; // gentle inner shade toward the base
   const outline = 0x32230f; // dark outline around the wall mass
-  // A wall/door neighbour joins us flush (no outline there); every other side is
-  // the edge of the wall mass — outdoors or the room — and gets the dark outline,
-  // which is what cleanly frames the run and its corners (inner ones included).
+  // Only another wall joins us flush (no outline there). Every other side — the
+  // outdoors, the room, OR a doorway — is an edge of the wall mass and gets the
+  // dark outline. Outlining the door-facing edge caps the wall at the opening, so
+  // the jamb is closed (the door tile itself draws no building outline).
   const joins = (dx: number, dy: number): boolean => {
-    const t = world.getTile({ x: x + dx, y: y + dy })?.type;
-    return t === "Wall" || t === "Door";
+    return world.getTile({ x: x + dx, y: y + dy })?.type === "Wall";
   };
   const edgeN = !joins(0, -1), edgeS = !joins(0, 1), edgeW = !joins(-1, 0), edgeE = !joins(1, 0);
 
@@ -982,35 +982,13 @@ function drawOpenDoor(graphics: Graphics, x: number, y: number, mask: number) {
     graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, 2.5);
   }
   graphics.fill(0x7a5a36);
-  // Keep the wall outline across the faces even while the door stands open.
-  doorFaceOutline(graphics, px, py, S_, alongHorizontal);
 }
 
 const DOOR_OUTLINE = 0x32230f; // matches the wall outline
 const DOOR_LEAF = 0x7c5c34;
 
-/**
- * The wall's dark outline continued across the two FACE edges a door sits flush
- * with (the same edges its neighbouring wall cells outline), so the building's
- * border runs unbroken through the doorway. Faces are top/bottom for a door in a
- * horizontal wall run, left/right for a vertical one.
- */
-function doorFaceOutline(graphics: Graphics, px: number, py: number, S_: number, alongH: boolean) {
-  const OL = 2;
-  if (alongH) {
-    graphics.rect(px, py, S_, OL);
-    graphics.fill(DOOR_OUTLINE);
-    graphics.rect(px, py + S_ - OL, S_, OL);
-    graphics.fill(DOOR_OUTLINE);
-  } else {
-    graphics.rect(px, py, OL, S_);
-    graphics.fill(DOOR_OUTLINE);
-    graphics.rect(px + S_ - OL, py, OL, S_);
-    graphics.fill(DOOR_OUTLINE);
-  }
-}
-
-/** A door slab set into the wall it breaks, oriented along the wall's run. */
+/** A door slab set into the wall it breaks, oriented along the wall's run. The
+ * door itself carries no building outline — the flanking walls cap the opening. */
 function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
@@ -1029,8 +1007,6 @@ function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
     graphics.rect(px + S_ / 2 - 4, py + 1, 8, S_ - 2);
     graphics.stroke({ color: DOOR_OUTLINE, width: 1, alpha: 0.9 });
   }
-  // Carry the wall outline across the door's faces so the seam is seamless.
-  doorFaceOutline(graphics, px, py, S_, alongHorizontal);
 }
 
 /**
