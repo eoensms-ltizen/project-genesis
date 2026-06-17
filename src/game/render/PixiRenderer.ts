@@ -982,6 +982,32 @@ function drawOpenDoor(graphics: Graphics, x: number, y: number, mask: number) {
     graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, 2.5);
   }
   graphics.fill(0x7a5a36);
+  // Keep the wall outline across the faces even while the door stands open.
+  doorFaceOutline(graphics, px, py, S_, alongHorizontal);
+}
+
+const DOOR_OUTLINE = 0x32230f; // matches the wall outline
+const DOOR_LEAF = 0x7c5c34;
+
+/**
+ * The wall's dark outline continued across the two FACE edges a door sits flush
+ * with (the same edges its neighbouring wall cells outline), so the building's
+ * border runs unbroken through the doorway. Faces are top/bottom for a door in a
+ * horizontal wall run, left/right for a vertical one.
+ */
+function doorFaceOutline(graphics: Graphics, px: number, py: number, S_: number, alongH: boolean) {
+  const OL = 2;
+  if (alongH) {
+    graphics.rect(px, py, S_, OL);
+    graphics.fill(DOOR_OUTLINE);
+    graphics.rect(px, py + S_ - OL, S_, OL);
+    graphics.fill(DOOR_OUTLINE);
+  } else {
+    graphics.rect(px, py, OL, S_);
+    graphics.fill(DOOR_OUTLINE);
+    graphics.rect(px + S_ - OL, py, OL, S_);
+    graphics.fill(DOOR_OUTLINE);
+  }
 }
 
 /** A door slab set into the wall it breaks, oriented along the wall's run. */
@@ -993,16 +1019,18 @@ function drawDoor(graphics: Graphics, x: number, y: number, mask: number) {
   graphics.fill(0x4a3b2a);
   const alongHorizontal = Boolean(mask & E) || Boolean(mask & W);
   if (alongHorizontal) {
-    graphics.rect(px + 1, py + S_ / 2 - 3.5, S_ - 2, 7);
-    graphics.fill(0x7a5a36);
-    graphics.rect(px + 1, py + S_ / 2 - 3.5, S_ - 2, 7);
-    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+    graphics.rect(px + 1, py + S_ / 2 - 4, S_ - 2, 8);
+    graphics.fill(DOOR_LEAF);
+    graphics.rect(px + 1, py + S_ / 2 - 4, S_ - 2, 8);
+    graphics.stroke({ color: DOOR_OUTLINE, width: 1, alpha: 0.9 });
   } else {
-    graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, S_ - 2);
-    graphics.fill(0x7a5a36);
-    graphics.rect(px + S_ / 2 - 3.5, py + 1, 7, S_ - 2);
-    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+    graphics.rect(px + S_ / 2 - 4, py + 1, 8, S_ - 2);
+    graphics.fill(DOOR_LEAF);
+    graphics.rect(px + S_ / 2 - 4, py + 1, 8, S_ - 2);
+    graphics.stroke({ color: DOOR_OUTLINE, width: 1, alpha: 0.9 });
   }
+  // Carry the wall outline across the door's faces so the seam is seamless.
+  doorFaceOutline(graphics, px, py, S_, alongHorizontal);
 }
 
 /**
