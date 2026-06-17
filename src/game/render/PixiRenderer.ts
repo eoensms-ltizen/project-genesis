@@ -919,35 +919,39 @@ function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
-  const body = 0x6e5333;
-  const face = 0x8c6b40;
-  const hi = 0xab8651;
-  const shade = 0x402e1b;
-  // Solid timber body + a faint plank seam for texture.
+  const body = 0x6a4f2f;
+  const top = 0x8f6c3f; // lit top surface of the wall
+  const hi = 0xbd965b; // bright top edge
+  const shade = 0x281b0d; // deep shadow for a thick, tall-looking outline
+  const sideShade = 0x3a2917;
+  // Solid timber body.
   graphics.rect(px, py, S_, S_);
   graphics.fill(body);
-  graphics.rect(px, py + S_ / 2 - 0.5, S_, 1);
-  graphics.fill({ color: 0x523c23, alpha: 0.45 });
-  // Raised top face on an exposed north edge (the lit top of the wall), and a
-  // base shadow on an exposed south edge — this is what makes it look raised.
-  if (!(mask & N)) {
-    graphics.rect(px, py, S_, 4);
-    graphics.fill(face);
-    graphics.rect(px, py, S_, 1.4);
-    graphics.fill(hi);
-  }
-  if (!(mask & S)) {
-    graphics.rect(px, py + S_ - 3, S_, 3);
-    graphics.fill(shade);
-  }
-  // Subtle side relief on exposed east/west edges.
+  // Thick side faces on exposed edges read as the wall's vertical sides, so the
+  // lit core looks narrow and the wall tall (rather than a flat, wide slab). The
+  // bevel is only on edges without a neighbour, so runs stay connected.
+  const SIDE = 4;
   if (!(mask & W)) {
-    graphics.rect(px, py, 2, S_);
-    graphics.fill({ color: hi, alpha: 0.28 });
+    graphics.rect(px, py, SIDE, S_);
+    graphics.fill(sideShade);
   }
   if (!(mask & E)) {
-    graphics.rect(px + S_ - 2, py, 2, S_);
-    graphics.fill({ color: shade, alpha: 0.7 });
+    graphics.rect(px + S_ - SIDE, py, SIDE, S_);
+    graphics.fill(sideShade);
+  }
+  // A tall, dark front face along an exposed south edge gives the wall height.
+  if (!(mask & S)) {
+    graphics.rect(px, py + S_ - 6, S_, 6);
+    graphics.fill(shade);
+    graphics.rect(px, py + S_ - 6, S_, 1.2);
+    graphics.fill({ color: 0x4a3a22, alpha: 0.8 });
+  }
+  // A bright lit cap along an exposed north edge — the top of the raised wall.
+  if (!(mask & N)) {
+    graphics.rect(px, py, S_, 4.5);
+    graphics.fill(top);
+    graphics.rect(px, py, S_, 1.8);
+    graphics.fill(hi);
   }
 }
 
