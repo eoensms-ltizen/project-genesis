@@ -919,47 +919,52 @@ function drawWall(graphics: Graphics, world: WorldMap, x: number, y: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
-  const body = 0x6b5234; // warm timber
-  const light = 0xb59067; // warm highlight (lit from the top-left)
-  const shadow = 0x3f2e1c; // warm shadow (not near-black, so edges stay soft)
-  // Classify each neighbour: a wall/door joins us (no edge), a room-interior tile
-  // (floor/furniture) gets a soft inset shadow so the inner faces and corners read,
-  // and anything else is the outdoors and gets the raised bevel.
-  const kind = (dx: number, dy: number): "wall" | "in" | "out" => {
+  const body = 0x8a6638; // warm tan timber
+  const lite = 0xb18a4e; // lit top edge
+  const shade = 0x6f5230; // gentle inner shade toward the base
+  const outline = 0x32230f; // dark outline around the wall mass
+  // A wall/door neighbour joins us flush (no outline there); every other side is
+  // the edge of the wall mass — outdoors or the room — and gets the dark outline,
+  // which is what cleanly frames the run and its corners (inner ones included).
+  const joins = (dx: number, dy: number): boolean => {
     const t = world.getTile({ x: x + dx, y: y + dy })?.type;
-    if (t === "Wall" || t === "Door") return "wall";
-    if (t === "Floor" || t === "Bed" || t === "BedFoot" || t === "BedSite" || t === "Table" || t === "Stove") {
-      return "in";
-    }
-    return "out";
+    return t === "Wall" || t === "Door";
   };
-  const sN = kind(0, -1), sS = kind(0, 1), sW = kind(-1, 0), sE = kind(1, 0);
+  const edgeN = !joins(0, -1), edgeS = !joins(0, 1), edgeW = !joins(-1, 0), edgeE = !joins(1, 0);
 
   graphics.rect(px, py, S_, S_);
   graphics.fill(body);
 
-  // Soft relief in three steps per edge (more steps read as a round blur).
-  const fade = (axis: "v" | "h", fromStart: boolean, color: number, band: number, peak: number) => {
-    for (let i = 0; i < 3; i += 1) {
-      const off = fromStart ? i * band : S_ - (i + 1) * band;
-      if (axis === "v") graphics.rect(px, py + off, S_, band);
-      else graphics.rect(px + off, py, band, S_);
-      graphics.fill({ color, alpha: peak * (1 - i / 3) });
-    }
-  };
-  // Lit from the top-left: outer top/left edges catch light, outer bottom/right
-  // fall into shadow — drawn shadow-first so the highlight crowns the corner.
-  if (sS === "out") fade("v", false, shadow, 2, 0.85);
-  if (sE === "out") fade("h", false, shadow, 1.6, 0.62);
-  if (sN === "out") fade("v", true, light, 1.7, 0.8);
-  if (sW === "out") fade("h", true, light, 1.6, 0.6);
-  // Soft ambient shadow where the wall meets the room, so inner faces and the
-  // concave corners between two inner walls are defined (not flat).
-  const ao = 0x33260f;
-  if (sN === "in") fade("v", true, ao, 1.4, 0.4);
-  if (sS === "in") fade("v", false, ao, 1.4, 0.4);
-  if (sW === "in") fade("h", true, ao, 1.3, 0.4);
-  if (sE === "in") fade("h", false, ao, 1.3, 0.4);
+  // Slight raised shading: a lit band under an open top edge, a soft shade above
+  // an open bottom edge — gives the timber a little depth before the outline.
+  const OL = 2;
+  if (edgeN) {
+    graphics.rect(px, py + OL, S_, 2);
+    graphics.fill({ color: lite, alpha: 0.8 });
+  }
+  if (edgeS) {
+    graphics.rect(px, py + S_ - OL - 2.5, S_, 2.5);
+    graphics.fill({ color: shade, alpha: 0.85 });
+  }
+
+  // Dark outline on every open edge (none between joined wall cells), so the run
+  // reads as one timbered mass with a crisp border and clean corners.
+  if (edgeN) {
+    graphics.rect(px, py, S_, OL);
+    graphics.fill(outline);
+  }
+  if (edgeS) {
+    graphics.rect(px, py + S_ - OL, S_, OL);
+    graphics.fill(outline);
+  }
+  if (edgeW) {
+    graphics.rect(px, py, OL, S_);
+    graphics.fill(outline);
+  }
+  if (edgeE) {
+    graphics.rect(px + S_ - OL, py, OL, S_);
+    graphics.fill(outline);
+  }
 }
 
 /** A door drawn open (leaf swung against the jamb) while someone passes through. */
