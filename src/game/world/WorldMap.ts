@@ -384,10 +384,11 @@ export class WorldMap {
   }
 
   /**
-   * Two buildings may share/abut a wall (gap 0) or stand clearly apart (gap ≥2),
-   * but never leave an awkward 1-tile sliver between them. Water, solid rock and
-   * in-progress (claimed) footprints always keep a gap. Returns whether the site
-   * is allowed and whether it touches a path (a siting bonus).
+   * Free-standing placement keeps a clear gap (≥2 tiles) from other buildings:
+   * abutting a neighbour (gap 0) just builds a redundant second wall right beside
+   * theirs (an ugly double-wall "ladder" with thin walls), and a 1-tile sliver is
+   * worse. True wall-sharing is done separately (findAdjoiningSite, by overlapping
+   * the neighbour's wall). Water, rock and claimed footprints also force a gap.
    */
   private placementClear(
     x: number,
@@ -431,7 +432,7 @@ export class WorldMap {
             return { ok: false, touchesPath: false };
           }
           if (isBuildingTile(tile.type)) {
-            buildingAdjacent = true; // sharing a wall — allowed
+            buildingAdjacent = true; // flush against a neighbour — a double wall
           }
           if (tile.type === "Road" || tile.type === "Dirt" || tile.type === "Plaza") {
             touchesPath = true;
@@ -441,9 +442,10 @@ export class WorldMap {
         }
       }
     }
-    // The only forbidden case is a 1-tile sliver: a building one tile away with
-    // no flush contact. Flush sharing (gap 0) and clear separation (gap ≥2) are fine.
-    if (buildingOneAway && !buildingAdjacent) {
+    // Forbid both a flush double-wall (gap 0) and a 1-tile sliver (gap 1); only a
+    // clear gap (≥2) is allowed here. Genuine wall-sharing goes through
+    // findAdjoiningSite, which overlaps a neighbour's wall instead of abutting it.
+    if (buildingAdjacent || buildingOneAway) {
       return { ok: false, touchesPath };
     }
     return { ok: true, touchesPath };

@@ -441,14 +441,17 @@ export class PixiRenderer {
         const cx = (building.x + building.width / 2) * TILE_SIZE;
         const cy = (building.y + building.height / 2) * TILE_SIZE;
         const isPowered = powered.has(building.id);
-        const outer = isPowered ? 34 : 24;
+        // A small warm glow near the building, not a room-filling blob: capped to
+        // the building's footprint so it reads as light through the windows.
+        const span = Math.min(building.width, building.height) * TILE_SIZE;
+        const outer = Math.min(isPowered ? 16 : 13, span * 0.45);
         const haloColor = isPowered ? 0xbfe3ff : 0xffc97a;
         const coreColor = isPowered ? 0xeaf6ff : 0xffe1a6;
-        const haloAlpha = isPowered ? 0.26 : 0.16;
-        const coreAlpha = isPowered ? 0.5 : 0.32;
+        const haloAlpha = isPowered ? 0.22 : 0.14;
+        const coreAlpha = isPowered ? 0.42 : 0.26;
         this.nightGraphics.circle(cx, cy, outer);
         this.nightGraphics.fill({ color: haloColor, alpha: darkness * haloAlpha });
-        this.nightGraphics.circle(cx, cy, isPowered ? 14 : 10);
+        this.nightGraphics.circle(cx, cy, outer * 0.5);
         this.nightGraphics.fill({ color: coreColor, alpha: darkness * coreAlpha });
       }
 
