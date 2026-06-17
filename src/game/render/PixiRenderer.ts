@@ -908,47 +908,46 @@ function wallMask(world: WorldMap, x: number, y: number): number {
   return mask;
 }
 
-// Thin timbered wall: a slim central band with arms reaching only toward
-// neighbouring wall/door tiles, so straight runs read as one thin line and
-// corners (L/ㄱ) and junctions (T/+) link up cleanly without a tile-edge seam.
-const WALL_THICK = 6;
-const WALL_INSET = (TILE_SIZE - WALL_THICK) / 2; // 5
-
+/**
+ * A timbered wall cell, full-tile so a run reads as one solid connected mass
+ * (no gaps). It's embossed/raised: a lit top face and soft shadow at the base,
+ * with the bevel drawn ONLY on sides that have no wall/door neighbour — so the
+ * interior of a wall run stays flat and corners knit into a clean raised outline
+ * (no internal seams or black edges).
+ */
 function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
-  const T = WALL_THICK;
-  const C = WALL_INSET;
-  const wood = 0x7a5d3a;
-  const edge = 0x231a0e;
-  const lite = 0x9c7a48;
-  // A horizontal bar gets its dark outline on top/bottom (its long sides) and a
-  // light top edge; a vertical bar gets it on left/right. The connecting ends
-  // run flush to the tile border, so a neighbour's bar meets it without a seam.
-  const horiz = (gx: number, gw: number) => {
-    graphics.rect(gx, py + C, gw, T);
-    graphics.fill(edge);
-    graphics.rect(gx, py + C + 1, gw, T - 2);
-    graphics.fill(wood);
-    graphics.rect(gx, py + C + 1, gw, 1.2);
-    graphics.fill({ color: lite, alpha: 0.7 });
-  };
-  const vert = (gy: number, gh: number) => {
-    graphics.rect(px + C, gy, T, gh);
-    graphics.fill(edge);
-    graphics.rect(px + C + 1, gy, T - 2, gh);
-    graphics.fill(wood);
-  };
-  const linkV = Boolean(mask & N) || Boolean(mask & S);
-  const linkH = Boolean(mask & E) || Boolean(mask & W);
-  // Vertical run first, then the horizontal run over it, so crosses and L/ㄱ
-  // corners knit together at the central post.
-  if (linkV || !linkH) {
-    vert(mask & N ? py : py + C, (mask & S ? py + S_ : py + C + T) - (mask & N ? py : py + C));
+  const body = 0x6e5333;
+  const face = 0x8c6b40;
+  const hi = 0xab8651;
+  const shade = 0x402e1b;
+  // Solid timber body + a faint plank seam for texture.
+  graphics.rect(px, py, S_, S_);
+  graphics.fill(body);
+  graphics.rect(px, py + S_ / 2 - 0.5, S_, 1);
+  graphics.fill({ color: 0x523c23, alpha: 0.45 });
+  // Raised top face on an exposed north edge (the lit top of the wall), and a
+  // base shadow on an exposed south edge — this is what makes it look raised.
+  if (!(mask & N)) {
+    graphics.rect(px, py, S_, 4);
+    graphics.fill(face);
+    graphics.rect(px, py, S_, 1.4);
+    graphics.fill(hi);
   }
-  if (linkH) {
-    horiz(mask & W ? px : px + C, (mask & E ? px + S_ : px + C + T) - (mask & W ? px : px + C));
+  if (!(mask & S)) {
+    graphics.rect(px, py + S_ - 3, S_, 3);
+    graphics.fill(shade);
+  }
+  // Subtle side relief on exposed east/west edges.
+  if (!(mask & W)) {
+    graphics.rect(px, py, 2, S_);
+    graphics.fill({ color: hi, alpha: 0.28 });
+  }
+  if (!(mask & E)) {
+    graphics.rect(px + S_ - 2, py, 2, S_);
+    graphics.fill({ color: shade, alpha: 0.7 });
   }
 }
 
