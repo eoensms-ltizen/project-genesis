@@ -220,6 +220,112 @@ function motivation(agent: Agent): string {
   return pulls[0].urgency < 35 ? tr("content", "만족") : pulls[0].label;
 }
 
+/** A plain-language read on what the resident is doing right now. */
+function activityLabel(agent: Agent): string {
+  const carried = agent.carry?.amount ? resourceName(agent.carry.resource) : tr("materials", "자재");
+  switch (agent.state) {
+    case "Idle":
+      return tr("taking a breather", "잠시 쉬는 중");
+    case "Wander":
+      return tr("wandering about", "어슬렁거리는 중");
+    case "Rest":
+      return tr("resting", "휴식 중");
+    case "FindTree":
+      return tr("looking for a tree to fell", "벨 나무를 찾는 중");
+    case "MoveToTree":
+      return tr("heading out to chop wood", "나무하러 가는 중");
+    case "ChopTree":
+      return tr("chopping wood", "나무를 베는 중");
+    case "FindHouseSite":
+      return tr("scouting a building site", "지을 자리를 찾는 중");
+    case "MoveToHouseSite":
+      return tr("heading to the building site", "공사장으로 가는 중");
+    case "PlanHouse":
+      return tr("staking out a building", "건물 터를 잡는 중");
+    case "BuildHouse":
+    case "BuildTile":
+      return tr("building", "집을 짓는 중");
+    case "MoveToBuildTile":
+      return tr("heading over to build", "지을 곳으로 가는 중");
+    case "FindFood":
+    case "MoveToFood":
+      return tr("looking for food", "먹을 것을 찾는 중");
+    case "Eat":
+      return tr("eating", "식사 중");
+    case "MoveHome":
+      return tr("heading home", "집으로 가는 중");
+    case "Sleep": {
+      const onBed =
+        agent.bedPos &&
+        Math.round(agent.position.x) === agent.bedPos.x &&
+        Math.round(agent.position.y) === agent.bedPos.y;
+      return onBed ? tr("sleeping in bed", "침대에서 자는 중") : tr("sleeping", "자는 중");
+    }
+    case "Chat":
+      return tr("chatting with a neighbour", "이웃과 대화 중");
+    case "MoveToFarm":
+      return tr("heading to the field", "밭으로 가는 중");
+    case "FarmWork":
+      return tr("working the field", "밭일 하는 중");
+    case "MoveToPave":
+    case "Pave":
+      return tr("paving a path", "길을 까는 중");
+    case "MoveToKitchen":
+      return tr("heading to the kitchen", "부엌으로 가는 중");
+    case "Cook":
+      return tr("cooking a meal", "요리하는 중");
+    case "MoveToWorship":
+    case "Worship":
+      return tr("at prayer", "기도하는 중");
+    case "MoveToStump":
+    case "Transplant":
+      return tr("transplanting a sapling", "묘목을 옮겨 심는 중");
+    case "MoveToPlant":
+    case "Plant":
+      return tr("sowing seeds", "씨를 심는 중");
+    case "MoveToHunt":
+    case "Hunt":
+      return tr("hunting", "사냥하는 중");
+    case "MoveToTame":
+    case "Tame":
+      return tr("taming livestock", "가축을 길들이는 중");
+    case "MoveToPark":
+    case "Relax":
+      return tr("taking some leisure", "여가를 즐기는 중");
+    case "MoveToClean":
+    case "Clean":
+      return tr("tidying up", "청소하는 중");
+    case "Patrol":
+      return tr("on patrol", "순찰하는 중");
+    case "MoveToHaul":
+      return tr("off to fetch a dropped load", "떨어진 자재를 가지러 가는 중");
+    case "LoadWood":
+      return tr("picking up a load", "자재를 줍는 중");
+    case "MoveToStore":
+      return tr(`hauling ${carried} to the warehouse`, `창고로 ${carried} 나르는 중`);
+    case "StoreWood":
+      return tr("stocking the warehouse", "창고에 자재를 넣는 중");
+    case "MoveToWithdraw":
+      return tr("fetching materials from the warehouse", "창고로 자재를 가지러 가는 중");
+    case "WithdrawWood":
+      return tr("drawing materials from the warehouse", "창고에서 자재를 꺼내는 중");
+    case "MoveToMine":
+      return tr("heading to the rock face", "채굴하러 가는 중");
+    case "Mine":
+      return tr("mining stone", "광석을 캐는 중");
+    case "MoveToCraft":
+      return tr("heading to the workshop", "작업장으로 가는 중");
+    case "CraftTool":
+      return tr("crafting a tool", "도구를 만드는 중");
+    case "MoveToFurnish":
+      return tr("heading home to set up furniture", "가구를 놓으러 가는 중");
+    case "Furnish":
+      return tr("building furniture", "가구를 만드는 중");
+    default:
+      return tr("busy", "활동 중");
+  }
+}
+
 function moodLabel(mood: number): string {
   if (mood >= 75) return tr("happy 😊", "행복 😊");
   if (mood >= 55) return tr("content 🙂", "좋음 🙂");
@@ -268,6 +374,8 @@ function AgentInfo({
     <div className="inspector-body">
       <strong>{agent.name}</strong>
       <dl>
+        <dt>{tr("Doing", "하는 일")}</dt>
+        <dd>{activityLabel(agent)}</dd>
         <dt>{tr("Stage", "생애")}</dt>
         <dd>
           {lifeStage(agent.age)} · {agent.age}
