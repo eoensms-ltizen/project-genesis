@@ -264,7 +264,7 @@ export class PixiRenderer {
           continue;
         }
         if (tile.type === "Wall") {
-          drawWall(g, tx, ty, wallMask(world, tx, ty));
+          drawWall(g, world, tx, ty);
         } else if (tile.type === "Door") {
           drawDoor(g, tx, ty, wallMask(world, tx, ty));
         } else if (isRockSolid(tile.type)) {
@@ -915,40 +915,51 @@ function wallMask(world: WorldMap, x: number, y: number): number {
  * interior of a wall run stays flat and corners knit into a clean raised outline
  * (no internal seams or black edges).
  */
-function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
+function drawWall(graphics: Graphics, world: WorldMap, x: number, y: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
   const body = 0x6b5234; // warm timber
-  const light = 0xb59067; // warm highlight
+  const light = 0xb59067; // warm highlight (lit from the top-left)
   const shadow = 0x3f2e1c; // warm shadow (not near-black, so edges stay soft)
-  // Solid timber body.
+  // Classify each neighbour: a wall/door joins us (no edge), a room-interior tile
+  // (floor/furniture) gets a soft inset shadow so the inner faces and corners read,
+  // and anything else is the outdoors and gets the raised bevel.
+  const kind = (dx: number, dy: number): "wall" | "in" | "out" => {
+    const t = world.getTile({ x: x + dx, y: y + dy })?.type;
+    if (t === "Wall" || t === "Door") return "wall";
+    if (t === "Floor" || t === "Bed" || t === "BedFoot" || t === "BedSite" || t === "Table" || t === "Stove") {
+      return "in";
+    }
+    return "out";
+  };
+  const sN = kind(0, -1), sS = kind(0, 1), sW = kind(-1, 0), sE = kind(1, 0);
+
   graphics.rect(px, py, S_, S_);
   graphics.fill(body);
-  // Soft relief: each exposed edge fades from its tone into the body over several
-  // 1px bands of decreasing alpha, so the wall reads as a gently raised block
-  // rather than hard-edged colour slabs. Bevels only on neighbourless edges keep
-  // runs connected and corners clean.
-  const fadeV = (fromTop: boolean, color: number, depth: number, peak: number) => {
-    for (let i = 0; i < depth; i += 1) {
-      const yy = fromTop ? py + i : py + S_ - 1 - i;
-      graphics.rect(px, yy, S_, 1);
-      graphics.fill({ color, alpha: peak * (1 - i / depth) });
+
+  // Soft relief in three steps per edge (more steps read as a round blur).
+  const fade = (axis: "v" | "h", fromStart: boolean, color: number, band: number, peak: number) => {
+    for (let i = 0; i < 3; i += 1) {
+      const off = fromStart ? i * band : S_ - (i + 1) * band;
+      if (axis === "v") graphics.rect(px, py + off, S_, band);
+      else graphics.rect(px + off, py, band, S_);
+      graphics.fill({ color, alpha: peak * (1 - i / 3) });
     }
   };
-  const fadeH = (fromLeft: boolean, color: number, depth: number, peak: number) => {
-    for (let i = 0; i < depth; i += 1) {
-      const xx = fromLeft ? px + i : px + S_ - 1 - i;
-      graphics.rect(xx, py, 1, S_);
-      graphics.fill({ color, alpha: peak * (1 - i / depth) });
-    }
-  };
-  // Tall soft shadow at an exposed base (height), then gentler side shadows
-  // (narrow lit core), then the lit top cap last so the crown stays bright.
-  if (!(mask & S)) fadeV(false, shadow, 7, 0.85);
-  if (!(mask & W)) fadeH(true, shadow, 4, 0.45);
-  if (!(mask & E)) fadeH(false, shadow, 4, 0.6);
-  if (!(mask & N)) fadeV(true, light, 6, 0.8);
+  // Lit from the top-left: outer top/left edges catch light, outer bottom/right
+  // fall into shadow — drawn shadow-first so the highlight crowns the corner.
+  if (sS === "out") fade("v", false, shadow, 2, 0.85);
+  if (sE === "out") fade("h", false, shadow, 1.6, 0.62);
+  if (sN === "out") fade("v", true, light, 1.7, 0.8);
+  if (sW === "out") fade("h", true, light, 1.6, 0.6);
+  // Soft ambient shadow where the wall meets the room, so inner faces and the
+  // concave corners between two inner walls are defined (not flat).
+  const ao = 0x33260f;
+  if (sN === "in") fade("v", true, ao, 1.4, 0.4);
+  if (sS === "in") fade("v", false, ao, 1.4, 0.4);
+  if (sW === "in") fade("h", true, ao, 1.3, 0.4);
+  if (sE === "in") fade("h", false, ao, 1.3, 0.4);
 }
 
 /** A door drawn open (leaf swung against the jamb) while someone passes through. */
