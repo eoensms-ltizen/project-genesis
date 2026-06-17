@@ -625,8 +625,16 @@ export class Simulation {
         // A tile already showing its target type needs no laying. This is what
         // lets an annex share its parent's wall: those tiles are already Wall, so
         // they start done — only the genuinely new structure (and the doorway
-        // punched through the shared wall) is built and paid for.
-        .map((tile) => ({ ...tile, done: this.world.getTile(tile)?.type === tile.t }))
+        // punched through the shared wall) is built and paid for. A Floor tile
+        // that already holds furniture (a stove, bed, table) is left alone too,
+        // so re-planning an enlarged room never lays floor over its fittings.
+        .map((tile) => {
+          const current = this.world.getTile(tile)?.type;
+          const done =
+            current === tile.t ||
+            (tile.t === "Floor" && Simulation.FURNITURE_TILES.has(current as TileType));
+          return { ...tile, done };
+        })
         .sort((a, b) => order(a.t) - order(b.t));
     }
     return building.plan;
@@ -876,6 +884,119 @@ export class Simulation {
       }
     }
     return tiles;
+  }
+
+  // --- Expansion: enlarge a full warehouse / cramped kitchen in place ---------
+
+  /** A warehouse/kitchen should always keep at least this many free interior tiles. */
+  private static readonly MIN_FREE_CIVIC_TILES = 2;
+
+  /**
+   * How many interior tiles are still free to use: for a warehouse, tiles with no
+   * pile on them (room to stock more); for a kitchen, bare floor tiles (room for
+   * the cook to stand and for fittings like a table).
+   */
+  private freeCivicTiles(building: Building): number {
+    if (building.kind === "warehouse") {
+      return this.interiorTiles(building).filter((t) => !this.itemAt(t)).length;
+    }
+    return this.interiorTiles(building).filter(
+      (t) => this.world.getTile(t)?.type === "Floor",
+    ).length;
+  }
+
+  /**
+   * A built warehouse or kitchen that has run low on breathing room and has clear
+   * ground to grow into. Returns the first one that should be enlarged, if any.
+   */
+  civicNeedingExpansion(): Building | undefined {
+    for (const building of this.buildings) {
+      if (building.stage !== "built") {
+        continue;
+      }
+      if (building.kind !== "warehouse" && building.kind !== "kitchen") {
+        continue;
+      }
+      if (this.freeCivicTiles(building) >= Simulation.MIN_FREE_CIVIC_TILES) {
+        continue;
+      }
+      if (this.planExpansionRect(building)) {
+        return building;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Pick an enlarged rectangle for `building` at least 1.5× its current area,
+   * growing into clear ground on a side that isn't its (south) doorway — so the
+   * door stays on the perimeter and the existing structure stays put. Tries east,
+   * west, then north. Returns the new footprint, or undefined if hemmed in.
+   */
+  planExpansionRect(
+    building: Building,
+  ): { x: number; y: number; width: number; height: number } | undefined {
+    const { x, y, width: w, height: h } = building;
+    const isGround = (p: Vec2): boolean =>
+      this.world.inBounds(p) &&
+      this.world.getTile(p)?.type === "Grass" &&
+      !this.isTileClaimed(p);
+    const stripClear = (x0: number, y0: number, sw: number, sh: number): boolean => {
+      for (let yy = y0; yy < y0 + sh; yy += 1) {
+        for (let xx = x0; xx < x0 + sw; xx += 1) {
+          if (!isGround({ x: xx, y: yy })) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+    const ex = Math.ceil(w * 0.5); // columns needed to reach ≥1.5× area
+    const ey = Math.ceil(h * 0.5); // rows needed to reach ≥1.5× area
+    // East: new ground to the right; height (and the south doorway) unchanged.
+    if (stripClear(x + w, y, ex, h)) {
+      return { x, y, width: w + ex, height: h };
+    }
+    // West: new ground to the left; origin shifts, door stays on the south row.
+    if (stripClear(x - ex, y, ex, h)) {
+      return { x: x - ex, y, width: w + ex, height: h };
+    }
+    // North: new ground above; the south row (with the door) is untouched.
+    if (stripClear(x, y - ey, w, ey)) {
+      return { x, y: y - ey, width: w, height: h + ey };
+    }
+    return undefined;
+  }
+
+  /**
+   * Reopen a finished room as a construction project on an enlarged footprint:
+   * the old structure stays, the side wall becomes interior, and the new floor +
+   * surrounding walls are laid by hand (RimWorld-style) before it's sealed again.
+   * Returns false if there's no room to grow.
+   */
+  beginExpansion(building: Building): boolean {
+    const rect = this.planExpansionRect(building);
+    if (!rect) {
+      return false;
+    }
+    // Release the old footprint claim before resizing, then claim the new one.
+    this.releaseBuildingFootprint(building);
+    building.x = rect.x;
+    building.y = rect.y;
+    building.width = rect.width;
+    building.height = rect.height;
+    // The single south doorway sits on a side we never extend, so it stays valid;
+    // drop any stale multi-door list so the plan reads the one door.
+    building.doors = undefined;
+    building.expanding = true;
+    building.stage = "foundation";
+    building.plan = undefined;
+    this.ensureBuildPlan(building); // existing walls/floor/fittings start done
+    this.claimBuildingFootprint(building);
+    this.reserveEntrance(building);
+    this.refreshDoors();
+    this.notifyChanged();
+    return true;
   }
 
   /**
@@ -1179,23 +1300,34 @@ export class Simulation {
       // grass inside for the herd to graze.
       this.paintFencedYard(building);
     } else if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
-      this.paintWalledRoom(building);
+      // An enlarged room keeps its interior (stockpile, stove, beds); a fresh one
+      // is painted blank. Either way the perimeter and floor are asserted.
+      if (building.expanding) {
+        this.repaintWalledRoomKeepingFurniture(building);
+        building.expanding = undefined;
+      } else {
+        this.paintWalledRoom(building);
+      }
       building.plan = undefined;
-      // A kitchen comes with a stove to cook at, set on its interior floor.
+      // A kitchen comes with a stove to cook at, set on its interior floor — but
+      // only if it hasn't got one already (an enlarged kitchen keeps its stove).
       if (building.kind === "kitchen") {
         const interior = this.interiorTiles(building);
-        // The stove is solid, so set it on the interior tile FARTHEST from the
-        // doorway — that keeps the entrance and the floor beside it clear for the
-        // cook to stand on, rather than walling the room off.
-        const door = this.buildingDoors(building)[0];
-        const spot = interior
-          .slice()
-          .sort(
-            (a, b) =>
-              Math.hypot(b.x - door.x, b.y - door.y) - Math.hypot(a.x - door.x, a.y - door.y),
-          )[0];
-        if (spot) {
-          this.world.setTile(spot, "Stove");
+        const hasStove = interior.some((t) => this.world.getTile(t)?.type === "Stove");
+        if (!hasStove) {
+          // The stove is solid, so set it on the interior tile FARTHEST from the
+          // doorway — that keeps the entrance and the floor beside it clear for the
+          // cook to stand on, rather than walling the room off.
+          const door = this.buildingDoors(building)[0];
+          const spot = interior
+            .slice()
+            .sort(
+              (a, b) =>
+                Math.hypot(b.x - door.x, b.y - door.y) - Math.hypot(a.x - door.x, a.y - door.y),
+            )[0];
+          if (spot) {
+            this.world.setTile(spot, "Stove");
+          }
         }
       }
     } else {

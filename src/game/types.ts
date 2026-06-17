@@ -181,6 +181,10 @@ export type Building = {
   // For a "bedroom" annex: the id of the communal house it's attached to (it
   // shares one wall with that house and opens onto it through an internal door).
   annexOf?: string;
+  // True while a finished room is being enlarged in place (walls torn down,
+  // floor laid, walls re-wrapped). Tells the build/finish path to preserve the
+  // existing interior (stockpile, stove, beds) instead of repainting it blank.
+  expanding?: boolean;
 };
 
 // One tile of a building's construction plan — a wall, floor, or doorway that a

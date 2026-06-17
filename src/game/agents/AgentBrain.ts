@@ -1045,7 +1045,9 @@ export class AgentBrain {
       kind = "station";
     }
     if (!kind) {
-      return "none";
+      // Nothing new to raise — but a full warehouse or cramped kitchen can be
+      // enlarged in place so it always keeps room to spare.
+      return this.tryExpandCivic(agent, simulation) ? "started" : "none";
     }
 
     const cost = buildCost(kind);
@@ -1054,6 +1056,40 @@ export class AgentBrain {
       return "started";
     }
     return this.startCommunalBuilding(agent, simulation, kind) ? "started" : "none";
+  }
+
+  /**
+   * Enlarge a finished warehouse/kitchen that's run out of breathing room: reopen
+   * it as a construction project on a bigger footprint and start laying the new
+   * floor and walls. Other idle hands pitch in via tryHelpBuild, just like a fresh
+   * build. The per-tile wood is paid as the walls go up (floors are free).
+   */
+  private tryExpandCivic(agent: Agent, simulation: Simulation): boolean {
+    if (agent.projectBuildingId) {
+      return false; // already busy on a build
+    }
+    const target = simulation.civicNeedingExpansion();
+    if (!target || !simulation.beginExpansion(target)) {
+      return false;
+    }
+    agent.projectBuildingId = target.id;
+    simulation.log(
+      tr(
+        `${agent.name} began enlarging the ${target.kind}.`,
+        `${agent.name}이(가) ${buildingNameKo(target.kind)}을(를) 증축하기 시작했다.`,
+      ),
+    );
+    const path = findPath(simulation.world, { start: agent.position, goal: target.door });
+    if (path) {
+      agent.target = { ...target.door };
+      agent.path = path;
+      this.setState(agent, simulation, "MoveToHouseSite");
+    } else {
+      // Can't path to the door right now — hand to the builder, which fetches
+      // wood and lays tiles, pathing per-tile (others can help meanwhile).
+      this.setState(agent, simulation, "BuildHouse");
+    }
+    return true;
   }
 
   /**
