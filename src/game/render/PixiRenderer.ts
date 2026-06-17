@@ -299,6 +299,10 @@ export class PixiRenderer {
         } else if (tile.type === "BedSite") {
           // The reserved plot likewise reads as one ghost bed, not two squares.
           drawBedSite(g, world, tx, ty);
+        } else if (tile.type === "Fence" || tile.type === "FenceGate") {
+          // The rail line follows its neighbours (straight runs, corners, the
+          // gate), so it needs the surrounding tiles — can't be a per-tile draw.
+          drawFence(g, world, tx, ty, tile.type === "FenceGate");
         } else {
           drawTile(g, tx, ty, tile.type);
         }
@@ -806,31 +810,125 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0xe6ddc8);
   }
 
-  if (type === "Fence") {
-    // A post-and-rail fence on the pasture's grass.
-    const rail = 0x8a6a44;
-    const post = 0x6b4a2c;
-    graphics.rect(px, py + 5, TILE_SIZE, 2);
-    graphics.fill(rail);
-    graphics.rect(px, py + 10, TILE_SIZE, 2);
-    graphics.fill(rail);
-    graphics.rect(px + TILE_SIZE / 2 - 1.5, py + 2, 3, TILE_SIZE - 4);
-    graphics.fill(post);
+}
+
+/**
+ * A post-and-rail fence whose rails follow the run: a beam reaches from the tile
+ * centre toward each neighbouring fence/gate tile, so straight runs and corners
+ * join cleanly (no stray horizontal bars on a vertical stretch). A capped post
+ * sits at the centre over the joint, with a soft ground shadow for depth. A gate
+ * is lighter, hangs slightly ajar, and leaves the middle open.
+ */
+function drawFence(graphics: Graphics, world: WorldMap, x: number, y: number, isGate: boolean) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  const cx = px + TILE_SIZE / 2;
+  const cy = py + TILE_SIZE / 2;
+  const half = TILE_SIZE / 2;
+
+  // Grass underneath the rails.
+  graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+  graphics.fill(tileColor("Fence"));
+
+  const linked = (dx: number, dy: number): boolean => {
+    const t = world.getTile({ x: x + dx, y: y + dy })?.type;
+    return t === "Fence" || t === "FenceGate";
+  };
+  const dirs: Array<{ on: boolean; dx: number; dy: number }> = [
+    { on: linked(0, -1), dx: 0, dy: -1 },
+    { on: linked(0, 1), dx: 0, dy: 1 },
+    { on: linked(1, 0), dx: 1, dy: 0 },
+    { on: linked(-1, 0), dx: -1, dy: 0 },
+  ];
+  const anyLink = dirs.some((d) => d.on);
+  const runHoriz = dirs[2].on || dirs[3].on;
+
+  const RAIL = isGate ? 0xb89358 : 0x9a7548;
+  const RAIL_HI = isGate ? 0xd6b67e : 0xbb945e;
+  const POST = 0x6a4a2c;
+  const POST_HI = 0x8c6a40;
+  const OUTLINE = 0x2c1d10;
+  const RW = 3.2; // rail thickness
+
+  // A beam from the centre toward each linked edge (half a tile each).
+  const beam = (dx: number, dy: number, w: number): [number, number, number, number] =>
+    dx !== 0
+      ? [dx < 0 ? px : cx, cy - w / 2, half, w]
+      : [cx - w / 2, dy < 0 ? py : cy, w, half];
+
+  // Soft ground shadow, offset down-right, under each beam.
+  for (const d of dirs) {
+    if (!d.on) continue;
+    const [bx, by, bw, bh] = beam(d.dx, d.dy, RW);
+    graphics.rect(bx + 1.3, by + 1.4, bw, bh);
+  }
+  if (!anyLink) {
+    graphics.rect(px + 3.3, cy - RW / 2 + 1.4, TILE_SIZE - 6, RW);
+  }
+  graphics.fill({ color: 0x14250f, alpha: 0.32 });
+
+  // The rails themselves.
+  for (const d of dirs) {
+    if (!d.on) continue;
+    const [bx, by, bw, bh] = beam(d.dx, d.dy, RW);
+    graphics.rect(bx, by, bw, bh);
+  }
+  if (!anyLink) {
+    graphics.rect(px + 3, cy - RW / 2, TILE_SIZE - 6, RW); // a lone stub of rail
+  }
+  graphics.fill(RAIL);
+
+  // A lit top edge along each rail for a rounded, sunny look.
+  for (const d of dirs) {
+    if (!d.on) continue;
+    const [bx, by, bw] = beam(d.dx, d.dy, RW);
+    graphics.rect(bx, by, d.dx !== 0 ? bw : 1, d.dx !== 0 ? 1 : half);
+  }
+  graphics.fill({ color: RAIL_HI, alpha: 0.85 });
+
+  if (isGate) {
+    // Posts flank the opening (across the run); a lighter leaf hangs ajar, swung
+    // a little into the yard, and the middle is left clear so folk can pass.
+    const P = 4.2;
+    const posts = runHoriz
+      ? [
+          { x: px + 1.6, y: cy },
+          { x: px + TILE_SIZE - 1.6, y: cy },
+        ]
+      : [
+          { x: cx, y: py + 1.6 },
+          { x: cx, y: py + TILE_SIZE - 1.6 },
+        ];
+    for (const p of posts) {
+      graphics.rect(p.x - P / 2, p.y - P / 2, P, P);
+      graphics.fill(POST);
+      graphics.rect(p.x - P / 2, p.y - P / 2, P, P);
+      graphics.stroke({ color: OUTLINE, width: 1, alpha: 0.8 });
+    }
+    // The ajar leaf: a short lighter plank angled off one post into the yard.
+    if (runHoriz) {
+      graphics.rect(px + 2.2, cy - 1, 6.5, 2);
+      graphics.fill({ color: RAIL_HI, alpha: 0.95 });
+      graphics.rect(px + 7.5, cy - 4.2, 2, 4.2);
+      graphics.fill({ color: RAIL, alpha: 0.95 });
+    } else {
+      graphics.rect(cx - 1, py + 2.2, 2, 6.5);
+      graphics.fill({ color: RAIL_HI, alpha: 0.95 });
+      graphics.rect(cx, py + 7.5, 4.2, 2);
+      graphics.fill({ color: RAIL, alpha: 0.95 });
+    }
+    return;
   }
 
-  if (type === "FenceGate") {
-    // A lighter swing gate set in the fence line — people pass, animals don't.
-    const post = 0x6b4a2c;
-    graphics.rect(px + 1, py + 2, 2.5, TILE_SIZE - 4);
-    graphics.fill(post);
-    graphics.rect(px + TILE_SIZE - 3.5, py + 2, 2.5, TILE_SIZE - 4);
-    graphics.fill(post);
-    graphics.rect(px + 2, py + 6, TILE_SIZE - 4, 1.5);
-    graphics.fill({ color: 0xb89a6a, alpha: 0.9 });
-    graphics.rect(px + 2, py + 10, TILE_SIZE - 4, 1.5);
-    graphics.fill({ color: 0xb89a6a, alpha: 0.9 });
-  }
-
+  // A capped post at the centre, sitting over the rail joint.
+  const P = 5;
+  graphics.rect(cx - P / 2, cy - P / 2, P, P);
+  graphics.fill(POST);
+  graphics.rect(cx - P / 2, cy - P / 2, P, P);
+  graphics.stroke({ color: OUTLINE, width: 1, alpha: 0.85 });
+  // A lit cap (top-left) so the post reads as raised.
+  graphics.rect(cx - P / 2 + 0.9, cy - P / 2 + 0.9, P - 2.6, 1.6);
+  graphics.fill({ color: POST_HI, alpha: 0.95 });
 }
 
 function resourcePileColors(resource: ResourceKind): [number, number] {
