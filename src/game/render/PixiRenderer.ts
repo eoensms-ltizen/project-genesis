@@ -919,40 +919,36 @@ function drawWall(graphics: Graphics, x: number, y: number, mask: number) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
   const S_ = TILE_SIZE;
-  const body = 0x6a4f2f;
-  const top = 0x8f6c3f; // lit top surface of the wall
-  const hi = 0xbd965b; // bright top edge
-  const shade = 0x281b0d; // deep shadow for a thick, tall-looking outline
-  const sideShade = 0x3a2917;
+  const body = 0x6b5234; // warm timber
+  const light = 0xb59067; // warm highlight
+  const shadow = 0x3f2e1c; // warm shadow (not near-black, so edges stay soft)
   // Solid timber body.
   graphics.rect(px, py, S_, S_);
   graphics.fill(body);
-  // Thick side faces on exposed edges read as the wall's vertical sides, so the
-  // lit core looks narrow and the wall tall (rather than a flat, wide slab). The
-  // bevel is only on edges without a neighbour, so runs stay connected.
-  const SIDE = 4;
-  if (!(mask & W)) {
-    graphics.rect(px, py, SIDE, S_);
-    graphics.fill(sideShade);
-  }
-  if (!(mask & E)) {
-    graphics.rect(px + S_ - SIDE, py, SIDE, S_);
-    graphics.fill(sideShade);
-  }
-  // A tall, dark front face along an exposed south edge gives the wall height.
-  if (!(mask & S)) {
-    graphics.rect(px, py + S_ - 6, S_, 6);
-    graphics.fill(shade);
-    graphics.rect(px, py + S_ - 6, S_, 1.2);
-    graphics.fill({ color: 0x4a3a22, alpha: 0.8 });
-  }
-  // A bright lit cap along an exposed north edge — the top of the raised wall.
-  if (!(mask & N)) {
-    graphics.rect(px, py, S_, 4.5);
-    graphics.fill(top);
-    graphics.rect(px, py, S_, 1.8);
-    graphics.fill(hi);
-  }
+  // Soft relief: each exposed edge fades from its tone into the body over several
+  // 1px bands of decreasing alpha, so the wall reads as a gently raised block
+  // rather than hard-edged colour slabs. Bevels only on neighbourless edges keep
+  // runs connected and corners clean.
+  const fadeV = (fromTop: boolean, color: number, depth: number, peak: number) => {
+    for (let i = 0; i < depth; i += 1) {
+      const yy = fromTop ? py + i : py + S_ - 1 - i;
+      graphics.rect(px, yy, S_, 1);
+      graphics.fill({ color, alpha: peak * (1 - i / depth) });
+    }
+  };
+  const fadeH = (fromLeft: boolean, color: number, depth: number, peak: number) => {
+    for (let i = 0; i < depth; i += 1) {
+      const xx = fromLeft ? px + i : px + S_ - 1 - i;
+      graphics.rect(xx, py, 1, S_);
+      graphics.fill({ color, alpha: peak * (1 - i / depth) });
+    }
+  };
+  // Tall soft shadow at an exposed base (height), then gentler side shadows
+  // (narrow lit core), then the lit top cap last so the crown stays bright.
+  if (!(mask & S)) fadeV(false, shadow, 7, 0.85);
+  if (!(mask & W)) fadeH(true, shadow, 4, 0.45);
+  if (!(mask & E)) fadeH(false, shadow, 4, 0.6);
+  if (!(mask & N)) fadeV(true, light, 6, 0.8);
 }
 
 /** A door drawn open (leaf swung against the jamb) while someone passes through. */
