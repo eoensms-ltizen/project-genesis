@@ -149,6 +149,20 @@ function resourceName(resource: ResourceKind): string {
   return tr("Steel", "강철");
 }
 
+/** What a resident is physically carrying — a hauled load and/or build wood. */
+function carriedSummary(agent: Agent): string {
+  const counts = new Map<ResourceKind, number>();
+  if (agent.carry && agent.carry.amount > 0) {
+    counts.set(agent.carry.resource, agent.carry.amount);
+  }
+  if (agent.inventory.wood > 0) {
+    counts.set("wood", (counts.get("wood") ?? 0) + agent.inventory.wood);
+  }
+  return [...counts.entries()]
+    .map(([resource, amount]) => `${resourceName(resource)} ×${amount}`)
+    .join(", ");
+}
+
 const TILE_NAMES: Partial<Record<TileType, () => string>> = {
   Grass: () => tr("Grass", "풀밭"),
   Tree: () => tr("Tree", "나무"),
@@ -274,6 +288,12 @@ function AgentInfo({
         </dd>
         <dt>{tr("Home", "집")}</dt>
         <dd>{agent.home ? `(${agent.home.x}, ${agent.home.y})` : tr("homeless", "노숙")}</dd>
+        {carriedSummary(agent) && (
+          <>
+            <dt>{tr("Carrying", "소지품")}</dt>
+            <dd>{carriedSummary(agent)}</dd>
+          </>
+        )}
         {agent.home && homeAmbiance !== undefined && (
           <>
             <dt>{tr("Surroundings", "주변 환경")}</dt>

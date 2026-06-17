@@ -409,6 +409,9 @@ export class PixiRenderer {
         const ly = sy + 11 - i * 2.4;
         this.overlayGraphics.rect(sx + 3, ly, 10, 2);
         this.overlayGraphics.fill({ color: i % 2 === 0 ? a : b, alpha: 0.95 });
+        // thin, dark outline so the pile reads crisply against the ground
+        this.overlayGraphics.rect(sx + 3, ly, 10, 2);
+        this.overlayGraphics.stroke({ width: 0.6, color: 0x1c130a, alpha: 0.9 });
       }
     }
 
@@ -621,6 +624,10 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
     graphics.fill(0x6d4b2d);
     graphics.circle(px + 8, py + 6, 6);
     graphics.fill(0x153f1f);
+    // soft, low-contrast outline so the canopy reads against grass without
+    // the harsh dark line the walls and material piles use
+    graphics.circle(px + 8, py + 6, 6);
+    graphics.stroke({ width: 1, color: 0x0c2a12, alpha: 0.45 });
   }
 
   if (type === "FieldEmpty" || type === "FieldGrowing" || type === "FieldRipe") {

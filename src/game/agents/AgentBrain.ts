@@ -3055,6 +3055,15 @@ export class AgentBrain {
 
   private goSleep(agent: Agent, simulation: Simulation) {
     const rp = roundVec(agent.position);
+    // Claim a free bed at bedtime if we don't already own one — beds aren't saved
+    // across reloads, so a resident with a bed standing empty in their home would
+    // otherwise sleep on the floor at the centre. Adopt it and sleep there.
+    if (!this.hasOwnBed(agent, simulation) && agent.homeBuildingId) {
+      const home = simulation.getBuilding(agent.homeBuildingId);
+      if (home && home.kind === "house" && home.stage === "built") {
+        this.claimUnownedBed(agent, simulation, home);
+      }
+    }
     // A bed is solid: you climb onto it from an adjacent tile. Walk up beside the
     // bed, and the Sleep state mounts it. If already on/beside it, sleep now.
     if (this.hasOwnBed(agent, simulation) && agent.bedPos) {
