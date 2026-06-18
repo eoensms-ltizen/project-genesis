@@ -301,6 +301,9 @@ export class Simulation {
   private readonly logs: GameLogEntry[] = [];
   private readonly claimedTiles = new Set<string>();
   private readonly episodes = new Map<string, GameLogEntry[]>();
+  // Which cook (agent id) currently has each stove reserved. Transient — cleared
+  // on load so a reservation never outlives the cooking trip that made it.
+  private readonly stoveCooks = new Map<string, string>();
   private traffic = new Map<number, number>();
   private ambianceGrid = new Float32Array(0);
   private elapsedSeconds = 0;
@@ -2819,6 +2822,47 @@ export class Simulation {
     return tile ? { x: tile.x, y: tile.y } : undefined;
   }
 
+  /** Every stove in the village. */
+  getStoves(): Vec2[] {
+    return this.world.tiles
+      .filter((t) => t.type === "Stove")
+      .map((t) => ({ x: t.x, y: t.y }));
+  }
+
+  // --- Stove reservation: only one cook may work a stove at a time -------------
+
+  /** A stove free for `agentId` to claim (not in use by another cook), if any. */
+  freeStoveFor(agentId: string): Vec2 | undefined {
+    return this.getStoves().find((s) => {
+      const cook = this.stoveCooks.get(`${s.x},${s.y}`);
+      return !cook || cook === agentId;
+    });
+  }
+
+  /** Reserve a stove for a cook (releasing any other they held first). */
+  claimStove(position: Vec2, agentId: string) {
+    this.releaseStove(agentId);
+    this.stoveCooks.set(`${position.x},${position.y}`, agentId);
+  }
+
+  /** Release whatever stove a cook held (when they finish or down tools). */
+  releaseStove(agentId: string) {
+    for (const [key, cook] of this.stoveCooks) {
+      if (cook === agentId) {
+        this.stoveCooks.delete(key);
+      }
+    }
+  }
+
+  /** Put unused ingredients back in the larder (e.g. a cook abandons the job). */
+  returnFood(amount: number, spoiled: boolean) {
+    if (amount <= 0) {
+      return;
+    }
+    this.foods.push({ kind: "wheat", amount, ageSeconds: spoiled ? FOOD_SPOIL_SECONDS : 0, spoiled });
+    this.foodStock = Math.min(FOOD_CAP, this.foodStock + amount);
+  }
+
   getChurch(): Building | undefined {
     return this.buildings.find(
       (building) => building.kind === "church" && building.stage === "built",
@@ -3045,6 +3089,12 @@ export class Simulation {
       this.releaseClaim(agent.target);
     }
     this.releaseItemsHeldBy(agent.id);
+    this.releaseStove(agent.id);
+    // Ingredients a cook was carrying go back to the pantry.
+    if (agent.carryFood) {
+      this.returnFood(agent.carryFood.amount, agent.carryFood.spoiled);
+      agent.carryFood = undefined;
+    }
     // Goods they were carrying spill onto the ground where they fell.
     if (agent.inventory.wood > 0 && this.hasAnyWarehouse()) {
       this.dropWood(agent.position, agent.inventory.wood);

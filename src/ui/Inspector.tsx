@@ -181,9 +181,18 @@ function carriedSummary(agent: Agent): string {
   if (agent.inventory.wood > 0) {
     counts.set("wood", (counts.get("wood") ?? 0) + agent.inventory.wood);
   }
-  return [...counts.entries()]
-    .map(([resource, amount]) => `${resourceName(resource)} ×${amount}`)
-    .join(", ");
+  const parts = [...counts.entries()].map(
+    ([resource, amount]) => `${resourceName(resource)} ×${amount}`,
+  );
+  // Raw ingredients a cook is carrying to the stove.
+  if (agent.carryFood && agent.carryFood.amount > 0) {
+    parts.push(
+      `${tr("ingredients", "요리 재료")} ×${agent.carryFood.amount}${
+        agent.carryFood.spoiled ? " 🤢" : ""
+      }`,
+    );
+  }
+  return parts.join(", ");
 }
 
 const TILE_NAMES: Partial<Record<TileType, () => string>> = {
@@ -293,8 +302,12 @@ function activityLabel(agent: Agent): string {
     case "MoveToPave":
     case "Pave":
       return tr("paving a path", "길을 까는 중");
+    case "MoveToPantry":
+      return tr("fetching ingredients", "재료를 가지러 가는 중");
+    case "CollectIngredients":
+      return tr("gathering ingredients", "재료를 챙기는 중");
     case "MoveToKitchen":
-      return tr("heading to the kitchen", "부엌으로 가는 중");
+      return tr("carrying ingredients to the stove", "재료를 화덕으로 옮기는 중");
     case "Cook":
       return tr("cooking a meal", "요리하는 중");
     case "MoveToWorship":

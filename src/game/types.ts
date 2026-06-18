@@ -67,6 +67,8 @@ export type AgentState =
   | "FarmWork"
   | "MoveToPave"
   | "Pave"
+  | "MoveToPantry" // walking to the warehouse to pick up cooking ingredients
+  | "CollectIngredients" // taking raw food into one's arms to carry to the stove
   | "MoveToKitchen"
   | "Cook"
   | "MoveToWorship"
@@ -302,6 +304,12 @@ export type Agent = {
   // Seconds of food poisoning left to run after eating spoiled food: while sick a
   // resident is miserable and tires faster.
   sickSeconds?: number;
+  // Raw ingredients a cook is carrying from the pantry to the stove (spoiled if
+  // any of them had turned — the meal comes out tainted).
+  carryFood?: { amount: number; spoiled: boolean };
+  // The stove this cook has reserved for the current cooking trip (one cook per
+  // stove — nobody else may use it until they're done).
+  cookStove?: Vec2;
   // How much wood to draw out of the warehouse on the current fetch trip.
   fetchAmount?: number;
   // The ground stack this agent has reserved and is hauling.

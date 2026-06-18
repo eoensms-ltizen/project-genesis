@@ -313,6 +313,12 @@ export class AgentBrain {
       case "Pave":
         this.pave(agent, simulation, deltaSeconds);
         break;
+      case "MoveToPantry":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "CollectIngredients");
+        break;
+      case "CollectIngredients":
+        this.collectIngredients(agent, simulation);
+        break;
       case "MoveToKitchen":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Cook");
         break;
@@ -2073,11 +2079,13 @@ export class AgentBrain {
   }
 
   private tryCook(agent: Agent, simulation: Simulation): boolean {
-    // Cooking needs a stove (inside a kitchen), raw food, and a larder that
-    // isn't already full of meals. Anyone may do it — see cookEfficiency.
-    const stove = simulation.getStove();
+    // Cooking needs a free stove (one cook per stove), raw ingredients in the
+    // pantry, and a larder not already full of meals. Anyone may do it — see
+    // cookEfficiency. The cook fetches the ingredients and carries them to the
+    // stove before cooking.
+    const stove = simulation.freeStoveFor(agent.id);
     if (!stove) {
-      return false;
+      return false; // no stove, or every stove already has a cook
     }
     if (
       simulation.foodStock < COOK_RAW_COST ||
@@ -2085,17 +2093,60 @@ export class AgentBrain {
     ) {
       return false;
     }
-
-    // Stand beside the (solid) stove to cook, not on it.
-    const path = findPath(simulation.world, { start: agent.position, goal: stove, stopAdjacent: true });
+    // Ingredients live in the warehouse pantry; without one there's nowhere to
+    // fetch them from.
+    const warehouse = simulation.getWarehouse();
+    if (!warehouse) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
     if (!path) {
       return false;
     }
+    // Hold the stove for the whole trip so no one else starts cooking on it.
+    simulation.claimStove(stove, agent.id);
+    agent.cookStove = { ...stove };
+    agent.target = { ...warehouse.door };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToPantry");
+    return true;
+  }
 
+  /** At the pantry: take raw ingredients into one's arms, then carry to the stove. */
+  private collectIngredients(agent: Agent, simulation: Simulation) {
+    if (!agent.carryFood) {
+      const { eaten, spoiled } = simulation.consumeFood(COOK_RAW_COST);
+      if (eaten <= 0) {
+        // Pantry emptied out from under us — give up the stove and rethink.
+        this.dropCookJob(agent, simulation);
+        this.setState(agent, simulation, "Idle");
+        return;
+      }
+      agent.carryFood = { amount: eaten, spoiled: spoiled > 0 };
+    }
+    const stove = agent.cookStove;
+    const path = stove
+      ? findPath(simulation.world, { start: agent.position, goal: stove, stopAdjacent: true })
+      : null;
+    if (!stove || !path) {
+      // Can't reach the stove — put the ingredients back and let the stove go.
+      this.dropCookJob(agent, simulation);
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
     agent.target = { ...stove };
     agent.path = path;
     this.setState(agent, simulation, "MoveToKitchen");
-    return true;
+  }
+
+  /** Release a cook's stove and return any carried ingredients to the pantry. */
+  private dropCookJob(agent: Agent, simulation: Simulation) {
+    if (agent.carryFood) {
+      simulation.returnFood(agent.carryFood.amount, agent.carryFood.spoiled);
+      agent.carryFood = undefined;
+    }
+    simulation.releaseStove(agent.id);
+    agent.cookStove = undefined;
   }
 
   /** A cook works at full speed and yield; anyone else cooks slower and wastefully. */
@@ -2111,14 +2162,14 @@ export class AgentBrain {
       return;
     }
 
-    if (simulation.foodStock >= COOK_RAW_COST) {
-      // Bring in the raw ingredients (oldest first); if any were spoiled the
-      // whole batch of meals comes out tainted — eating them will make folk sick.
-      const { spoiled } = simulation.consumeFood(COOK_RAW_COST);
-      // A non-cook gets fewer meals out of the same ingredients (some is spoiled).
+    // Cook the ingredients we carried over. If any were spoiled the whole batch
+    // of meals comes out tainted — eating them will make folk sick.
+    if (agent.carryFood && agent.carryFood.amount > 0) {
+      const spoiled = agent.carryFood.spoiled;
+      // A non-cook gets fewer meals out of the same ingredients (some is wasted).
       const yieldMeals = Math.max(1, Math.round(COOK_MEAL_YIELD * efficiency));
-      simulation.addMeals(yieldMeals, spoiled > 0);
-      if (spoiled > 0) {
+      simulation.addMeals(yieldMeals, spoiled);
+      if (spoiled) {
         simulation.log(
           tr(
             `${agent.name} cooked with food that had turned — those meals look off. 🤢`,
@@ -2134,6 +2185,9 @@ export class AgentBrain {
       }
       simulation.notifyChanged();
     }
+    agent.carryFood = undefined;
+    simulation.releaseStove(agent.id);
+    agent.cookStove = undefined;
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -3381,6 +3435,10 @@ export class AgentBrain {
     }
     // A carried load is set down where they stand so it isn't lost.
     this.dropCarry(agent, simulation);
+    // A cook who downs tools frees their stove and returns the ingredients.
+    if (agent.cookStove || agent.carryFood) {
+      this.dropCookJob(agent, simulation);
+    }
     // If they were mid-craft, let the colony try again.
     if (agent.state === "MoveToCraft" || agent.state === "CraftTool") {
       simulation.pickaxeInProgress = false;
