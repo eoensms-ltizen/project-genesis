@@ -568,6 +568,7 @@ export class Simulation {
     "BedFoot",
     "BedSite",
     "Table",
+    "Chair",
     "Stove",
   ]);
 

@@ -37,7 +37,11 @@ const MOVE_COSTS: Record<TileType, number> = {
   Bed: Number.POSITIVE_INFINITY,
   BedFoot: Number.POSITIVE_INFINITY,
   BedSite: 1,
-  Table: 1,
+  // Furniture is solid: a table is a surface you stand beside, and a chair is
+  // climbed onto from an adjacent tile to sit (handled by the dining logic) —
+  // pathfinding never routes through either.
+  Table: Number.POSITIVE_INFINITY,
+  Chair: Number.POSITIVE_INFINITY,
   // A fence rail is solid; its gate is passable for people (animals are kept in
   // by the animal-movement logic, which refuses to step onto fence or gate).
   Fence: Number.POSITIVE_INFINITY,
@@ -78,6 +82,7 @@ const TILE_CODES: Record<TileType, string> = {
   BedFoot: "f",
   BedSite: "m",
   Table: "t",
+  Chair: "h",
   Fence: "x",
   FenceGate: "j",
   Berry: "B",

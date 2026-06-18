@@ -303,6 +303,9 @@ export class PixiRenderer {
           // The rail line follows its neighbours (straight runs, corners, the
           // gate), so it needs the surrounding tiles — can't be a per-tile draw.
           drawFence(g, world, tx, ty, tile.type === "FenceGate");
+        } else if (tile.type === "Chair") {
+          // A chair faces its table, so it needs to know which side the table is on.
+          drawChair(g, world, tx, ty);
         } else {
           drawTile(g, tx, ty, tile.type);
         }
@@ -799,17 +802,61 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
 
 
   if (type === "Table") {
-    // A wooden dining table with a couple of plates.
-    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, TILE_SIZE - 8);
+    // A solid wooden dining table, nearly filling its tile so a run of tables
+    // reads as one long board, with a lit top edge and a set place.
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
     graphics.fill(0x8a6a44);
-    graphics.rect(px + 3, py + 4, TILE_SIZE - 6, TILE_SIZE - 8);
-    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.8 });
-    graphics.circle(px + 6, py + 8, 1.2);
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, 1.5);
+    graphics.fill({ color: 0xa6855a, alpha: 0.85 });
+    graphics.circle(px + 8, py + 9, 2.1);
     graphics.fill(0xe6ddc8);
-    graphics.circle(px + 10, py + 8, 1.2);
-    graphics.fill(0xe6ddc8);
+    graphics.circle(px + 8, py + 9, 2.1);
+    graphics.stroke({ color: 0xbdb39a, width: 0.6 });
   }
 
+}
+
+/**
+ * A dining chair: a wooden seat with its backrest on the side away from the
+ * table it serves, so the diner faces the table. Solid furniture, climbed onto
+ * only to sit (see the dining logic).
+ */
+function drawChair(graphics: Graphics, world: WorldMap, x: number, y: number) {
+  const px = x * TILE_SIZE;
+  const py = y * TILE_SIZE;
+  graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+  graphics.fill(tileColor("Chair"));
+
+  const SEAT = 0x9a6f43;
+  const SEAT_HI = 0xba8f5d;
+  const FRAME = 0x5c3f24;
+  const OUTLINE = 0x2c1d10;
+
+  // The diner faces the adjacent table; the backrest sits on the opposite side.
+  const table = [
+    { dx: 0, dy: -1 },
+    { dx: 0, dy: 1 },
+    { dx: 1, dy: 0 },
+    { dx: -1, dy: 0 },
+  ].find((d) => world.getTile({ x: x + d.dx, y: y + d.dy })?.type === "Table");
+  const back = table ? { dx: -table.dx, dy: -table.dy } : { dx: 0, dy: -1 };
+
+  // Backrest bar along the back edge.
+  if (back.dy < 0) graphics.rect(px + 3, py + 2.4, TILE_SIZE - 6, 2.2);
+  else if (back.dy > 0) graphics.rect(px + 3, py + TILE_SIZE - 4.6, TILE_SIZE - 6, 2.2);
+  else if (back.dx < 0) graphics.rect(px + 2.4, py + 3, 2.2, TILE_SIZE - 6);
+  else graphics.rect(px + TILE_SIZE - 4.6, py + 3, 2.2, TILE_SIZE - 6);
+  graphics.fill(FRAME);
+
+  // Seat.
+  graphics.roundRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8, 2);
+  graphics.fill(SEAT);
+  graphics.roundRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8, 2);
+  graphics.stroke({ color: OUTLINE, width: 1, alpha: 0.8 });
+  graphics.rect(px + 5, py + 5, TILE_SIZE - 10, 1.5);
+  graphics.fill({ color: SEAT_HI, alpha: 0.85 });
 }
 
 /**
@@ -1596,6 +1643,8 @@ function tileColor(type: TileType): number {
     case "BedSite":
       return 0x4a3b2a; // floor tone; the ghost outline is drawn on top
     case "Table":
+      return 0x4a3b2a;
+    case "Chair":
       return 0x4a3b2a;
     case "Fence":
       return 0x3f5a26; // pasture grass under the rails

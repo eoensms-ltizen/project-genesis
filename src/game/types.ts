@@ -33,6 +33,10 @@ export type TileType =
   | "BedFoot"
   | "BedSite"
   | "Table"
+  // A chair set at a table's edge. Solid like all furniture, but its diner can
+  // climb onto it to sit and eat (mounted from beside it, like a bed) — so it's
+  // only ever stood on while in use.
+  | "Chair"
   // A pasture is fenced like a walled room: solid fence rails pen the herd in,
   // with a gate people can walk through but animals cannot.
   | "Fence"
