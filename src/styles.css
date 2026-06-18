@@ -254,6 +254,10 @@ button[data-active="true"] {
   text-transform: capitalize;
 }
 
+.spoiled-tag {
+  color: #c98a6a;
+}
+
 .inspector-name-row {
   display: flex;
   align-items: center;

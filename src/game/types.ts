@@ -214,6 +214,20 @@ export type ItemStack = {
   reservedBy?: string;
 };
 
+// Kinds of food the village stores. Crops come from fields, meat from the hunt
+// and the herd, fish from the water; berries are foraged. Stored food keeps for
+// a while, then spoils — and eating (or cooking with) spoiled food makes a
+// resident sick.
+export type FoodKind = "berry" | "wheat" | "rice" | "beef" | "rabbit" | "fish";
+
+// One lot of stored food of a single kind, ageing toward spoilage as it sits.
+export type FoodBatch = {
+  kind: FoodKind;
+  amount: number;
+  ageSeconds: number;
+  spoiled: boolean;
+};
+
 export type AnimalKind = "deer" | "boar" | "rabbit";
 
 export type AnimalState = "wild" | "fleeing" | "tamed";
@@ -285,6 +299,9 @@ export type Agent = {
   socialCooldown?: number;
   resumeState?: AgentState;
   eatPlan?: "berry" | "warehouse" | "meal";
+  // Seconds of food poisoning left to run after eating spoiled food: while sick a
+  // resident is miserable and tires faster.
+  sickSeconds?: number;
   // How much wood to draw out of the warehouse on the current fetch trip.
   fetchAmount?: number;
   // The ground stack this agent has reserved and is hauling.

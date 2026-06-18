@@ -2,6 +2,7 @@ import type {
   Agent,
   Animal,
   Building,
+  FoodKind,
   GameLogEntry,
   InspectionTarget,
   ItemStack,
@@ -20,6 +21,7 @@ type InspectorProps = {
   tileType?: TileType;
   tileTraffic?: number;
   homeAmbiance?: number;
+  foodSummary?: { kind: FoodKind; fresh: number; spoiled: number }[];
   following?: boolean;
   onToggleFollow?: () => void;
   onClose: () => void;
@@ -35,6 +37,7 @@ export function Inspector({
   tileType,
   tileTraffic,
   homeAmbiance,
+  foodSummary,
   following,
   onToggleFollow,
   onClose,
@@ -61,6 +64,7 @@ export function Inspector({
         <BuildingInfo
           building={buildings.find((building) => building.id === selection.buildingId)}
           agents={agents}
+          foodSummary={foodSummary}
         />
       )}
       {selection.kind === "animal" && (
@@ -153,6 +157,19 @@ function resourceName(resource: ResourceKind): string {
   if (resource === "stone") return tr("Stone", "돌");
   if (resource === "ironOre") return tr("Iron ore", "철광석");
   return tr("Steel", "강철");
+}
+
+const FOOD_NAMES: Record<FoodKind, () => string> = {
+  berry: () => tr("berries", "베리"),
+  wheat: () => tr("wheat", "밀"),
+  rice: () => tr("rice", "쌀"),
+  beef: () => tr("beef", "쇠고기"),
+  rabbit: () => tr("rabbit", "토끼고기"),
+  fish: () => tr("fish", "생선"),
+};
+
+function foodName(kind: FoodKind): string {
+  return FOOD_NAMES[kind]();
 }
 
 /** What a resident is physically carrying — a hauled load and/or build wood. */
@@ -398,6 +415,12 @@ function AgentInfo({
       <dl>
         <dt>{tr("Doing", "하는 일")}</dt>
         <dd>{activityLabel(agent)}</dd>
+        {agent.sickSeconds !== undefined && agent.sickSeconds > 0 && (
+          <>
+            <dt>{tr("Health", "건강")}</dt>
+            <dd>{tr("food poisoning 🤢", "식중독 🤢")}</dd>
+          </>
+        )}
         <dt>{tr("Stage", "생애")}</dt>
         <dd>
           {lifeStage(agent.age)} · {agent.age}
@@ -458,10 +481,20 @@ function AgentInfo({
   );
 }
 
-function BuildingInfo({ building, agents }: { building?: Building; agents: Agent[] }) {
+function BuildingInfo({
+  building,
+  agents,
+  foodSummary,
+}: {
+  building?: Building;
+  agents: Agent[];
+  foodSummary?: { kind: FoodKind; fresh: number; spoiled: number }[];
+}) {
   if (!building) {
     return <p className="muted">{tr("This building no longer exists.", "이 건물은 더 이상 없습니다.")}</p>;
   }
+
+  const larder = (foodSummary ?? []).filter((f) => f.fresh > 0 || f.spoiled > 0);
 
   const owner = building.ownerId
     ? agents.find((agent) => agent.id === building.ownerId)
@@ -501,6 +534,21 @@ function BuildingInfo({ building, agents }: { building?: Building; agents: Agent
         <dd>
           {building.width}x{building.height} ({building.x}, {building.y})
         </dd>
+        {building.kind === "warehouse" && larder.length > 0 && (
+          <>
+            <dt>{tr("Larder", "식량")}</dt>
+            <dd>
+              {larder.map((f) => (
+                <div key={f.kind}>
+                  {foodName(f.kind)} {f.fresh}
+                  {f.spoiled > 0 && (
+                    <span className="spoiled-tag"> · {tr(`spoiled ${f.spoiled} 🤢`, `상함 ${f.spoiled} 🤢`)}</span>
+                  )}
+                </div>
+              ))}
+            </dd>
+          </>
+        )}
       </dl>
     </div>
   );

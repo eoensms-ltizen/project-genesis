@@ -100,6 +100,10 @@ const MAX_FIELD_TILES = 12;
 // keeps its distance from where people live.
 const FIELD_HOME_BUFFER = 4;
 const FOOD_STOCK_TARGET = 50;
+// Food poisoning: how long it lasts, the extra stamina it saps, and the mood hit.
+const SICK_DURATION_SECONDS = 90;
+const SICK_STAMINA_DRAIN = 2.5;
+const SICK_MOOD_PENALTY = 22;
 const HUNGER_SEEK_THRESHOLD = 65;
 const HUNGER_SNACK_THRESHOLD = 40;
 const STAMINA_EXHAUSTED = 25;
@@ -217,6 +221,13 @@ const WORKING_STATES: ReadonlySet<AgentState> = new Set([
 
 export class AgentBrain {
   update(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    // Food poisoning runs its course over time; while it lasts it saps strength
+    // and spirits (handled in updateMood), pushing the resident to rest.
+    if (agent.sickSeconds && agent.sickSeconds > 0) {
+      agent.sickSeconds = Math.max(0, agent.sickSeconds - deltaSeconds);
+      agent.health.stamina = Math.max(0, agent.health.stamina - deltaSeconds * SICK_STAMINA_DRAIN);
+    }
+
     const hungerRate = agent.state === "Sleep" ? 0.12 : 0.35;
     agent.health.hunger = Math.min(100, agent.health.hunger + deltaSeconds * hungerRate);
     // Being up and about costs stamina — far more so at night (see the night
@@ -944,6 +955,10 @@ export class AgentBrain {
     }
     if (agent.health.stamina < STAMINA_EXHAUSTED) {
       target -= 14;
+    }
+    // Food poisoning is thoroughly miserable.
+    if (agent.sickSeconds && agent.sickSeconds > 0) {
+      target -= SICK_MOOD_PENALTY;
     }
     target = clampNeed(target);
     const current = agent.mood ?? 60;
@@ -2097,11 +2112,20 @@ export class AgentBrain {
     }
 
     if (simulation.foodStock >= COOK_RAW_COST) {
-      simulation.foodStock -= COOK_RAW_COST;
+      // Bring in the raw ingredients (oldest first); if any were spoiled the
+      // whole batch of meals comes out tainted — eating them will make folk sick.
+      const { spoiled } = simulation.consumeFood(COOK_RAW_COST);
       // A non-cook gets fewer meals out of the same ingredients (some is spoiled).
       const yieldMeals = Math.max(1, Math.round(COOK_MEAL_YIELD * efficiency));
-      simulation.meals += yieldMeals;
-      if (Math.random() < 0.4) {
+      simulation.addMeals(yieldMeals, spoiled > 0);
+      if (spoiled > 0) {
+        simulation.log(
+          tr(
+            `${agent.name} cooked with food that had turned — those meals look off. 🤢`,
+            `${agent.name}이(가) 상한 재료로 요리했다 — 음식이 이상해 보인다. 🤢`,
+          ),
+        );
+      } else if (Math.random() < 0.4) {
         simulation.log(
           efficiency >= 1
             ? tr(`${agent.name} cooked warm meals at the stove.`, `${agent.name}이(가) 화덕에서 따뜻한 식사를 지었다.`)
@@ -2419,6 +2443,19 @@ export class AgentBrain {
     this.setState(agent, simulation, "MoveToFood");
   }
 
+  /** A resident comes down with food poisoning after eating something off. */
+  private fallSick(agent: Agent, simulation: Simulation) {
+    agent.sickSeconds = Math.max(agent.sickSeconds ?? 0, SICK_DURATION_SECONDS);
+    agent.mood = Math.max(0, (agent.mood ?? 60) - SICK_MOOD_PENALTY);
+    simulation.log(
+      tr(
+        `${agent.name} ate spoiled food and feels ill. 🤢`,
+        `${agent.name}이(가) 상한 음식을 먹고 탈이 났다. 🤢`,
+      ),
+      [agent],
+    );
+  }
+
   private eat(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < EAT_DURATION_SECONDS) {
@@ -2427,15 +2464,23 @@ export class AgentBrain {
 
     if (agent.eatPlan === "meal") {
       if (simulation.meals > 0) {
-        simulation.meals -= 1;
+        const tainted = simulation.takeMeal();
         agent.health.hunger = Math.max(0, agent.health.hunger - 80);
-        simulation.log(tr(`${agent.name} enjoyed a warm meal.`, `${agent.name}이(가) 따뜻한 식사를 즐겼다.`));
+        if (tainted) {
+          this.fallSick(agent, simulation);
+        } else {
+          simulation.log(tr(`${agent.name} enjoyed a warm meal.`, `${agent.name}이(가) 따뜻한 식사를 즐겼다.`));
+        }
       }
     } else if (agent.eatPlan === "warehouse") {
       if (simulation.foodStock > 0) {
-        simulation.foodStock -= 1;
+        const { spoiled } = simulation.consumeFood(1);
         agent.health.hunger = Math.max(0, agent.health.hunger - 60);
-        simulation.log(tr(`${agent.name} ate from the warehouse.`, `${agent.name}이(가) 창고에서 끼니를 해결했다.`));
+        if (spoiled > 0) {
+          this.fallSick(agent, simulation);
+        } else {
+          simulation.log(tr(`${agent.name} ate from the warehouse.`, `${agent.name}이(가) 창고에서 끼니를 해결했다.`));
+        }
       }
     } else {
       if (agent.target) {
@@ -2512,8 +2557,14 @@ export class AgentBrain {
       const tile = simulation.world.getTile(center);
       if (tile?.type === "FieldRipe") {
         simulation.world.setTile(center, "FieldEmpty");
-        simulation.foodStock += 2;
-        simulation.log(tr(`${agent.name} harvested crops. +2 food`, `${agent.name}이(가) 작물을 거뒀다. +식량 2`));
+        // Fields grow wheat or rice depending on the plot (a checkerboard).
+        const crop = (center.x + center.y) % 2 === 0 ? "wheat" : "rice";
+        simulation.addFood(crop, 2);
+        simulation.log(
+          crop === "wheat"
+            ? tr(`${agent.name} harvested wheat. +2 food`, `${agent.name}이(가) 밀을 거뒀다. +식량 2`)
+            : tr(`${agent.name} harvested rice. +2 food`, `${agent.name}이(가) 쌀을 거뒀다. +식량 2`),
+        );
       } else if (tile?.type === "FieldEmpty") {
         simulation.world.setTile(center, "FieldGrowing");
         if (Math.random() < 0.35) {

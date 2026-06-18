@@ -9,6 +9,8 @@ import type {
   BuildingKind,
   BuildingStage,
   BuildPlanTile,
+  FoodBatch,
+  FoodKind,
   GameClock,
   GameLogEntry,
   ItemStack,
@@ -89,6 +91,8 @@ const PASTURE_HERD_CAP = 6;
 const PASTURE_YIELD_CHANCE = 0.25;
 
 const ANIMAL_FOOD: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 1 };
+// What kind of meat an animal yields when butchered.
+const meatKind = (kind: AnimalKind): FoodKind => (kind === "rabbit" ? "rabbit" : "beef");
 const ANIMAL_HEALTH: Record<AnimalKind, number> = { deer: 3, boar: 4, rabbit: 2 };
 const TAMEABLE: Record<AnimalKind, boolean> = { deer: true, boar: false, rabbit: true };
 
@@ -109,6 +113,13 @@ const AUTOSAVE_INTERVAL_SECONDS = 15;
 // Throttle React panel updates; the Pixi canvas renders independently every tick.
 const UI_EMIT_INTERVAL_SECONDS = 0.25;
 const FOOD_CAP = 400;
+// Stored food keeps for about two days, then the batch spoils. Eating (or
+// cooking with) spoiled food makes a resident sick for a stretch.
+const FOOD_SPOIL_SECONDS = DAY_LENGTH_SECONDS * 2;
+// Food stocked within this window of an existing fresh batch of the same kind
+// merges into it, so the larder doesn't fragment into hundreds of tiny lots.
+const FOOD_BATCH_MERGE_SECONDS = 60;
+const SICK_DURATION_SECONDS = 90;
 // How much wood the warehouse can physically hold, and how full the village
 // tries to keep it (store + loose ground piles) before woodcutters stop felling.
 // The store cap sits well above the want target so haulers always have room to
@@ -245,6 +256,10 @@ type SaveData = {
   era: number;
   foodStock: number;
   meals: number;
+  taintedMeals?: number;
+  // The typed, perishable larder. Absent in old saves — then `foodStock` is
+  // taken as one fresh lot of grain.
+  foods?: FoodBatch[];
   hasMiningTools?: boolean;
   items?: ItemStack[];
   nextItemId?: number;
@@ -262,7 +277,13 @@ export class Simulation {
   era = 0;
   foodStock = 0;
   meals = 0;
+  // Of the cooked meals on hand, how many were made with spoiled ingredients —
+  // these are served first and make whoever eats them sick.
+  taintedMeals = 0;
   deaths = 0;
+  // The larder broken down by kind and freshness. Its total amount is kept in
+  // lock-step with `foodStock` (which the wider economy reads as one number).
+  readonly foods: FoodBatch[] = [];
   // Materials are stored as physical piles (ItemStacks) sitting on the warehouse
   // floor — the stockpile zone — not as abstract numbers. See stockOf()/store().
   // True once the colony has the tools (a pickaxe) to mine hard rock and ore.
@@ -308,8 +329,19 @@ export class Simulation {
       this.traffic = new Map(saved.traffic);
       this.nextBuildingId = saved.nextBuildingId;
       this.era = saved.era;
-      this.foodStock = saved.foodStock;
       this.meals = saved.meals;
+      this.taintedMeals = Math.min(this.meals, saved.taintedMeals ?? 0);
+      // Restore the typed larder; an old save without one keeps its food as a
+      // single fresh lot of grain so totals (and the wider economy) line up.
+      if (saved.foods && saved.foods.length > 0) {
+        for (const batch of saved.foods) {
+          this.foods.push({ ...batch });
+        }
+        this.foodStock = this.foods.reduce((sum, b) => sum + b.amount, 0);
+      } else if (saved.foodStock > 0) {
+        this.foods.push({ kind: "wheat", amount: saved.foodStock, ageSeconds: 0, spoiled: false });
+        this.foodStock = saved.foodStock;
+      }
       this.hasMiningTools = saved.hasMiningTools ?? false;
       for (const stack of saved.items ?? []) {
         // Reservations are transient; drop them so loose piles are haulable again.
@@ -379,6 +411,7 @@ export class Simulation {
     }
 
     this.updateAnimals(deltaSeconds);
+    this.ageFood(deltaSeconds);
 
     this.natureTimer += deltaSeconds;
     if (this.natureTimer >= NATURE_TICK_SECONDS) {
@@ -1494,6 +1527,8 @@ export class Simulation {
         era: this.era,
         foodStock: this.foodStock,
         meals: this.meals,
+        taintedMeals: this.taintedMeals,
+        foods: this.foods.map((batch) => ({ ...batch })),
         hasMiningTools: this.hasMiningTools,
         items: this.items.map((stack) => ({
           ...stack,
@@ -2233,7 +2268,8 @@ export class Simulation {
   private runFactories() {
     for (const building of this.buildings) {
       if (building.kind === "factory" && building.stage === "built" && this.isPowered(building)) {
-        this.foodStock = Math.min(FOOD_CAP, this.foodStock + FACTORY_FOOD_PER_TICK);
+        // A cannery turns out preserved grain rations.
+        this.addFood("wheat", FACTORY_FOOD_PER_TICK);
         this.store("steel", FACTORY_STEEL_PER_TICK);
       }
     }
@@ -2306,6 +2342,113 @@ export class Simulation {
         this.world.setTile(tile, "Grass");
       }
     }
+  }
+
+  // --- The larder: typed, perishable food --------------------------------------
+
+  /** Stock food of a kind; it starts fresh and ages toward spoiling (capped). */
+  addFood(kind: FoodKind, amount: number) {
+    const add = Math.min(amount, FOOD_CAP - this.foodStock);
+    if (add <= 0) {
+      return;
+    }
+    // Merge into a recent fresh lot of the same kind so the larder doesn't
+    // fragment into countless tiny batches.
+    const recent = this.foods.find(
+      (b) => b.kind === kind && !b.spoiled && b.ageSeconds < FOOD_BATCH_MERGE_SECONDS,
+    );
+    if (recent) {
+      recent.amount += add;
+    } else {
+      this.foods.push({ kind, amount: add, ageSeconds: 0, spoiled: false });
+    }
+    this.foodStock += add;
+  }
+
+  /**
+   * Eat `amount` of stored food, oldest lots first — so the food nearest to
+   * spoiling gets used (or makes someone sick) instead of sitting forever behind
+   * fresher stock. Returns how much was eaten and how much of it was spoiled.
+   */
+  consumeFood(amount: number): { eaten: number; spoiled: number } {
+    const order = [...this.foods].sort((a, b) => b.ageSeconds - a.ageSeconds);
+    let need = amount;
+    let spoiled = 0;
+    for (const batch of order) {
+      if (need <= 0) {
+        break;
+      }
+      const take = Math.min(batch.amount, need);
+      batch.amount -= take;
+      need -= take;
+      if (batch.spoiled) {
+        spoiled += take;
+      }
+    }
+    for (let i = this.foods.length - 1; i >= 0; i -= 1) {
+      if (this.foods[i].amount <= 0) {
+        this.foods.splice(i, 1);
+      }
+    }
+    const eaten = amount - need;
+    this.foodStock = Math.max(0, this.foodStock - eaten);
+    return { eaten, spoiled };
+  }
+
+  /** Age every stored batch; one that passes its keeping time spoils. */
+  private ageFood(deltaSeconds: number) {
+    let changed = false;
+    for (const batch of this.foods) {
+      batch.ageSeconds += deltaSeconds;
+      if (!batch.spoiled && batch.ageSeconds >= FOOD_SPOIL_SECONDS) {
+        batch.spoiled = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.notifyChanged();
+    }
+  }
+
+  /** Larder broken down by kind with a fresh/spoiled split — for the inspector. */
+  foodSummary(): { kind: FoodKind; fresh: number; spoiled: number }[] {
+    const byKind = new Map<FoodKind, { fresh: number; spoiled: number }>();
+    for (const b of this.foods) {
+      const entry = byKind.get(b.kind) ?? { fresh: 0, spoiled: 0 };
+      if (b.spoiled) {
+        entry.spoiled += b.amount;
+      } else {
+        entry.fresh += b.amount;
+      }
+      byKind.set(b.kind, entry);
+    }
+    return [...byKind.entries()].map(([kind, v]) => ({ kind, ...v }));
+  }
+
+  /** Total spoiled food sitting in the larder. */
+  spoiledFood(): number {
+    return this.foods.reduce((sum, b) => sum + (b.spoiled ? b.amount : 0), 0);
+  }
+
+  /** Add cooked meals; if cooked from spoiled food they're tainted (made ill). */
+  addMeals(count: number, tainted: boolean) {
+    this.meals += count;
+    if (tainted) {
+      this.taintedMeals = Math.min(this.meals, this.taintedMeals + count);
+    }
+  }
+
+  /** Take one meal to eat. Tainted meals are served first; returns true if so. */
+  takeMeal(): boolean {
+    if (this.meals <= 0) {
+      return false;
+    }
+    this.meals -= 1;
+    if (this.taintedMeals > 0) {
+      this.taintedMeals -= 1;
+      return true;
+    }
+    return false;
   }
 
   getWarehouse(): Building | undefined {
@@ -2991,7 +3134,7 @@ export class Simulation {
     animal.health -= 1;
     animal.state = "fleeing";
     if (animal.health <= 0) {
-      this.foodStock += ANIMAL_FOOD[animal.kind];
+      this.addFood(meatKind(animal.kind), ANIMAL_FOOD[animal.kind]);
       this.removeAnimal(animal.id);
       return true;
     }
@@ -3068,7 +3211,7 @@ export class Simulation {
     if (Math.random() < 0.04) {
       const herd = this.tamedHerdSize();
       if (herd > 0 && Math.random() < PASTURE_YIELD_CHANCE) {
-        this.foodStock += 1;
+        this.addFood("beef", 1);
         this.notifyChanged();
       }
     }

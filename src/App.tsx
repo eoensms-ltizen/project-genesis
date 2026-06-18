@@ -368,6 +368,11 @@ export default function App() {
                 const home = agents.find((a) => a.id === selection.agentId)?.home;
                 return home ? gameRef.current?.simulation.ambianceAt(home) : undefined;
               })()}
+              foodSummary={
+                selection.kind === "building"
+                  ? gameRef.current?.simulation.foodSummary()
+                  : undefined
+              }
               following={selection.kind === "agent" && followId === selection.agentId}
               onToggleFollow={() => {
                 if (selection.kind !== "agent") {
