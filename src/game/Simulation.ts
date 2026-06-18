@@ -304,6 +304,8 @@ export class Simulation {
   // Which cook (agent id) currently has each stove reserved. Transient — cleared
   // on load so a reservation never outlives the cooking trip that made it.
   private readonly stoveCooks = new Map<string, string>();
+  // Which diner (agent id) currently has each chair reserved. Transient too.
+  private readonly chairSitters = new Map<string, string>();
   private traffic = new Map<number, number>();
   private ambianceGrid = new Float32Array(0);
   private elapsedSeconds = 0;
@@ -944,7 +946,11 @@ export class Simulation {
       if (building.kind !== "warehouse" && building.kind !== "kitchen") {
         continue;
       }
-      if (this.freeCivicTiles(building) >= Simulation.MIN_FREE_CIVIC_TILES) {
+      // A kitchen with no room to fit a dining set wants to grow even if it isn't
+      // strictly "full" — so the diners get a table and chairs.
+      const wantsDiningRoom =
+        building.kind === "kitchen" && !this.hasDiningTable() && !this.diningSetSpot(building);
+      if (this.freeCivicTiles(building) >= Simulation.MIN_FREE_CIVIC_TILES && !wantsDiningRoom) {
         continue;
       }
       if (this.planExpansionRect(building)) {
@@ -2864,6 +2870,163 @@ export class Simulation {
     this.foodStock = Math.min(FOOD_CAP, this.foodStock + amount);
   }
 
+  // --- Dining: a kitchen table ringed with chairs ------------------------------
+
+  /** Does the kitchen already have a dining table? */
+  hasDiningTable(): boolean {
+    const kitchen = this.getKitchen();
+    return (
+      !!kitchen &&
+      this.interiorTiles(kitchen).some((t) => this.world.getTile(t)?.type === "Table")
+    );
+  }
+
+  /** Chairs inside the kitchen, by tile. */
+  private diningChairs(): Vec2[] {
+    const kitchen = this.getKitchen();
+    if (!kitchen) {
+      return [];
+    }
+    return this.interiorTiles(kitchen).filter(
+      (t) => this.world.getTile(t)?.type === "Chair",
+    );
+  }
+
+  /** A kitchen chair free for `agentId` to sit in (not taken by another diner). */
+  freeDiningChair(agentId: string): Vec2 | undefined {
+    return this.diningChairs().find((c) => {
+      const sitter = this.chairSitters.get(`${c.x},${c.y}`);
+      return !sitter || sitter === agentId;
+    });
+  }
+
+  hasFreeDiningChair(agentId: string): boolean {
+    return this.freeDiningChair(agentId) !== undefined;
+  }
+
+  claimChair(position: Vec2, agentId: string) {
+    this.releaseChair(agentId);
+    this.chairSitters.set(`${position.x},${position.y}`, agentId);
+  }
+
+  releaseChair(agentId: string) {
+    for (const [key, sitter] of this.chairSitters) {
+      if (sitter === agentId) {
+        this.chairSitters.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Where to lay a dining set in the kitchen: a table tile with chairs on its
+   * open floor sides, such that the room stays connected — the door stays
+   * reachable, the stove keeps a tile to cook from, every free-floor tile is
+   * still reachable, and each chair can be reached (and so sat on) from the tile
+   * just beyond it. Returns the table tile and its chairs, or undefined if it
+   * won't fit (the kitchen needs enlarging first).
+   */
+  diningSetSpot(kitchen: Building): { table: Vec2; chairs: Vec2[] } | undefined {
+    const DIRS = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ];
+    const key = (p: Vec2) => `${p.x},${p.y}`;
+    const isFloor = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    const interior = this.interiorTiles(kitchen);
+    const interiorKeys = new Set(interior.map(key));
+    const doors = this.buildingDoors(kitchen);
+    const inRoom = new Set([...interiorKeys, ...doors.map(key)]);
+    const stove = interior.find((t) => this.world.getTile(t)?.type === "Stove");
+
+    // Flood from the doorways across floor, treating `blocked` tiles as walls.
+    const reachable = (blocked: Set<string>): Set<string> => {
+      const seen = new Set<string>();
+      const stack: Vec2[] = [];
+      for (const d of doors) {
+        if (!blocked.has(key(d))) {
+          seen.add(key(d));
+          stack.push(d);
+        }
+      }
+      while (stack.length) {
+        const p = stack.pop()!;
+        for (const s of DIRS) {
+          const np = { x: p.x + s.x, y: p.y + s.y };
+          const k = key(np);
+          if (seen.has(k) || !inRoom.has(k) || blocked.has(k)) {
+            continue;
+          }
+          // Only walk across what's still passable (floor/door), not furniture.
+          const t = this.world.getTile(np)?.type;
+          if (t !== "Floor" && t !== "Door") {
+            continue;
+          }
+          seen.add(k);
+          stack.push(np);
+        }
+      }
+      return seen;
+    };
+
+    // The placement is valid only if the room stays whole: with `blocked` tiles
+    // treated as solid, no free-floor tile is cut off and the stove keeps a tile
+    // beside it to cook from.
+    const roomWhole = (blocked: Set<string>): boolean => {
+      const seen = reachable(blocked);
+      const strands = interior.some(
+        (t) => isFloor(t) && !blocked.has(key(t)) && !seen.has(key(t)),
+      );
+      if (strands) {
+        return false;
+      }
+      if (stove && !DIRS.some((s) => seen.has(key({ x: stove.x + s.x, y: stove.y + s.y })))) {
+        return false;
+      }
+      return true;
+    };
+
+    for (const table of interior) {
+      if (!isFloor(table)) {
+        continue;
+      }
+      const blocked = new Set<string>([key(table)]);
+      // A solid table on its own mustn't cut the room in two.
+      if (!roomWhole(blocked)) {
+        continue;
+      }
+      // Add chairs on the table's open floor sides one at a time, keeping the room
+      // whole and each chair reachable (a diner mounts it from an adjacent tile).
+      const chairs: Vec2[] = [];
+      for (const d of DIRS) {
+        const c = { x: table.x + d.x, y: table.y + d.y };
+        if (!interiorKeys.has(key(c)) || !isFloor(c)) {
+          continue;
+        }
+        const tentative = new Set(blocked);
+        tentative.add(key(c));
+        if (!roomWhole(tentative)) {
+          continue;
+        }
+        const seen = reachable(tentative);
+        const approachable = DIRS.some((s) => {
+          const n = { x: c.x + s.x, y: c.y + s.y };
+          return !(n.x === table.x && n.y === table.y) && seen.has(key(n));
+        });
+        if (!approachable) {
+          continue;
+        }
+        chairs.push(c);
+        blocked.add(key(c));
+      }
+      if (chairs.length > 0) {
+        return { table, chairs };
+      }
+    }
+    return undefined;
+  }
+
   getChurch(): Building | undefined {
     return this.buildings.find(
       (building) => building.kind === "church" && building.stage === "built",
@@ -3091,6 +3254,7 @@ export class Simulation {
     }
     this.releaseItemsHeldBy(agent.id);
     this.releaseStove(agent.id);
+    this.releaseChair(agent.id);
     // Ingredients a cook was carrying go back to the pantry.
     if (agent.carryFood) {
       this.returnFood(agent.carryFood.amount, agent.carryFood.spoiled);

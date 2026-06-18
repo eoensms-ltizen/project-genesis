@@ -80,6 +80,10 @@ const CRAFT_DURATION_SECONDS = 3;
 // A bed: built from wood inside one's home. Sleeping in a bed rests best.
 const BED_WOOD_COST = 4;
 const TABLE_WOOD_COST = 4;
+const CHAIR_WOOD_COST = 1;
+// A meal eaten sitting at the table lifts the spirits and eases the day's wear.
+const SEATED_MEAL_COMFORT = 16;
+const SEATED_MEAL_MOOD = 10;
 // Once the warehouse holds at least this much wood, a resident sharing a communal
 // house may spend the surplus annexing a private bedroom (privacy without
 // starving the village of building material). Tuned above a house's full cost so
@@ -734,8 +738,9 @@ export class AgentBrain {
     if (this.tryCook(agent, simulation)) {
       return true;
     }
-    // A dining table once the bed's in and food is handled — a further comfort.
-    if (this.tryBuildTable(agent, simulation)) {
+    // Furnish the kitchen with a dining set (a table ringed with chairs) so the
+    // village can sit down to a shared meal.
+    if (this.tryBuildDiningSet(agent, simulation)) {
       return true;
     }
     // Sharing a communal house grates once there's wood to spare: annex a private
@@ -1771,33 +1776,50 @@ export class AgentBrain {
     return undefined;
   }
 
-  /** Furnish the home with a table once it has a bed — a step toward a real room. */
-  private tryBuildTable(agent: Agent, simulation: Simulation): boolean {
-    if (!agent.home || !agent.homeBuildingId) {
+  /**
+   * Furnish the kitchen with a dining set — a table ringed with chairs — so the
+   * village can sit down together. Built only where it fits without sealing the
+   * room (a cramped kitchen is enlarged first by the expansion logic). The whole
+   * set is raised in one go from a tile beside it.
+   */
+  private tryBuildDiningSet(agent: Agent, simulation: Simulation): boolean {
+    const kitchen = simulation.getKitchen();
+    if (!kitchen || simulation.hasDiningTable()) {
       return false;
     }
-    const home = simulation.getBuilding(agent.homeBuildingId);
-    if (
-      !home ||
-      home.kind !== "house" ||
-      home.stage !== "built" ||
-      !simulation.hasBed(home) || // a bed comes first
-      simulation.hasTable(home)
-    ) {
+    const plan = simulation.diningSetSpot(kitchen);
+    if (!plan) {
+      return false; // too cramped — the kitchen will be enlarged, then we retry
+    }
+    const cost = TABLE_WOOD_COST + plan.chairs.length * CHAIR_WOOD_COST;
+    if (agent.inventory.wood < cost) {
+      return this.fetchWood(agent, simulation, cost);
+    }
+    // Build from a kitchen tile that isn't part of the set, so the builder never
+    // ends up standing where a table or chair is about to go.
+    const setKeys = new Set(
+      [plan.table, ...plan.chairs].map((p) => `${p.x},${p.y}`),
+    );
+    const stand = simulation
+      .interiorTiles(kitchen)
+      .filter(
+        (t) =>
+          !setKeys.has(`${t.x},${t.y}`) &&
+          simulation.world.getTile(t)?.type === "Floor",
+      )
+      .find((t) => findPath(simulation.world, { start: agent.position, goal: t }));
+    if (!stand) {
       return false;
     }
-    if (agent.inventory.wood < TABLE_WOOD_COST) {
-      return this.fetchWood(agent, simulation, TABLE_WOOD_COST);
-    }
-    const spot = simulation.bedSpot(home); // nearest free interior floor tile
-    if (!spot) {
-      return false;
-    }
-    const path = findPath(simulation.world, { start: agent.position, goal: spot });
+    const path = findPath(simulation.world, { start: agent.position, goal: stand });
     if (!path) {
       return false;
     }
-    agent.target = { ...spot };
+    agent.diningPlan = {
+      table: { ...plan.table },
+      chairs: plan.chairs.map((c) => ({ ...c })),
+    };
+    agent.target = { ...stand };
     agent.path = path;
     this.setState(agent, simulation, "MoveToFurnish");
     return true;
@@ -1809,6 +1831,36 @@ export class AgentBrain {
       return;
     }
     const home = agent.homeBuildingId ? simulation.getBuilding(agent.homeBuildingId) : undefined;
+    // A planned dining set → raise the table and its chairs in one go (only on
+    // tiles that are still bare floor, in case the room changed under us).
+    if (agent.diningPlan) {
+      const plan = agent.diningPlan;
+      const isFloor = (p: Vec2) => simulation.world.getTile(p)?.type === "Floor";
+      let cost = 0;
+      if (isFloor(plan.table)) {
+        simulation.world.setTile(plan.table, "Table");
+        cost += TABLE_WOOD_COST;
+        for (const chair of plan.chairs) {
+          if (isFloor(chair)) {
+            simulation.world.setTile(chair, "Chair");
+            cost += CHAIR_WOOD_COST;
+          }
+        }
+        agent.inventory.wood = Math.max(0, agent.inventory.wood - cost);
+        simulation.log(
+          tr(
+            `${agent.name} set up a dining table with chairs. 🍽️`,
+            `${agent.name}이(가) 식탁과 의자를 놓았다. 🍽️`,
+          ),
+          [agent],
+        );
+      }
+      agent.diningPlan = undefined;
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
     // A reserved bed plot (the resident walked to a tile beside it) → raise the
     // bed on its staked tiles from where they stand. Otherwise it's a dining table.
     const onBedSite =
@@ -2460,6 +2512,26 @@ export class AgentBrain {
   private findFood(agent: Agent, simulation: Simulation) {
     const kitchen = simulation.getKitchen();
     if (kitchen && simulation.meals > 0) {
+      // Prefer sitting down at the table: claim a free chair and walk up beside
+      // it (it's solid, so we mount it in Eat). A meal taken seated lifts spirits.
+      const chair = simulation.freeDiningChair(agent.id);
+      if (chair) {
+        const path = findPath(simulation.world, {
+          start: agent.position,
+          goal: chair,
+          stopAdjacent: true,
+        });
+        if (path) {
+          simulation.claimChair(chair, agent.id);
+          agent.sitChair = { ...chair };
+          agent.eatPlan = "meal";
+          agent.target = { ...chair };
+          agent.path = path;
+          this.setState(agent, simulation, "MoveToFood");
+          return;
+        }
+      }
+      // No table/free chair — eat standing at the kitchen door (no happiness boost).
       const path = findPath(simulation.world, { start: agent.position, goal: kitchen.door });
       if (path) {
         agent.eatPlan = "meal";
@@ -2511,6 +2583,13 @@ export class AgentBrain {
   }
 
   private eat(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    // Climb onto the reserved chair once we're beside it (it's solid furniture,
+    // sat on only while dining).
+    if (agent.sitChair && isAdjacent(roundVec(agent.position), agent.sitChair)) {
+      agent.position = { ...agent.sitChair };
+      agent.path = undefined;
+      agent.target = undefined;
+    }
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < EAT_DURATION_SECONDS) {
       return;
@@ -2522,6 +2601,16 @@ export class AgentBrain {
         agent.health.hunger = Math.max(0, agent.health.hunger - 80);
         if (tainted) {
           this.fallSick(agent, simulation);
+        } else if (agent.sitChair) {
+          // A shared meal at the table is a comfort and a quiet pleasure.
+          agent.needs.comfort = clampNeed(agent.needs.comfort + SEATED_MEAL_COMFORT);
+          agent.mood = Math.min(100, (agent.mood ?? 60) + SEATED_MEAL_MOOD);
+          simulation.log(
+            tr(
+              `${agent.name} enjoyed a meal at the table. 🍽️`,
+              `${agent.name}이(가) 식탁에 앉아 식사를 즐겼다. 🍽️`,
+            ),
+          );
         } else {
           simulation.log(tr(`${agent.name} enjoyed a warm meal.`, `${agent.name}이(가) 따뜻한 식사를 즐겼다.`));
         }
@@ -2543,6 +2632,10 @@ export class AgentBrain {
       }
       agent.health.hunger = Math.max(0, agent.health.hunger - 55);
       simulation.log(tr(`${agent.name} ate berries.`, `${agent.name}이(가) 산딸기를 먹었다.`));
+    }
+    if (agent.sitChair) {
+      simulation.releaseChair(agent.id);
+      agent.sitChair = undefined;
     }
     agent.eatPlan = undefined;
     agent.target = undefined;
@@ -3439,6 +3532,12 @@ export class AgentBrain {
     if (agent.cookStove || agent.carryFood) {
       this.dropCookJob(agent, simulation);
     }
+    // A diner who gives up frees their chair.
+    if (agent.sitChair) {
+      simulation.releaseChair(agent.id);
+      agent.sitChair = undefined;
+    }
+    agent.diningPlan = undefined;
     // If they were mid-craft, let the colony try again.
     if (agent.state === "MoveToCraft" || agent.state === "CraftTool") {
       simulation.pickaxeInProgress = false;

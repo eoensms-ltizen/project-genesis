@@ -314,6 +314,11 @@ export type Agent = {
   // The stove this cook has reserved for the current cooking trip (one cook per
   // stove — nobody else may use it until they're done).
   cookStove?: Vec2;
+  // The dining chair a resident has reserved to sit and eat at (one diner per
+  // chair); they climb onto it from beside it, like a bed.
+  sitChair?: Vec2;
+  // A dining set (table + chairs) a resident is on their way to build.
+  diningPlan?: { table: Vec2; chairs: Vec2[] };
   // How much wood to draw out of the warehouse on the current fetch trip.
   fetchAmount?: number;
   // The ground stack this agent has reserved and is hauling.
