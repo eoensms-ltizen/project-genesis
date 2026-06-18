@@ -2110,11 +2110,12 @@ export class AgentBrain {
     // interior; the warehouse is larger to hold a decent stockpile. Open spaces
     // (park, pasture, cemetery) keep their 3x3 yard.
     const SIZES: Partial<Record<BuildingKind, [number, number]>> = {
-      // A roomy stockpile: a 6×6 warehouse has a 4×4 (16-tile) floor to stack on.
-      warehouse: [6, 6],
-      // A 5×5 kitchen has a 3×3 interior — the stove plus room for a dining set
-      // (table and a few chairs) without the cook standing on the food.
-      kitchen: [5, 5],
+      // Start small and let the expansion logic grow these as the village needs —
+      // it makes for a nicer "extending the building" feel (and varied shapes)
+      // than raising a big box up front. A 4×4 warehouse begins with a 2×2
+      // stockpile; a 4×4 kitchen has room for the stove, then grows for diners.
+      warehouse: [4, 4],
+      kitchen: [4, 4],
       church: [3, 3],
       powerplant: [3, 3],
       factory: [3, 3],

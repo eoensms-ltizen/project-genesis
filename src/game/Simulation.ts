@@ -968,8 +968,10 @@ export class Simulation {
   /**
    * Pick an enlarged rectangle for `building` at least 1.5× its current area,
    * growing into clear ground on a side that isn't its (south) doorway — so the
-   * door stays on the perimeter and the existing structure stays put. Tries east,
-   * west, then north. Returns the new footprint, or undefined if hemmed in.
+   * door stays on the perimeter and the existing structure stays put. Of the
+   * directions with room, one is chosen at random so repeated expansions yield
+   * varied shapes rather than always stretching the same way. Returns the new
+   * footprint, or undefined if hemmed in on every buildable side.
    */
   planExpansionRect(
     building: Building,
@@ -991,19 +993,24 @@ export class Simulation {
     };
     const ex = Math.ceil(w * 0.5); // columns needed to reach ≥1.5× area
     const ey = Math.ceil(h * 0.5); // rows needed to reach ≥1.5× area
+    type Rect = { x: number; y: number; width: number; height: number };
+    const options: Rect[] = [];
     // East: new ground to the right; height (and the south doorway) unchanged.
     if (stripClear(x + w, y, ex, h)) {
-      return { x, y, width: w + ex, height: h };
+      options.push({ x, y, width: w + ex, height: h });
     }
     // West: new ground to the left; origin shifts, door stays on the south row.
     if (stripClear(x - ex, y, ex, h)) {
-      return { x: x - ex, y, width: w + ex, height: h };
+      options.push({ x: x - ex, y, width: w + ex, height: h });
     }
     // North: new ground above; the south row (with the door) is untouched.
     if (stripClear(x, y - ey, w, ey)) {
-      return { x, y: y - ey, width: w, height: h + ey };
+      options.push({ x, y: y - ey, width: w, height: h + ey });
     }
-    return undefined;
+    if (options.length === 0) {
+      return undefined;
+    }
+    return options[Math.floor(Math.random() * options.length)];
   }
 
   /**
