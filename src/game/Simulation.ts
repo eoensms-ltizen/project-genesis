@@ -120,6 +120,8 @@ const FOOD_SPOIL_SECONDS = DAY_LENGTH_SECONDS * 2;
 // merges into it, so the larder doesn't fragment into hundreds of tiny lots.
 const FOOD_BATCH_MERGE_SECONDS = 60;
 const SICK_DURATION_SECONDS = 90;
+// The dining table grows toward one seat per resident, up to this many.
+const DINING_SEAT_CAP = 8;
 // How much wood the warehouse can physically hold, and how full the village
 // tries to keep it (store + loose ground piles) before woodcutters stop felling.
 // The store cap sits well above the want target so haulers always have room to
@@ -946,10 +948,13 @@ export class Simulation {
       if (building.kind !== "warehouse" && building.kind !== "kitchen") {
         continue;
       }
-      // A kitchen with no room to fit a dining set wants to grow even if it isn't
-      // strictly "full" — so the diners get a table and chairs.
+      // A kitchen grows when it can't fit a dining set at all, or when it wants
+      // more seats but has no room left to add them — so the dining room keeps up
+      // with the village even if it isn't strictly "full".
       const wantsDiningRoom =
-        building.kind === "kitchen" && !this.hasDiningTable() && !this.diningSetSpot(building);
+        building.kind === "kitchen" &&
+        ((!this.hasDiningTable() && !this.diningSetSpot(building)) ||
+          (this.wantsMoreSeats() && !this.diningGrowthTile(building)));
       if (this.freeCivicTiles(building) >= Simulation.MIN_FREE_CIVIC_TILES && !wantsDiningRoom) {
         continue;
       }
@@ -2881,6 +2886,15 @@ export class Simulation {
     );
   }
 
+  /** A table tile in the kitchen, to set served meals down on. */
+  diningTableTile(): Vec2 | undefined {
+    const kitchen = this.getKitchen();
+    if (!kitchen) {
+      return undefined;
+    }
+    return this.interiorTiles(kitchen).find((t) => this.world.getTile(t)?.type === "Table");
+  }
+
   /** Chairs inside the kitchen, by tile. */
   private diningChairs(): Vec2[] {
     const kitchen = this.getKitchen();
@@ -3022,6 +3036,127 @@ export class Simulation {
       }
       if (chairs.length > 0) {
         return { table, chairs };
+      }
+    }
+    return undefined;
+  }
+
+  /** How many chairs (seats) the dining table currently has. */
+  diningSeatCount(): number {
+    return this.diningChairs().length;
+  }
+
+  /** Seats the village would like at the table: one per resident, within reason. */
+  private seatTarget(): number {
+    return Math.min(this.agents.length, DINING_SEAT_CAP);
+  }
+
+  /** The dining table is short of seats for the village. */
+  wantsMoreSeats(): boolean {
+    return this.hasDiningTable() && this.diningSeatCount() < this.seatTarget();
+  }
+
+  /**
+   * The next single piece to grow an existing dining set: a chair on an open
+   * floor side of the table (preferred), or a table tile extending the board
+   * when there's no room left for another chair — always keeping the room whole.
+   * Returns undefined if nothing more fits (the kitchen needs enlarging).
+   */
+  diningGrowthTile(kitchen: Building): { pos: Vec2; kind: "Table" | "Chair" } | undefined {
+    const DIRS = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ];
+    const key = (p: Vec2) => `${p.x},${p.y}`;
+    const isFloor = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    const isTable = (p: Vec2): boolean => this.world.getTile(p)?.type === "Table";
+    const interior = this.interiorTiles(kitchen);
+    const interiorKeys = new Set(interior.map(key));
+    const doors = this.buildingDoors(kitchen);
+    const inRoom = new Set([...interiorKeys, ...doors.map(key)]);
+    const stove = interior.find((t) => this.world.getTile(t)?.type === "Stove");
+    const tables = interior.filter(isTable);
+    if (tables.length === 0) {
+      return undefined;
+    }
+    // Flood the room's floor/door space with `block` treated as solid (existing
+    // furniture is already non-floor, so it blocks naturally).
+    const reachable = (block: Vec2): Set<string> => {
+      const blocked = key(block);
+      const seen = new Set<string>();
+      const stack: Vec2[] = [];
+      for (const d of doors) {
+        if (key(d) !== blocked) {
+          seen.add(key(d));
+          stack.push(d);
+        }
+      }
+      while (stack.length) {
+        const p = stack.pop()!;
+        for (const s of DIRS) {
+          const np = { x: p.x + s.x, y: p.y + s.y };
+          const k = key(np);
+          if (seen.has(k) || !inRoom.has(k) || k === blocked) {
+            continue;
+          }
+          const t = this.world.getTile(np)?.type;
+          if (t !== "Floor" && t !== "Door") {
+            continue;
+          }
+          seen.add(k);
+          stack.push(np);
+        }
+      }
+      return seen;
+    };
+    const roomWhole = (block: Vec2): boolean => {
+      const seen = reachable(block);
+      const strands = interior.some(
+        (t) => isFloor(t) && key(t) !== key(block) && !seen.has(key(t)),
+      );
+      if (strands) {
+        return false;
+      }
+      return !stove || DIRS.some((s) => seen.has(key({ x: stove.x + s.x, y: stove.y + s.y })));
+    };
+    // Distinct floor tiles orthogonally adjacent to a table.
+    const beside = new Map<string, Vec2>();
+    for (const t of tables) {
+      for (const d of DIRS) {
+        const p = { x: t.x + d.x, y: t.y + d.y };
+        if (interiorKeys.has(key(p)) && isFloor(p)) {
+          beside.set(key(p), p);
+        }
+      }
+    }
+    // Prefer adding a chair (keeps the room whole and is reachable to sit on).
+    for (const c of beside.values()) {
+      if (!roomWhole(c)) {
+        continue;
+      }
+      const seen = reachable(c);
+      const approachable = DIRS.some((s) => {
+        const n = { x: c.x + s.x, y: c.y + s.y };
+        return !isTable(n) && seen.has(key(n));
+      });
+      if (approachable) {
+        return { pos: c, kind: "Chair" };
+      }
+    }
+    // Otherwise extend the board into a tile that still leaves an open side for a
+    // future chair, so the longer table can be seated.
+    for (const t of beside.values()) {
+      if (!roomWhole(t)) {
+        continue;
+      }
+      const hasOpenSide = DIRS.some((s) => {
+        const n = { x: t.x + s.x, y: t.y + s.y };
+        return interiorKeys.has(key(n)) && isFloor(n) && key(n) !== key(t);
+      });
+      if (hasOpenSide) {
+        return { pos: t, kind: "Table" };
       }
     }
     return undefined;
@@ -3259,6 +3394,11 @@ export class Simulation {
     if (agent.carryFood) {
       this.returnFood(agent.carryFood.amount, agent.carryFood.spoiled);
       agent.carryFood = undefined;
+    }
+    // A finished meal in hand still gets set out for the others.
+    if (agent.carryMeal) {
+      this.addMeals(agent.carryMeal.count, agent.carryMeal.tainted);
+      agent.carryMeal = undefined;
     }
     // Goods they were carrying spill onto the ground where they fell.
     if (agent.inventory.wood > 0 && this.hasAnyWarehouse()) {

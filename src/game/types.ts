@@ -75,6 +75,8 @@ export type AgentState =
   | "CollectIngredients" // taking raw food into one's arms to carry to the stove
   | "MoveToKitchen"
   | "Cook"
+  | "MoveToServe" // carrying a finished meal to the dining table to set it down
+  | "Serve" // placing the meal on the table for others to eat
   | "MoveToWorship"
   | "Worship"
   | "MoveToStump"
@@ -311,14 +313,18 @@ export type Agent = {
   // Raw ingredients a cook is carrying from the pantry to the stove (spoiled if
   // any of them had turned — the meal comes out tainted).
   carryFood?: { amount: number; spoiled: boolean };
+  // Finished meals a cook is carrying from the stove to the dining table to serve
+  // (tainted if cooked from spoiled ingredients).
+  carryMeal?: { count: number; tainted: boolean };
   // The stove this cook has reserved for the current cooking trip (one cook per
   // stove — nobody else may use it until they're done).
   cookStove?: Vec2;
   // The dining chair a resident has reserved to sit and eat at (one diner per
   // chair); they climb onto it from beside it, like a bed.
   sitChair?: Vec2;
-  // A dining set (table + chairs) a resident is on their way to build.
-  diningPlan?: { table: Vec2; chairs: Vec2[] };
+  // Dining furniture a resident is on their way to lay: a new table and/or some
+  // chairs (an initial set, or extra pieces when the table is enlarged).
+  diningPlan?: { table?: Vec2; chairs: Vec2[] };
   // How much wood to draw out of the warehouse on the current fetch trip.
   fetchAmount?: number;
   // The ground stack this agent has reserved and is hauling.

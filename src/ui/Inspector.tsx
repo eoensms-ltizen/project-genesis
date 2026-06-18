@@ -192,6 +192,12 @@ function carriedSummary(agent: Agent): string {
       }`,
     );
   }
+  // Finished meals being carried to the table to serve.
+  if (agent.carryMeal && agent.carryMeal.count > 0) {
+    parts.push(
+      `${tr("meals", "요리")} ×${agent.carryMeal.count}${agent.carryMeal.tainted ? " 🤢" : ""}`,
+    );
+  }
   return parts.join(", ");
 }
 
@@ -311,6 +317,10 @@ function activityLabel(agent: Agent): string {
       return tr("carrying ingredients to the stove", "재료를 화덕으로 옮기는 중");
     case "Cook":
       return tr("cooking a meal", "요리하는 중");
+    case "MoveToServe":
+      return tr("serving the meal to the table", "음식을 식탁으로 나르는 중");
+    case "Serve":
+      return tr("setting the table", "식탁에 음식을 차리는 중");
     case "MoveToWorship":
     case "Worship":
       return tr("at prayer", "기도하는 중");

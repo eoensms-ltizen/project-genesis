@@ -48,6 +48,8 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   CollectIngredients: "재료 챙기기",
   MoveToKitchen: "재료 화덕으로 이동",
   Cook: "요리",
+  MoveToServe: "식탁으로 배식 이동",
+  Serve: "배식",
   MoveToWorship: "교회로 이동",
   Worship: "예배",
   MoveToStump: "그루터기로 이동",

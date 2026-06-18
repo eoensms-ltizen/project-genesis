@@ -329,6 +329,12 @@ export class AgentBrain {
       case "Cook":
         this.cook(agent, simulation, deltaSeconds);
         break;
+      case "MoveToServe":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Serve");
+        break;
+      case "Serve":
+        this.serve(agent, simulation);
+        break;
       case "MoveToWorship":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Worship");
         break;
@@ -739,8 +745,11 @@ export class AgentBrain {
       return true;
     }
     // Furnish the kitchen with a dining set (a table ringed with chairs) so the
-    // village can sit down to a shared meal.
+    // village can sit down to a shared meal — then grow it as the village does.
     if (this.tryBuildDiningSet(agent, simulation)) {
+      return true;
+    }
+    if (this.tryExpandDiningSet(agent, simulation)) {
       return true;
     }
     // Sharing a communal house grates once there's wood to spare: annex a private
@@ -1825,6 +1834,48 @@ export class AgentBrain {
     return true;
   }
 
+  /**
+   * Grow the kitchen's dining table as the village does: add a chair on an open
+   * side (or extend the board when chairs have run out of room), up to one seat
+   * per resident. A cramped kitchen with no room left is enlarged by the
+   * expansion logic first, then this adds the seats.
+   */
+  private tryExpandDiningSet(agent: Agent, simulation: Simulation): boolean {
+    const kitchen = simulation.getKitchen();
+    if (!kitchen || !simulation.wantsMoreSeats()) {
+      return false;
+    }
+    const grow = simulation.diningGrowthTile(kitchen);
+    if (!grow) {
+      return false; // no room — the kitchen will be enlarged, then we retry
+    }
+    const cost = grow.kind === "Table" ? TABLE_WOOD_COST : CHAIR_WOOD_COST;
+    if (agent.inventory.wood < cost) {
+      return this.fetchWood(agent, simulation, cost);
+    }
+    const stand = simulation
+      .interiorTiles(kitchen)
+      .filter(
+        (t) =>
+          !(t.x === grow.pos.x && t.y === grow.pos.y) &&
+          simulation.world.getTile(t)?.type === "Floor",
+      )
+      .find((t) => findPath(simulation.world, { start: agent.position, goal: t }));
+    if (!stand) {
+      return false;
+    }
+    const path = findPath(simulation.world, { start: agent.position, goal: stand });
+    if (!path) {
+      return false;
+    }
+    agent.diningPlan =
+      grow.kind === "Table" ? { table: { ...grow.pos }, chairs: [] } : { chairs: [{ ...grow.pos }] };
+    agent.target = { ...stand };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFurnish");
+    return true;
+  }
+
   private furnish(agent: Agent, simulation: Simulation, deltaSeconds: number) {
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < FURNISH_DURATION_SECONDS) {
@@ -1837,21 +1888,32 @@ export class AgentBrain {
       const plan = agent.diningPlan;
       const isFloor = (p: Vec2) => simulation.world.getTile(p)?.type === "Floor";
       let cost = 0;
-      if (isFloor(plan.table)) {
+      let placedTable = false;
+      if (plan.table && isFloor(plan.table)) {
         simulation.world.setTile(plan.table, "Table");
         cost += TABLE_WOOD_COST;
-        for (const chair of plan.chairs) {
-          if (isFloor(chair)) {
-            simulation.world.setTile(chair, "Chair");
-            cost += CHAIR_WOOD_COST;
-          }
+        placedTable = true;
+      }
+      let placedChairs = 0;
+      for (const chair of plan.chairs) {
+        if (isFloor(chair)) {
+          simulation.world.setTile(chair, "Chair");
+          cost += CHAIR_WOOD_COST;
+          placedChairs += 1;
         }
+      }
+      if (cost > 0) {
         agent.inventory.wood = Math.max(0, agent.inventory.wood - cost);
         simulation.log(
-          tr(
-            `${agent.name} set up a dining table with chairs. 🍽️`,
-            `${agent.name}이(가) 식탁과 의자를 놓았다. 🍽️`,
-          ),
+          placedTable
+            ? tr(
+                `${agent.name} set up a dining table with chairs. 🍽️`,
+                `${agent.name}이(가) 식탁과 의자를 놓았다. 🍽️`,
+              )
+            : tr(
+                `${agent.name} added ${placedChairs} more ${placedChairs === 1 ? "chair" : "chairs"} to the table. 🪑`,
+                `${agent.name}이(가) 식탁에 의자 ${placedChairs}개를 더 놓았다. 🪑`,
+              ),
           [agent],
         );
       }
@@ -2214,32 +2276,63 @@ export class AgentBrain {
       return;
     }
 
-    // Cook the ingredients we carried over. If any were spoiled the whole batch
-    // of meals comes out tainted — eating them will make folk sick.
+    // Cook the ingredients we carried over into a batch of meals to carry off and
+    // serve. If any were spoiled the whole batch is tainted — eating them sickens.
     if (agent.carryFood && agent.carryFood.amount > 0) {
       const spoiled = agent.carryFood.spoiled;
       // A non-cook gets fewer meals out of the same ingredients (some is wasted).
       const yieldMeals = Math.max(1, Math.round(COOK_MEAL_YIELD * efficiency));
-      simulation.addMeals(yieldMeals, spoiled);
-      if (spoiled) {
-        simulation.log(
-          tr(
-            `${agent.name} cooked with food that had turned — those meals look off. 🤢`,
-            `${agent.name}이(가) 상한 재료로 요리했다 — 음식이 이상해 보인다. 🤢`,
-          ),
-        );
-      } else if (Math.random() < 0.4) {
-        simulation.log(
-          efficiency >= 1
+      agent.carryMeal = { count: yieldMeals, tainted: spoiled };
+      simulation.log(
+        spoiled
+          ? tr(
+              `${agent.name} cooked with food that had turned — those meals look off. 🤢`,
+              `${agent.name}이(가) 상한 재료로 요리했다 — 음식이 이상해 보인다. 🤢`,
+            )
+          : efficiency >= 1
             ? tr(`${agent.name} cooked warm meals at the stove.`, `${agent.name}이(가) 화덕에서 따뜻한 식사를 지었다.`)
             : tr(`${agent.name} cooked at the stove, a little clumsily.`, `${agent.name}이(가) 화덕에서 서툴게 식사를 지었다.`),
-        );
-      }
-      simulation.notifyChanged();
+      );
     }
     agent.carryFood = undefined;
     simulation.releaseStove(agent.id);
     agent.cookStove = undefined;
+    agent.path = undefined;
+    // Carry the finished meals to the dining table and set them down. With no
+    // table to serve at, they're simply available from the kitchen.
+    const table = agent.carryMeal ? simulation.diningTableTile() : undefined;
+    const toTable = table
+      ? findPath(simulation.world, { start: agent.position, goal: table, stopAdjacent: true })
+      : null;
+    if (agent.carryMeal && table && toTable) {
+      agent.target = { ...table };
+      agent.path = toTable;
+      this.setState(agent, simulation, "MoveToServe");
+      return;
+    }
+    this.serveMeals(agent, simulation);
+    agent.target = undefined;
+    this.setState(agent, simulation, "Idle");
+  }
+
+  /** Set the carried meals down (on the table if there, else from the kitchen). */
+  private serveMeals(agent: Agent, simulation: Simulation) {
+    if (agent.carryMeal && agent.carryMeal.count > 0) {
+      simulation.addMeals(agent.carryMeal.count, agent.carryMeal.tainted);
+      simulation.log(
+        tr(
+          `${agent.name} served the meal on the table. 🍽️`,
+          `${agent.name}이(가) 식탁에 음식을 차렸다. 🍽️`,
+        ),
+      );
+    }
+    agent.carryMeal = undefined;
+    simulation.notifyChanged();
+  }
+
+  /** Arrived at the table with a finished meal: set it down for others to eat. */
+  private serve(agent: Agent, simulation: Simulation) {
+    this.serveMeals(agent, simulation);
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
@@ -3531,6 +3624,10 @@ export class AgentBrain {
     // A cook who downs tools frees their stove and returns the ingredients.
     if (agent.cookStove || agent.carryFood) {
       this.dropCookJob(agent, simulation);
+    }
+    // Finished meals in hand aren't wasted — set them down to be eaten.
+    if (agent.carryMeal) {
+      this.serveMeals(agent, simulation);
     }
     // A diner who gives up frees their chair.
     if (agent.sitChair) {
