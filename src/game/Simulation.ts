@@ -1144,6 +1144,17 @@ export class Simulation {
     const isGrass = (p: Vec2): boolean =>
       this.world.getTile(p)?.type === "Grass" && !this.isTileClaimed(p) && !(isBlocked?.(p) ?? false);
     const isWall = (p: Vec2): boolean => this.world.getTile(p)?.type === "Wall";
+    const isBuilding = (p: Vec2): boolean => {
+      const t = this.world.getTile(p)?.type;
+      return (
+        t === "Wall" ||
+        t === "Door" ||
+        t === "Floor" ||
+        t === "House" ||
+        t === "HouseSite" ||
+        t === "HouseFoundation"
+      );
+    };
     // A side has a usable doorway if some tile just outside it is open ground that
     // can reach a street (so the terraced house isn't sealed in).
     const openApproach = (p: Vec2): boolean => {
@@ -1154,8 +1165,20 @@ export class Simulation {
     type Side = "E" | "W" | "S" | "N";
     let best: { x: number; y: number; score: number } | undefined;
 
+    // The line of tiles just outside a footprint side (distance 1) and one beyond
+    // (distance 2) — used to keep clearance from OTHER buildings.
+    const outsideLine = (ax: number, ay: number, side: Side, d: number): Vec2[] => {
+      const line: Vec2[] = [];
+      if (side === "S") for (let fx = 0; fx < width; fx += 1) line.push({ x: ax + fx, y: ay + height - 1 + d });
+      else if (side === "N") for (let fx = 0; fx < width; fx += 1) line.push({ x: ax + fx, y: ay - d });
+      else if (side === "E") for (let fy = 0; fy < height; fy += 1) line.push({ x: ax + width - 1 + d, y: ay + fy });
+      else for (let fy = 0; fy < height; fy += 1) line.push({ x: ax - d, y: ay + fy });
+      return line;
+    };
+
     const consider = (ax: number, ay: number, shared: Side) => {
-      const fresh: Vec2[] = [];
+      const fresh: Vec2[] = []; // footprint tiles that must be open ground to build
+      let overlap = 0; // shared-edge tiles that actually sit on the neighbour's wall
       let sharedOk = true;
       for (let fy = 0; fy < height; fy += 1) {
         for (let fx = 0; fx < width; fx += 1) {
@@ -1169,7 +1192,14 @@ export class Simulation {
             (shared === "N" && fy === 0) ||
             (shared === "S" && fy === height - 1);
           if (onShared) {
-            if (!isWall(p)) {
+            // Each shared-edge tile either overlaps the neighbour's wall (reused)
+            // or is open ground that becomes this building's own wall, extending
+            // the line — so neighbours of unequal size can still terrace.
+            if (isWall(p)) {
+              overlap += 1;
+            } else if (isGrass(p)) {
+              fresh.push(p);
+            } else {
               sharedOk = false;
             }
           } else {
@@ -1177,7 +1207,8 @@ export class Simulation {
           }
         }
       }
-      if (!sharedOk || !fresh.every(isGrass)) {
+      // Need a genuine stretch of shared wall, and every other tile clear ground.
+      if (!sharedOk || overlap < 2 || !fresh.every(isGrass)) {
         return;
       }
       // At least one non-shared edge must open onto reachable ground for a door.
@@ -1189,6 +1220,22 @@ export class Simulation {
       ];
       if (!edges.some((e) => e.side !== shared && openApproach(e.approach))) {
         return;
+      }
+      // Keep clearance from OTHER buildings on the non-shared sides so terracing
+      // here never leaves a wasteful double wall or a squeezed one-tile sliver
+      // against a different building. Corner tiles are skipped — they can be the
+      // shared wall's own continuation when the neighbour is the larger building.
+      const interior = (line: Vec2[]) => line.slice(1, line.length - 1);
+      for (const side of ["S", "N", "E", "W"] as Side[]) {
+        if (side === shared) {
+          continue;
+        }
+        if (interior(outsideLine(ax, ay, side, 1)).some(isBuilding)) {
+          return; // a second wall flush alongside — a double wall
+        }
+        if (interior(outsideLine(ax, ay, side, 2)).some(isBuilding)) {
+          return; // a building one tile away — the squeezed sliver
+        }
       }
       const cx = ax + width / 2;
       const cy = ay + height / 2;

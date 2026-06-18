@@ -2110,11 +2110,11 @@ export class AgentBrain {
     // interior; the warehouse is larger to hold a decent stockpile. Open spaces
     // (park, pasture, cemetery) keep their 3x3 yard.
     const SIZES: Partial<Record<BuildingKind, [number, number]>> = {
-      warehouse: [4, 4],
-      // A 4×4 kitchen has a 2×2 interior: the stove sits on one tile and the cook
-      // stands on the floor beside it (a 3×3 left no room — the stove WAS the
-      // whole interior, so cooks ended up standing on it).
-      kitchen: [4, 4],
+      // A roomy stockpile: a 6×6 warehouse has a 4×4 (16-tile) floor to stack on.
+      warehouse: [6, 6],
+      // A 5×5 kitchen has a 3×3 interior — the stove plus room for a dining set
+      // (table and a few chairs) without the cook standing on the food.
+      kitchen: [5, 5],
       church: [3, 3],
       powerplant: [3, 3],
       factory: [3, 3],
