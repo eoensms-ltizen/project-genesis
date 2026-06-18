@@ -102,8 +102,6 @@ const FACTORY_FOOD_PER_TICK = 3;
 const FACTORY_STEEL_PER_TICK = 2;
 // A smelter forges this much iron ore into steel each nature tick.
 const SMELT_ORE_PER_BATCH = 2;
-const TRAIN_SPEED = 9;
-const TRAIN_DELIVER_FOOD = 8;
 
 export const ERA_NAMES = ["Pioneer", "Settlement", "Town", "City", "Industrial"];
 const CROP_RIPEN_CHANCE = 0.05;
@@ -252,9 +250,6 @@ type SaveData = {
   nextItemId?: number;
   animals: Animal[];
   nextAnimalId: number;
-  trainX: number | null;
-  trainRow: number;
-  trainDir: number;
 };
 
 export class Simulation {
@@ -280,9 +275,6 @@ export class Simulation {
   private nextBuildingId = 1;
   private nextItemId = 1;
   private nextAnimalId = 1;
-  private trainX: number | null = null;
-  private trainRow = 0;
-  private trainDir = 1;
   private readonly brain = new AgentBrain();
   private readonly onChange: SimulationOptions["onChange"];
   private readonly logs: GameLogEntry[] = [];
@@ -325,9 +317,6 @@ export class Simulation {
       }
       this.nextItemId = saved.nextItemId ?? 1;
       this.nextAnimalId = saved.nextAnimalId ?? 1;
-      this.trainX = saved.trainX ?? null;
-      this.trainRow = saved.trainRow ?? 0;
-      this.trainDir = saved.trainDir ?? 1;
       for (const animal of saved.animals ?? []) {
         this.animals.push({ ...animal, path: undefined });
       }
@@ -368,6 +357,8 @@ export class Simulation {
     this.repairWalledRooms();
     // Parks and plazas are retired — clear any an older save laid down.
     this.removeParksAndPlazas();
+    // The trade train and its railway are retired — tear up any old track.
+    this.removeRailways();
     // Shift any stockpile overflow an older save dropped onto a warehouse door.
     this.relocateDoorwayPiles();
     this.recomputeAmbiance();
@@ -388,7 +379,6 @@ export class Simulation {
     }
 
     this.updateAnimals(deltaSeconds);
-    this.updateTrain(deltaSeconds);
 
     this.natureTimer += deltaSeconds;
     if (this.natureTimer >= NATURE_TICK_SECONDS) {
@@ -1364,9 +1354,6 @@ export class Simulation {
     if (stage === "built" && !annex) {
       this.paveApproach(building);
     }
-    if (stage === "built" && building.kind === "station") {
-      this.layStationRail(building);
-    }
     this.refreshDoors();
     this.notifyChanged();
   }
@@ -1520,9 +1507,6 @@ export class Simulation {
           path: undefined,
         })),
         nextAnimalId: this.nextAnimalId,
-        trainX: this.trainX,
-        trainRow: this.trainRow,
-        trainDir: this.trainDir,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -2241,8 +2225,9 @@ export class Simulation {
       .map((building) => building.id);
   }
 
+  /** The trade train is retired (an early-version feature); never any to draw. */
   getTrainPositions(): Vec2[] {
-    return this.trainX !== null ? [{ x: this.trainX, y: this.trainRow }] : [];
+    return [];
   }
 
   private runFactories() {
@@ -2279,48 +2264,6 @@ export class Simulation {
     }
   }
 
-  /** Lays a rail line across the map through the station's row. */
-  layStationRail(station: Building) {
-    const row = station.y - 1 >= 1 ? station.y - 1 : station.y + station.height;
-    this.trainRow = row;
-    for (let x = 0; x < this.world.width; x += 1) {
-      const tile = this.world.getTile({ x, y: row });
-      if (tile && (tile.type === "Grass" || tile.type === "Dirt" || tile.type === "Stump")) {
-        this.world.setTile({ x, y: row }, "Rail");
-      }
-    }
-    if (this.trainX === null) {
-      this.trainX = 0;
-      this.trainDir = 1;
-    }
-    this.log(tr("A railway now crosses the valley. 🚂", "이제 철길이 골짜기를 가로지른다. 🚂"));
-  }
-
-  private updateTrain(deltaSeconds: number) {
-    if (this.trainX === null || !this.getStation()) {
-      return;
-    }
-    const prev = this.trainX;
-    this.trainX += this.trainDir * TRAIN_SPEED * deltaSeconds;
-
-    const stationX = (() => {
-      const s = this.getStation();
-      return s ? s.x + s.width / 2 : this.world.width / 2;
-    })();
-    // Deliver goods when the train passes the station.
-    if ((prev < stationX && this.trainX >= stationX) || (prev > stationX && this.trainX <= stationX)) {
-      this.foodStock = Math.min(FOOD_CAP, this.foodStock + TRAIN_DELIVER_FOOD);
-      this.log(tr(`A trade train rolled through the station. 🚃 +${TRAIN_DELIVER_FOOD} food`, `교역 열차가 역을 지나갔다. 🚃 +식량 ${TRAIN_DELIVER_FOOD}`));
-    }
-
-    if (this.trainX > this.world.width + 3) {
-      this.trainDir = -1;
-    } else if (this.trainX < -3) {
-      this.trainDir = 1;
-    }
-    this.notifyChanged();
-  }
-
   /** A built building's door tile or the tile directly in front of it. */
   private isEntrance(position: Vec2): boolean {
     for (const b of this.buildings) {
@@ -2348,6 +2291,18 @@ export class Simulation {
       if (tile.type === "Plaza") {
         this.world.setTile(tile, "Road");
       } else if (tile.type === "Fountain" || tile.type === "Statue" || tile.type === "Lamp") {
+        this.world.setTile(tile, "Grass");
+      }
+    }
+  }
+
+  /** The trade train and railway are retired — remove stations and tear up track. */
+  removeRailways() {
+    for (const station of this.buildings.filter((b) => b.kind === "station")) {
+      this.removeBuilding(station);
+    }
+    for (const tile of this.world.tiles) {
+      if (tile.type === "Rail") {
         this.world.setTile(tile, "Grass");
       }
     }

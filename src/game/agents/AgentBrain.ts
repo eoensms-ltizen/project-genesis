@@ -1037,13 +1037,9 @@ export class AgentBrain {
       simulation.getPowerPlant()
     ) {
       kind = "factory";
-    } else if (
-      simulation.era >= 4 &&
-      !simulation.hasAnyStation() &&
-      simulation.getPowerPlant()
-    ) {
-      kind = "station";
     }
+    // The trade-train station is retired — it was an early-version stand-in and
+    // is no longer built (see the train removal in Simulation).
     if (!kind) {
       // Nothing new to raise — but a full warehouse or cramped kitchen can be
       // enlarged in place so it always keeps room to spare.
