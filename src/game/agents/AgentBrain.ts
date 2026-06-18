@@ -2571,6 +2571,9 @@ export class AgentBrain {
     agent.buildTarget = undefined;
     agent.target = undefined;
     agent.path = undefined;
+    // A freshly finished room may sit against a neighbour with a redundant wall —
+    // remodel the two into a shared single face.
+    simulation.remodelDoubleWalls();
     this.setState(agent, simulation, "Idle");
   }
 

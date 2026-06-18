@@ -398,6 +398,8 @@ export class Simulation {
     this.removeParksAndPlazas();
     // The trade train and its railway are retired — tear up any old track.
     this.removeRailways();
+    // Tidy any redundant double walls an older save left between two buildings.
+    this.remodelDoubleWalls();
     // Shift any stockpile overflow an older save dropped onto a warehouse door.
     this.relocateDoorwayPiles();
     this.recomputeAmbiance();
@@ -1088,6 +1090,117 @@ export class Simulation {
     this.refreshDoors();
     this.notifyChanged();
     return true;
+  }
+
+  /**
+   * Remodel away redundant double walls. Where one finished room sits flush
+   * against another (or one tile off it) and the neighbour's wall fully covers
+   * the shared edge, the redundant wall is torn out and the rooms share a single
+   * face: the room grows up to the neighbour's wall, its old edge (and any
+   * one-tile gap) becoming interior floor. Furniture is preserved. Runs until no
+   * more merges are possible.
+   */
+  remodelDoubleWalls() {
+    const rooms = () =>
+      this.buildings.filter((b) => b.stage === "built" && ROOM_BUILDING_KINDS.has(b.kind));
+    let changed = false;
+    for (let pass = 0; pass < 6; pass += 1) {
+      let merged = false;
+      outer: for (const a of rooms()) {
+        for (const b of rooms()) {
+          if (a !== b && this.tryShareWall(a, b)) {
+            merged = true;
+            changed = true;
+            break outer; // footprints moved — restart the scan
+          }
+        }
+      }
+      if (!merged) {
+        break;
+      }
+    }
+    if (changed) {
+      this.refreshDoors();
+      this.recomputeAmbiance();
+      this.notifyChanged();
+    }
+  }
+
+  /**
+   * If `a` sits flush against (gap 0) or one tile from (gap 1) building `b` on a
+   * side whose whole edge `b`'s wall covers, grow `a` up to `b`'s wall so they
+   * share it, and report success. Skipped when `a`'s only door is on that side.
+   */
+  private tryShareWall(a: Building, b: Building): boolean {
+    const isGrass = (p: Vec2): boolean =>
+      this.world.getTile(p)?.type === "Grass" && !this.isTileClaimed(p);
+    const range = (start: number, len: number): number[] =>
+      Array.from({ length: len }, (_, i) => start + i);
+    const coversCols = b.y <= a.y && b.y + b.height >= a.y + a.height; // for E/W edges
+    const coversRows = b.x <= a.x && b.x + b.width >= a.x + a.width; // for N/S edges
+    type Side = {
+      gap: number;
+      covers: boolean;
+      doorOnEdge: (d: Vec2) => boolean;
+      gapLine: Vec2[]; // the single-tile gap to cross (only used when gap === 1)
+      apply: (g: number) => void;
+    };
+    const sides: Side[] = [
+      {
+        gap: b.x - (a.x + a.width),
+        covers: coversCols,
+        doorOnEdge: (d) => d.x === a.x + a.width - 1,
+        gapLine: range(a.y, a.height).map((yy) => ({ x: a.x + a.width, y: yy })),
+        apply: (g) => {
+          a.width += g + 1;
+        },
+      },
+      {
+        gap: a.x - (b.x + b.width),
+        covers: coversCols,
+        doorOnEdge: (d) => d.x === a.x,
+        gapLine: range(a.y, a.height).map((yy) => ({ x: a.x - 1, y: yy })),
+        apply: (g) => {
+          a.x -= g + 1;
+          a.width += g + 1;
+        },
+      },
+      {
+        gap: b.y - (a.y + a.height),
+        covers: coversRows,
+        doorOnEdge: (d) => d.y === a.y + a.height - 1,
+        gapLine: range(a.x, a.width).map((xx) => ({ x: xx, y: a.y + a.height })),
+        apply: (g) => {
+          a.height += g + 1;
+        },
+      },
+      {
+        gap: a.y - (b.y + b.height),
+        covers: coversRows,
+        doorOnEdge: (d) => d.y === a.y,
+        gapLine: range(a.x, a.width).map((xx) => ({ x: xx, y: a.y - 1 })),
+        apply: (g) => {
+          a.y -= g + 1;
+          a.height += g + 1;
+        },
+      },
+    ];
+    const doors = this.buildingDoors(a);
+    for (const s of sides) {
+      if ((s.gap !== 0 && s.gap !== 1) || !s.covers) {
+        continue;
+      }
+      if (doors.some(s.doorOnEdge)) {
+        continue; // would tear out the wall that holds a's entrance
+      }
+      if (s.gap === 1 && !s.gapLine.every(isGrass)) {
+        continue; // the one-tile gap must be open ground to floor over
+      }
+      s.apply(s.gap);
+      this.repaintWalledRoomKeepingFurniture(a);
+      return true;
+    }
+    return false;
   }
 
   /**
