@@ -994,6 +994,19 @@ export class Simulation {
     const ex = Math.ceil(w * 0.5); // columns needed to reach ≥1.5× area
     const ey = Math.ceil(h * 0.5); // rows needed to reach ≥1.5× area
     type Rect = { x: number; y: number; width: number; height: number };
+    // Growing must not bring a *different* building any closer than it already is:
+    // otherwise the new outer wall lands flush against a neighbour (a double wall)
+    // or one tile off it (a squeezed sliver). Existing shared walls are preserved
+    // because they were already within reach before the expansion.
+    const before = this.otherBuildingTilesNear(building, 2);
+    const keepsClearance = (rect: Rect): boolean => {
+      for (const key of this.otherBuildingTilesNear(rect, 2)) {
+        if (!before.has(key)) {
+          return false;
+        }
+      }
+      return true;
+    };
     const options: Rect[] = [];
     // East: new ground to the right; height (and the south doorway) unchanged.
     if (stripClear(x + w, y, ex, h)) {
@@ -1007,10 +1020,43 @@ export class Simulation {
     if (stripClear(x, y - ey, w, ey)) {
       options.push({ x, y: y - ey, width: w, height: h + ey });
     }
-    if (options.length === 0) {
+    const viable = options.filter(keepsClearance);
+    if (viable.length === 0) {
       return undefined;
     }
-    return options[Math.floor(Math.random() * options.length)];
+    return viable[Math.floor(Math.random() * viable.length)];
+  }
+
+  /**
+   * Building tiles (of OTHER buildings) within `margin` tiles of a rectangle,
+   * excluding the rectangle's own footprint. Used to keep an expanding building
+   * from planting a new wall flush against — or a sliver from — a neighbour.
+   */
+  private otherBuildingTilesNear(
+    rect: { x: number; y: number; width: number; height: number },
+    margin: number,
+  ): Set<string> {
+    const set = new Set<string>();
+    const isBuilding = (t: TileType | undefined): boolean =>
+      t === "Wall" ||
+      t === "Door" ||
+      t === "Floor" ||
+      t === "House" ||
+      t === "HouseSite" ||
+      t === "HouseFoundation";
+    for (let yy = rect.y - margin; yy < rect.y + rect.height + margin; yy += 1) {
+      for (let xx = rect.x - margin; xx < rect.x + rect.width + margin; xx += 1) {
+        const inside =
+          xx >= rect.x && xx < rect.x + rect.width && yy >= rect.y && yy < rect.y + rect.height;
+        if (inside) {
+          continue;
+        }
+        if (isBuilding(this.world.getTile({ x: xx, y: yy })?.type)) {
+          set.add(`${xx},${yy}`);
+        }
+      }
+    }
+    return set;
   }
 
   /**
