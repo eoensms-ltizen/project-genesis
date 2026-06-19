@@ -104,6 +104,9 @@ const MAX_FIELD_TILES = 12;
 // keeps its distance from where people live.
 const FIELD_HOME_BUFFER = 4;
 const FOOD_STOCK_TARGET = 50;
+// Per-resident larder target — the real target is max(FOOD_STOCK_TARGET, pop ×
+// this), so farming keeps up as the town grows instead of stalling at a flat 50.
+const FOOD_PER_CAPITA_TARGET = 3;
 // Food poisoning: how long it lasts, the extra stamina it saps, and the mood hit.
 const SICK_DURATION_SECONDS = 90;
 const SICK_STAMINA_DRAIN = 2.5;
@@ -600,21 +603,27 @@ export class AgentBrain {
       drives.push({ kind: "rest", urgency: 100 - agent.health.stamina });
     }
 
+    // When the colony is genuinely short of food, soft needs step aside so idle
+    // hands go to work (and thence to the fields) instead of strolling or chatting
+    // while the larder empties. Survival (eat/rest, above) is unaffected.
+    const foodTarget = Math.max(FOOD_STOCK_TARGET, simulation.agents.length * FOOD_PER_CAPITA_TARGET);
+    const foodShort = simulation.foodStock + simulation.meals < foodTarget * 0.5;
+
     const social = (100 - n.social) * (0.6 + p.sociability);
     // Socialising is only actionable when there's actually someone else to meet.
     // A lone settler can't satisfy it, so it must not crowd out the work and
     // provisioning that keep them alive — otherwise they wander forever seeking
     // company that doesn't exist.
-    if (social >= NEED_ACT_THRESHOLD && this.hasCompany(agent, simulation)) {
+    if (!foodShort && social >= NEED_ACT_THRESHOLD && this.hasCompany(agent, simulation)) {
       drives.push({ kind: "social", urgency: social });
     }
     const leisure = (100 - n.leisure) * (0.5 + p.curiosity);
-    if (leisure >= NEED_ACT_THRESHOLD) {
+    if (!foodShort && leisure >= NEED_ACT_THRESHOLD) {
       drives.push({ kind: "leisure", urgency: leisure });
     }
     // Feeling cramped pulls a resident toward a park for some breathing room.
     const comfort = (100 - n.comfort) * 0.9;
-    if (comfort >= NEED_ACT_THRESHOLD) {
+    if (!foodShort && comfort >= NEED_ACT_THRESHOLD) {
       drives.push({ kind: "comfort", urgency: comfort });
     }
     if (churchOpen) {
@@ -718,30 +727,30 @@ export class AgentBrain {
   }
 
   private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
+    // SURVIVAL BEFORE CONSTRUCTION. Keep the larder above its population-scaled
+    // target first — farm the ripe fields, then cook — before raising or expanding
+    // ANY building. A growing town's constant build demand (and now the demand-
+    // driven extra kitchens/granaries/warehouses) was starving the fields of
+    // labour, so the colony slowly ran out of food and died. These self-gate
+    // (findFarmWork/tryCook return false once food is at target / nothing to do),
+    // so once the colony is fed, building proceeds normally below.
+    if (this.findFarmWork(agent, simulation)) {
+      return true;
+    }
+    if (this.tryCook(agent, simulation)) {
+      return true;
+    }
     // Provisioning is need-driven from the very first resident, not gated on
-    // reaching a later era: raise a warehouse to stockpile goods, then farm to
-    // keep the larder full so hunger is met from stores rather than foraging.
-    // communalProject builds the warehouse (and a kitchen once there's food);
-    // its advanced civic buildings remain gated by their own era checks inside.
+    // reaching a later era: raise a warehouse to stockpile goods, a kitchen once
+    // there's food, etc. communalProject's advanced buildings keep their own gates.
     const communal = this.communalProject(agent, simulation);
     if (communal === "started") {
       return true;
     }
     // Set up one's own bed early: it's a quick, one-time comfort (each resident
-    // builds a single bed), so it comes before endless farming and before pitching
-    // in on neighbours' builds — otherwise it never gets a turn and folk sleep on
-    // the floor forever.
+    // builds a single bed), so it comes before pitching in on neighbours' builds —
+    // otherwise it never gets a turn and folk sleep on the floor forever.
     if (this.tryBuildBed(agent, simulation)) {
-      return true;
-    }
-    // Farm whenever the food stores sit below target — a standing guard against
-    // hunger that a lone settler tends to before idling.
-    if (this.findFarmWork(agent, simulation)) {
-      return true;
-    }
-    // Cook raw food into meals once there's a stove — anyone may, though a
-    // non-cook does it slowly and wastefully (see cookEfficiency).
-    if (this.tryCook(agent, simulation)) {
       return true;
     }
     // Furnish the kitchen with a dining set (a table ringed with chairs) so the
@@ -2814,7 +2823,11 @@ export class AgentBrain {
   }
 
   private findFarmWork(agent: Agent, simulation: Simulation): boolean {
-    if (simulation.foodStock >= FOOD_STOCK_TARGET) {
+    // The larder target scales with the population: a flat target let big towns
+    // think a day's worth of food was "enough" and stop farming, so consumption
+    // outran supply and the colony slowly starved. Keep ~a few days per resident.
+    const target = Math.max(FOOD_STOCK_TARGET, simulation.agents.length * FOOD_PER_CAPITA_TARGET);
+    if (simulation.foodStock >= target) {
       return false;
     }
     const world = simulation.world;
