@@ -2598,6 +2598,79 @@ export class AgentBrain {
     this.setState(agent, simulation, "Idle");
   }
 
+  /**
+   * Last-resort rescue for a resident who can reach no food because they're
+   * sealed in (most often a bed dropped in front of a doorway). Flood-fills the
+   * walkable area around them; if it never reaches open ground, the way out is
+   * blocked — so clear the bed sealing it (preferring one across a reachable
+   * doorway). Returns true if a bed was removed (the path may now be open).
+   */
+  private breakOutIfTrapped(agent: Agent, simulation: Simulation): boolean {
+    const DIRS = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ];
+    const key = (p: Vec2) => `${p.x},${p.y}`;
+    const OPEN = new Set<TileType>([
+      "Grass",
+      "Road",
+      "Dirt",
+      "Plaza",
+      "RockFloor",
+      "FieldEmpty",
+      "FieldGrowing",
+      "FieldRipe",
+      "Berry",
+      "Stump",
+    ]);
+    const start = roundVec(agent.position);
+    const seen = new Set<string>([key(start)]);
+    const stack: Vec2[] = [start];
+    let sealingBed: Vec2 | undefined;
+    let anyBed: Vec2 | undefined;
+    while (stack.length > 0 && seen.size < 600) {
+      const p = stack.pop()!;
+      const atDoor = simulation.world.getTile(p)?.type === "Door";
+      for (const d of DIRS) {
+        const np = { x: p.x + d.x, y: p.y + d.y };
+        const t = simulation.world.getTile(np)?.type;
+        if (t === undefined) {
+          continue;
+        }
+        if (simulation.world.isWalkable(np)) {
+          if (OPEN.has(t)) {
+            return false; // reached open ground — not trapped
+          }
+          if (!seen.has(key(np))) {
+            seen.add(key(np));
+            stack.push(np);
+          }
+        } else if (t === "Bed" || t === "BedFoot" || t === "BedSite") {
+          anyBed = np;
+          // A bed across a doorway we can reach is the one sealing us in.
+          if (atDoor) {
+            sealingBed = np;
+          }
+        }
+      }
+    }
+    const bed = sealingBed ?? anyBed;
+    if (!bed) {
+      return false; // enclosed, but by walls we can't clear — nothing to do here
+    }
+    simulation.removeBedAt(bed);
+    simulation.log(
+      tr(
+        `${agent.name} was boxed in — a bed blocking the way out was cleared. 🛏️`,
+        `${agent.name}이(가) 갇혀서, 길을 막던 침대를 치웠다. 🛏️`,
+      ),
+      [agent],
+    );
+    return true;
+  }
+
   private findFood(agent: Agent, simulation: Simulation) {
     const kitchen = simulation.getKitchen();
     if (kitchen && simulation.meals > 0) {
@@ -2647,6 +2720,12 @@ export class AgentBrain {
 
     const route = this.routeToNearest(agent, simulation, "Berry", false);
     if (!route) {
+      // No food anywhere reachable — the resident may be boxed in (e.g. a bed
+      // sealing a doorway). Try to break out by clearing the blocking bed.
+      if (this.breakOutIfTrapped(agent, simulation)) {
+        this.setState(agent, simulation, "Idle");
+        return;
+      }
       simulation.log(tr(`${agent.name} is hungry but found no food.`, `${agent.name}이(가) 배고프지만 먹을 것을 찾지 못했다.`));
       this.backOff(agent, simulation);
       return;

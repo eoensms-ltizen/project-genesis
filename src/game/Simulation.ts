@@ -790,7 +790,25 @@ export class Simulation {
     building: Building,
   ): { head: Vec2; foot?: Vec2; stand: Vec2 } | undefined {
     const home = this.houseInterior(building);
-    const free = (p: Vec2): boolean => this.world.getTile(p)?.type === "Floor";
+    const free = (p: Vec2): boolean => {
+      if (this.world.getTile(p)?.type !== "Floor") {
+        return false;
+      }
+      // Keep doorways clear: never set a bed on a tile touching a door — a bed in
+      // front of one would seal the entrance (e.g. a bedroom annex's internal door,
+      // trapping its owner inside).
+      for (const d of [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ]) {
+        if (this.world.getTile({ x: p.x + d.x, y: p.y + d.y })?.type === "Door") {
+          return false;
+        }
+      }
+      return true;
+    };
     // Place beds toward the edges/corners first, leaving the centre tile clear as
     // an aisle and the home anchor (which must stay walkable) — beds are solid.
     const interior = this.interiorTiles(building)
@@ -894,6 +912,41 @@ export class Simulation {
     // pressure that drives a roomier home or a private bedroom, rather than an
     // ugly one-tile cot.
     return undefined;
+  }
+
+  /**
+   * Tear out the bed at `pos` (both of its tiles), turning them back to floor and
+   * releasing its owner — used to free a resident a bed has sealed in.
+   */
+  removeBedAt(pos: Vec2): void {
+    const isBedTile = (p: Vec2): boolean => {
+      const t = this.world.getTile(p)?.type;
+      return t === "Bed" || t === "BedFoot" || t === "BedSite";
+    };
+    if (!isBedTile(pos)) {
+      return;
+    }
+    const pair = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ]
+      .map((d) => ({ x: pos.x + d.x, y: pos.y + d.y }))
+      .find((p) => isBedTile(p));
+    this.world.setTile(pos, "Floor");
+    if (pair) {
+      this.world.setTile(pair, "Floor");
+    }
+    for (const a of this.agents) {
+      const owns = (p?: Vec2) =>
+        p && ((p.x === pos.x && p.y === pos.y) || (pair && p.x === pair.x && p.y === pair.y));
+      if (owns(a.bedPos) || owns(a.bedFoot)) {
+        a.bedPos = undefined;
+        a.bedFoot = undefined;
+      }
+    }
+    this.notifyChanged();
   }
 
   /** The interior (non-wall, non-door) floor tiles of a walled room. */
