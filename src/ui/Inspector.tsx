@@ -220,6 +220,7 @@ const TILE_NAMES: Partial<Record<TileType, () => string>> = {
   OreIron: () => tr("Iron ore", "철광석"),
   RockFloor: () => tr("Rough stone floor", "암반 바닥"),
   Stove: () => tr("Stove", "화덕"),
+  Counter: () => tr("Counter", "조리대"),
   Bed: () => tr("Bed", "침대"),
   BedFoot: () => tr("Bed", "침대"),
   BedSite: () => tr("Planned bed", "침대 터 (제작 예정)"),

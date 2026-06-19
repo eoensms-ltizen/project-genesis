@@ -34,6 +34,7 @@ const MOVE_COSTS: Record<TileType, number> = {
   // pathfinding never routes through it; a stove is cooked at from beside it. A
   // reserved bed site is still bare floor until built, so it stays walkable.
   Stove: Number.POSITIVE_INFINITY,
+  Counter: Number.POSITIVE_INFINITY,
   Bed: Number.POSITIVE_INFINITY,
   BedFoot: Number.POSITIVE_INFINITY,
   BedSite: 1,
@@ -78,6 +79,7 @@ const TILE_CODES: Record<TileType, string> = {
   OreIron: "i",
   RockFloor: ",",
   Stove: "v",
+  Counter: "n",
   Bed: "b",
   BedFoot: "f",
   BedSite: "m",

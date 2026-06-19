@@ -1041,6 +1041,15 @@ export class AgentBrain {
     } else if (simulation.era >= 2 && !simulation.hasAnyPasture()) {
       // A paddock for the herd — open yard, not one of the cramped civic boxes.
       kind = "pasture";
+    } else if (simulation.needsMoreOf("kitchen")) {
+      // Demand has outgrown supply: a growing town raises another kitchen (each
+      // brings its own cooking counter and dining set), granary, or warehouse —
+      // rather than funnelling everyone through a single one.
+      kind = "kitchen";
+    } else if (simulation.needsMoreOf("granary")) {
+      kind = "granary";
+    } else if (simulation.needsMoreOf("warehouse")) {
+      kind = "warehouse";
     }
     // The cramped 1-tile civic rooms — church, police, smelter, power plant,
     // factory, station — are retired for now: they built as single-tile boxes
@@ -1108,20 +1117,29 @@ export class AgentBrain {
     let best: Building | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const b of simulation.buildings) {
-      // Help once the groundwork is down (a plan exists); skip un-staked sites.
-      if (b.stage !== "foundation" || !ROOM_BUILDING_KINDS.has(b.kind) || !b.plan) {
-        continue;
-      }
-      const undone = b.plan.filter((t) => !t.done);
-      // Every remaining tile already spoken for — no use crowding in.
-      if (undone.length === 0 || undone.every((t) => t.claimedBy)) {
+      if (b.stage === "built" || !ROOM_BUILDING_KINDS.has(b.kind)) {
         continue;
       }
       const builders = simulation.agents.filter((a) => a.projectBuildingId === b.id).length;
-      // One extra pair of hands per ~3 tiles left, up to four on a big build.
-      const cap = Math.max(1, Math.min(4, Math.ceil(undone.length / 3)));
-      if (builders >= cap) {
-        continue;
+      if (b.stage === "site") {
+        // An orphaned stake (its planner wandered off) — adopt it to break ground,
+        // so a building the town has decided it needs doesn't stall forever.
+        if (builders > 0) {
+          continue;
+        }
+      } else if (b.stage === "foundation" && b.plan) {
+        const undone = b.plan.filter((t) => !t.done);
+        // Every remaining tile already spoken for — no use crowding in.
+        if (undone.length === 0 || undone.every((t) => t.claimedBy)) {
+          continue;
+        }
+        // One extra pair of hands per ~3 tiles left, up to four on a big build.
+        const cap = Math.max(1, Math.min(4, Math.ceil(undone.length / 3)));
+        if (builders >= cap) {
+          continue;
+        }
+      } else {
+        continue; // foundation without a plan yet — nothing to grab onto
       }
       const d = Math.abs(b.x - agent.position.x) + Math.abs(b.y - agent.position.y);
       if (d < bestDistance) {
@@ -1138,8 +1156,8 @@ export class AgentBrain {
     if (this.fetchWood(agent, simulation, load)) {
       return true;
     }
-    // The build is at foundation stage, so BuildHouse drives the per-tile walk
-    // from wherever the helper stands — no need to route to a door first.
+    // BuildHouse drives the rest from wherever the helper stands: it breaks
+    // ground if this is a fresh site, then lays the plan tile by tile.
     this.setState(agent, simulation, "BuildHouse");
     return true;
   }

@@ -118,6 +118,7 @@ export class GameApp {
       structureTile === "BedSite" ||
       structureTile === "Table" ||
       structureTile === "Stove" ||
+      structureTile === "Counter" ||
       structureTile === "Fence" ||
       structureTile === "FenceGate"
     ) {

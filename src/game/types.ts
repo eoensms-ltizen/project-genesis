@@ -26,6 +26,9 @@ export type TileType =
   | "RockFloor"
   // Furniture inside rooms: a stove to cook at, a bed to sleep in, a table to dine at.
   | "Stove"
+  // The prep surface beside a stove — together they form a 2-tile cooking
+  // counter (조리대). Solid like the stove; cooking happens at the stove tile.
+  | "Counter"
   // A bed spans two tiles: the head (pillow end, where the sleeper lies) and the
   // foot. "BedSite" is a reserved-but-unbuilt bed plot — marked ahead of time so
   // it reads as a planned bed, then replaced by Bed+BedFoot once built.

@@ -812,6 +812,24 @@ function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
   }
 
 
+  if (type === "Counter") {
+    // The prep surface beside the stove: a butcher-block top with a cutting board
+    // and a knife, so the stove + counter read as one cooking station.
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.fill(0x6e5235);
+    graphics.rect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    graphics.stroke({ color: 0x3a2c19, width: 1, alpha: 0.85 });
+    // lit top edge
+    graphics.rect(px + 3, py + 3, TILE_SIZE - 6, 1.4);
+    graphics.fill({ color: 0x9a7a52, alpha: 0.85 });
+    // a pale cutting board
+    graphics.rect(px + 5, py + 7, 6, 4.5);
+    graphics.fill(0xcbb487);
+    // the knife
+    graphics.rect(px + 10.5, py + 6, 0.9, 5);
+    graphics.fill({ color: 0xc2c7cc, alpha: 0.9 });
+  }
+
   if (type === "Table") {
     // A solid wooden dining table, nearly filling its tile so a run of tables
     // reads as one long board, with a lit top edge and a set place.
@@ -1719,6 +1737,8 @@ function tileColor(type: TileType): number {
     case "RockFloor":
       return 0x4f4a44;
     case "Stove":
+      return 0x4a3b2a;
+    case "Counter":
       return 0x4a3b2a;
     case "Bed":
       return 0x4a3b2a;

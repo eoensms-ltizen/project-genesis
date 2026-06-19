@@ -576,6 +576,7 @@ export class Simulation {
     "Table",
     "Chair",
     "Stove",
+    "Counter",
   ]);
 
   /** Re-tile a building as a walled room without clobbering interior furniture. */
@@ -933,6 +934,37 @@ export class Simulation {
    * A built warehouse or kitchen that has run low on breathing room and has clear
    * ground to grow into. Returns the first one that should be enlarged, if any.
    */
+  // --- Demand vs supply: scale the COUNT of amenities with the population ------
+
+  /** Residents one of each amenity can comfortably serve before another is wanted. */
+  private static readonly SERVE_PER: Partial<Record<BuildingKind, number>> = {
+    warehouse: 18,
+    granary: 18,
+    kitchen: 14, // each kitchen brings its own stove + dining, so cooking scales too
+  };
+
+  /** How many of a civic building the current population warrants (≥1). */
+  desiredCivicCount(kind: BuildingKind): number {
+    const per = Simulation.SERVE_PER[kind];
+    if (!per) {
+      return 0;
+    }
+    return Math.max(1, Math.ceil(this.agents.length / per));
+  }
+
+  /**
+   * True when the population has outgrown the current supply of `kind` and
+   * another should be raised — but never while one of that kind is already going
+   * up (so a growing town adds them one at a time, not all at once).
+   */
+  needsMoreOf(kind: BuildingKind): boolean {
+    if (this.buildings.some((b) => b.kind === kind && b.stage !== "built")) {
+      return false;
+    }
+    const built = this.buildings.filter((b) => b.kind === kind && b.stage === "built").length;
+    return built >= 1 && built < this.desiredCivicCount(kind);
+  }
+
   civicNeedingExpansion(): Building | undefined {
     for (const building of this.buildings) {
       if (building.stage !== "built") {
@@ -1569,6 +1601,24 @@ export class Simulation {
             )[0];
           if (spot) {
             this.world.setTile(spot, "Stove");
+            // Extend it into a 2-tile cooking counter: a prep surface on an
+            // adjacent interior floor tile — but only if the stove keeps another
+            // free side for the cook to work from (so we never wall the cook out).
+            const interiorKeys = new Set(interior.map((t) => `${t.x},${t.y}`));
+            const freeAdj = [
+              { x: 1, y: 0 },
+              { x: -1, y: 0 },
+              { x: 0, y: 1 },
+              { x: 0, y: -1 },
+            ]
+              .map((d) => ({ x: spot.x + d.x, y: spot.y + d.y }))
+              .filter(
+                (n) =>
+                  interiorKeys.has(`${n.x},${n.y}`) && this.world.getTile(n)?.type === "Floor",
+              );
+            if (freeAdj.length >= 2) {
+              this.world.setTile(freeAdj[0], "Counter");
+            }
           }
         }
       }
