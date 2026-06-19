@@ -134,6 +134,7 @@ const KIND_NAMES: Record<Building["kind"], () => string> = {
   park: () => tr("park", "공원"),
   police: () => tr("police station", "경찰서"),
   smelter: () => tr("smelter", "제련소"),
+  funfair: () => tr("amusement park", "놀이공원"),
 };
 
 function kindName(kind: Building["kind"]): string {

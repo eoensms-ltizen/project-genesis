@@ -408,6 +408,12 @@ export class PixiRenderer {
         if (building.kind === "pasture" && building.stage === "built") {
           continue;
         }
+        // A finished fairground: plaza/fence come from the terrain layer; the
+        // roller-coaster track, supports, station and car are drawn on top here.
+        if (building.kind === "funfair" && building.stage === "built") {
+          drawFunfair(this.buildingGraphics, building);
+          continue;
+        }
         drawBuilding(this.buildingGraphics, building, this.flatBuildings);
       }
     }
@@ -1334,6 +1340,102 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
   } else if (building.kind === "smelter") {
     graphics.circle(cx, cy, 1.8);
     graphics.fill(0xe7873c);
+  }
+}
+
+/**
+ * The roller-coaster track as a closed loop of pixel points within the fairground
+ * footprint. Point 0 is the front/station (bottom-centre, by the entrance gate);
+ * `lift` is how "high" that stretch reads (0 at the front, 1 at the back hill) for
+ * later 2.5D shading and speed variation. Both the renderer and (later) the car
+ * animation share this so the track and the boarding spot always agree.
+ */
+function coasterTrack(b: Building): { x: number; y: number; lift: number }[] {
+  const px = b.x * TILE_SIZE;
+  const py = b.y * TILE_SIZE;
+  const W = b.width * TILE_SIZE;
+  const H = b.height * TILE_SIZE;
+  const m = Math.min(W, H) * 0.22;
+  const cx = px + W / 2;
+  const cy = py + H / 2;
+  const rx = W / 2 - m;
+  const ry = H / 2 - m;
+  const N = 72;
+  const pts: { x: number; y: number; lift: number }[] = [];
+  for (let i = 0; i < N; i += 1) {
+    const a = Math.PI / 2 + (2 * Math.PI * i) / N; // start at the bottom (station)
+    // A gently lobed loop so it reads as a winding coaster, not a plain oval.
+    const wobble = 1 + 0.1 * Math.cos(3 * a);
+    pts.push({
+      x: cx + rx * wobble * Math.cos(a),
+      y: cy + ry * wobble * Math.sin(a),
+      lift: (1 - Math.sin(a)) / 2, // 0 at the front, 1 at the back hill
+    });
+  }
+  return pts;
+}
+
+/** Draw a finished fairground's roller coaster: track, supports, station, car, gate. */
+function drawFunfair(graphics: Graphics, building: Building) {
+  const pts = coasterTrack(building);
+  const N = pts.length;
+  const trace = () => {
+    for (let i = 0; i <= N; i += 1) {
+      const p = pts[i % N];
+      if (i === 0) {
+        graphics.moveTo(p.x, p.y);
+      } else {
+        graphics.lineTo(p.x, p.y);
+      }
+    }
+  };
+  // Crossties first (under the rails).
+  for (let i = 0; i < N; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % N];
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    graphics.moveTo(mx - nx * 3.2, my - ny * 3.2);
+    graphics.lineTo(mx + nx * 3.2, my + ny * 3.2);
+    graphics.stroke({ color: 0x4a3722, width: 1.6, alpha: 0.85 });
+  }
+  // Track bed (dark), rails (warm), centre highlight.
+  trace();
+  graphics.stroke({ color: 0x2c2117, width: 5.5, alpha: 0.95 });
+  trace();
+  graphics.stroke({ color: 0xb5613a, width: 3, alpha: 1 });
+  trace();
+  graphics.stroke({ color: 0xe6a86c, width: 1, alpha: 0.75 });
+  // Support posts with a little shadow, sparser around the loop.
+  for (let i = 0; i < N; i += 6) {
+    const p = pts[i];
+    graphics.rect(p.x - 0.8, p.y + 1, 1.6, 4 + p.lift * 5);
+    graphics.fill({ color: 0x3a2c1d, alpha: 0.7 });
+  }
+  // Boarding station: a wooden platform at the front, by the entrance gate.
+  const board = pts[0];
+  graphics.roundRect(board.x - 9, board.y + 2, 18, 7, 1.5);
+  graphics.fill({ color: 0x8a6a44, alpha: 0.95 });
+  graphics.roundRect(board.x - 9, board.y + 2, 18, 7, 1.5);
+  graphics.stroke({ color: 0x4a3722, width: 1, alpha: 0.9 });
+  // A small "board here" gate/turnstile marker on the platform edge.
+  graphics.rect(board.x - 1, board.y + 1, 2, 4);
+  graphics.fill(0xe8d27a);
+  graphics.poly([board.x - 3, board.y - 1, board.x, board.y - 4, board.x + 3, board.y - 1]);
+  graphics.fill({ color: 0xe8d27a, alpha: 0.9 });
+  // A parked car (train of two) at the station, colourful so it pops.
+  const carColors = [0xd84f4f, 0x4f7dd8];
+  for (let c = 0; c < 2; c += 1) {
+    const t = pts[(c * 2) % N];
+    graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
+    graphics.fill(carColors[c]);
+    graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
+    graphics.stroke({ color: 0x2a1c12, width: 0.8, alpha: 0.9 });
   }
 }
 

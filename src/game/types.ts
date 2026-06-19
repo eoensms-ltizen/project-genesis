@@ -151,7 +151,10 @@ export type BuildingKind =
   | "park"
   | "police"
   // Forges mined iron ore into steel.
-  | "smelter";
+  | "smelter"
+  // An amusement park: an open fairground with a roller coaster. A leisure venue
+  // residents visit to ride, lifting their spirits.
+  | "funfair";
 
 export type BuildingStage = "site" | "foundation" | "built";
 

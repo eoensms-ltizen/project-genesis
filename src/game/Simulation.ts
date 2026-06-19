@@ -632,6 +632,43 @@ export class Simulation {
     }
   }
 
+  /**
+   * A fairground: a paved plaza (walkable) inside a low fence, with a gate at the
+   * entrance. The roller coaster itself is render-only decor laid over the plaza;
+   * residents walk in through the gate to the boarding spot.
+   */
+  private paintFunfair(building: Building) {
+    const { x, y, width, height } = building;
+    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    for (let fy = 0; fy < height; fy += 1) {
+      for (let fx = 0; fx < width; fx += 1) {
+        const pos = { x: x + fx, y: y + fy };
+        const edge = fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1;
+        const type: TileType = doorKeys.has(`${pos.x},${pos.y}`)
+          ? "FenceGate"
+          : edge
+            ? "Fence"
+            : "Plaza"; // paved fairground, walkable
+        this.world.setTile(pos, type);
+      }
+    }
+  }
+
+  getFunfair(): Building | undefined {
+    return this.buildings.find((b) => b.kind === "funfair" && b.stage === "built");
+  }
+
+  /**
+   * Where riders board the coaster: the front-centre plaza tile just inside the
+   * entrance gate, aligned with the track's station segment.
+   */
+  funfairBoardingTile(building: Building): Vec2 {
+    return {
+      x: building.x + Math.floor(building.width / 2),
+      y: building.y + building.height - 2,
+    };
+  }
+
   /** A free interior grass tile of a pasture to drop a tamed animal onto. */
   pastureGrazeSpot(building: Building): Vec2 | undefined {
     for (let fy = 1; fy < building.height - 1; fy += 1) {
@@ -1626,6 +1663,9 @@ export class Simulation {
       // A pasture is a fenced paddock: rail fence around the edge, a gate, open
       // grass inside for the herd to graze.
       this.paintFencedYard(building);
+    } else if (stage === "built" && building.kind === "funfair") {
+      // A fairground: a paved plaza inside a fence; the coaster is render decor.
+      this.paintFunfair(building);
     } else if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
       // An enlarged room keeps its interior (stockpile, stove, beds); a fresh one
       // is painted blank. Either way the perimeter and floor are asserted.
@@ -1699,9 +1739,13 @@ export class Simulation {
     }
     if (stage === "built") {
       for (const door of this.buildingDoors(building)) {
-        // Walled rooms keep a Door tile and a pasture keeps its gate; other open
-        // spaces (park, cemetery) pave their doorway instead.
-        if (!ROOM_BUILDING_KINDS.has(building.kind) && building.kind !== "pasture") {
+        // Walled rooms keep a Door tile and the fenced yards (pasture, fairground)
+        // keep their gate; other open spaces (park, cemetery) pave their doorway.
+        if (
+          !ROOM_BUILDING_KINDS.has(building.kind) &&
+          building.kind !== "pasture" &&
+          building.kind !== "funfair"
+        ) {
           this.world.setTile(door, "Road");
         }
       }

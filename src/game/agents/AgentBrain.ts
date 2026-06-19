@@ -3801,6 +3801,7 @@ function buildingNameKo(kind: BuildingKind): string {
     park: "공원",
     police: "경찰서",
     smelter: "제련소",
+    funfair: "놀이공원",
   };
   return names[kind] ?? kind;
 }
@@ -3836,6 +3837,8 @@ const BUILDING_WOOD_COST: Record<BuildingKind, number> = {
   park: PARK_WOOD_COST,
   police: POLICE_WOOD_COST,
   smelter: SMELTER_WOOD_COST,
+  // A roller coaster is a big, costly luxury (a stand-in figure for now).
+  funfair: 40,
 };
 
 // Wood to build, including an allowance for the building's doorway(s). Buildings
