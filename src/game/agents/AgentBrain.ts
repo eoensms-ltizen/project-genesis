@@ -1018,63 +1018,26 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "none" {
-    let kind:
-      | "warehouse"
-      | "kitchen"
-      | "church"
-      | "pasture"
-      | "powerplant"
-      | "factory"
-      | "station"
-      | "cemetery"
-      | "police"
-      | "smelter"
-      | undefined;
+    let kind: "warehouse" | "kitchen" | "cemetery" | "pasture" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (simulation.needsCemetery()) {
       // The dead must be laid to rest — built far from where people live.
       kind = "cemetery";
-    } else if (simulation.needsPoliceStation()) {
-      // A restless town builds a police station to keep the peace.
-      kind = "police";
-    } else if (
-      // Iron ore on hand and no smelter yet — build one to forge it into steel.
-      // Material-driven, not era-gated: mastering iron is its own milestone.
-      !simulation.hasAnySmelter() &&
-      simulation.hasMiningTools &&
-      simulation.stockOf("ironOre") > 0
-    ) {
-      kind = "smelter";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
       simulation.foodStock >= 10
     ) {
       kind = "kitchen";
-    } else if (
-      simulation.era >= 2 &&
-      !simulation.hasAnyChurch() &&
-      simulation.getKitchen()
-    ) {
-      kind = "church";
-    } else if (
-      simulation.era >= 2 &&
-      !simulation.hasAnyPasture() &&
-      simulation.getChurch()
-    ) {
+    } else if (simulation.era >= 2 && !simulation.hasAnyPasture()) {
+      // A paddock for the herd — open yard, not one of the cramped civic boxes.
       kind = "pasture";
-    } else if (simulation.era >= 4 && !simulation.hasAnyPowerPlant()) {
-      kind = "powerplant";
-    } else if (
-      simulation.era >= 4 &&
-      !simulation.hasAnyFactory() &&
-      simulation.getPowerPlant()
-    ) {
-      kind = "factory";
     }
-    // The trade-train station is retired — it was an early-version stand-in and
-    // is no longer built (see the train removal in Simulation).
+    // The cramped 1-tile civic rooms — church, police, smelter, power plant,
+    // factory, station — are retired for now: they built as single-tile boxes
+    // that read as bugs. Order/faith/industry will return later as proper,
+    // roomy amenities, designed one at a time.
     if (!kind) {
       // Nothing new to raise — but a full warehouse or cramped kitchen can be
       // enlarged in place so it always keeps room to spare.

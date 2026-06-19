@@ -2391,20 +2391,10 @@ export class Simulation {
    * High unrest occasionally erupts into a quarrel; officers break it up.
    */
   private updateUnrest() {
-    const friction =
-      Math.max(0, this.agents.length - 10) * 0.3 + Math.max(0, 60 - this.meanWellbeing()) * 0.2;
-    const unpolicedFrac =
-      this.agents.length > 0 ? this.uncoveredResidents() / this.agents.length : 0;
-    const order = this.policeCount() * 8;
-    const target = Math.max(0, Math.min(100, friction * 6 * unpolicedFrac - order));
-    this.unrest += (target - this.unrest) * 0.3;
-    if (this.unrest < 0.5) {
-      this.unrest = 0;
-    }
-
-    if (this.unrest >= UNREST_THRESHOLD && Math.random() < this.unrest / 280) {
-      this.stirQuarrel();
-    }
+    // Policing is retired for now (stations built as 1-tile boxes). With no
+    // officers to settle disputes, keep the meter at rest so quarrels don't
+    // erupt unanswered. Order will return later as a proper amenity.
+    this.unrest = 0;
   }
 
   private stirQuarrel() {
