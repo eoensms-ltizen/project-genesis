@@ -1376,10 +1376,10 @@ const COASTER_WAYPOINTS: { x: number; y: number; e: number }[] = [
   { x: 0.3, y: 0.82, e: 0.08 },
 ];
 
-let coasterCache: { key: string; pts: { x: number; y: number; elev: number }[] } | null = null;
+let coasterCache: { key: string; pts: CoasterPoint[] } | null = null;
 
 /** The map-wide coaster centreline (ground px + height), Catmull-Rom-smoothed. */
-function coasterTrack(world: WorldMap): { x: number; y: number; elev: number }[] {
+function coasterTrack(world: WorldMap): CoasterPoint[] {
   const key = `${world.width}x${world.height}`;
   if (coasterCache && coasterCache.key === key) {
     return coasterCache.pts;
@@ -1389,7 +1389,7 @@ function coasterTrack(world: WorldMap): { x: number; y: number; elev: number }[]
   const wp = COASTER_WAYPOINTS.map((p) => ({ x: p.x * W, y: p.y * H, e: p.e }));
   const n = wp.length;
   const PER = 10;
-  const pts: { x: number; y: number; elev: number }[] = [];
+  const pts: CoasterPoint[] = [];
   for (let i = 0; i < n; i += 1) {
     const p0 = wp[(i - 1 + n) % n];
     const p1 = wp[i];
@@ -1408,8 +1408,44 @@ function coasterTrack(world: WorldMap): { x: number; y: number; elev: number }[]
       });
     }
   }
+  // Signature features: vertical loop-the-loops, spliced in along straight-ish
+  // stretches (highest index first so earlier indices stay valid).
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.62), 18);
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.08), 16);
   coasterCache = { key, pts };
   return pts;
+}
+
+type CoasterPoint = { x: number; y: number; elev: number; noPillar?: boolean };
+
+/**
+ * Splice a vertical loop-the-loop into the track at `atIndex`: a circle standing
+ * in the plane of the track's local direction, so it reads as a real coaster
+ * loop in the 2.5D view. It returns to the entry point, so the track flows on.
+ */
+function insertVerticalLoop(pts: CoasterPoint[], atIndex: number, R: number) {
+  const m = pts.length;
+  const a = pts[atIndex];
+  const b = pts[(atIndex + 1) % m];
+  let dx = b.x - a.x;
+  let dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len;
+  dy /= len;
+  const loop: CoasterPoint[] = [];
+  const STEPS = 28;
+  for (let k = 1; k < STEPS; k += 1) {
+    const th = (k / STEPS) * Math.PI * 2;
+    const along = R * Math.sin(th);
+    loop.push({
+      x: a.x + dx * along,
+      y: a.y + dy * along,
+      // Rise as a circle in screen space: peak 2R at the top of the loop.
+      elev: a.elev + (R * (dy * Math.sin(th) + (1 - Math.cos(th)))) / COASTER_LIFT_PX,
+      noPillar: true,
+    });
+  }
+  pts.splice(atIndex + 1, 0, ...loop);
 }
 
 const COASTER_LIFT_PX = 34; // screen-px an elev-1 stretch rises above its footprint
@@ -1419,12 +1455,16 @@ const COASTER_LIFT_PX = 34; // screen-px an elev-1 stretch rises above its footp
  * track riding on top — lifted up-screen and drawn thicker the higher it climbs
  * (perspective), with higher track drawn over the track it crosses.
  */
-function drawCoaster(graphics: Graphics, pts: { x: number; y: number; elev: number }[]) {
+function drawCoaster(graphics: Graphics, pts: CoasterPoint[]) {
   const N = pts.length;
   const up = (p: { y: number; elev: number }) => p.y - p.elev * COASTER_LIFT_PX;
-  // Pillars from the ground up to the lifted track.
+  // Pillars from the ground up to the lifted track (skip loop points — a pillar
+  // through a loop would look wrong).
   for (let i = 0; i < N; i += 3) {
     const p = pts[i];
+    if (p.noPillar) {
+      continue;
+    }
     graphics.ellipse(p.x, p.y, 1.6, 0.9);
     graphics.fill({ color: 0x2c1f49, alpha: 0.45 }); // foot shadow
     graphics.moveTo(p.x, p.y);
