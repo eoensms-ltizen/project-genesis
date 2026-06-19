@@ -1355,22 +1355,58 @@ function coasterTrack(b: Building): { x: number; y: number; lift: number }[] {
   const py = b.y * TILE_SIZE;
   const W = b.width * TILE_SIZE;
   const H = b.height * TILE_SIZE;
-  const m = Math.min(W, H) * 0.22;
-  const cx = px + W / 2;
-  const cy = py + H / 2;
-  const rx = W / 2 - m;
-  const ry = H / 2 - m;
-  const N = 72;
-  const pts: { x: number; y: number; lift: number }[] = [];
-  for (let i = 0; i < N; i += 1) {
-    const a = Math.PI / 2 + (2 * Math.PI * i) / N; // start at the bottom (station)
-    // A gently lobed loop so it reads as a winding coaster, not a plain oval.
-    const wobble = 1 + 0.1 * Math.cos(3 * a);
-    pts.push({
-      x: cx + rx * wobble * Math.cos(a),
-      y: cy + ry * wobble * Math.sin(a),
-      lift: (1 - Math.sin(a)) / 2, // 0 at the front, 1 at the back hill
+  const m = Math.min(W, H) * 0.12;
+  const L = px + m;
+  const R = px + W - m;
+  const T = py + m;
+  const B = py + H - m;
+  const cx = (L + R) / 2;
+  // A long, winding circuit instead of a small oval: the bottom is the station
+  // straight (by the entrance); the train climbs the right side, then runs the
+  // length of the park as a row of camel-back hills (a zig-zag between the top
+  // edge and deep into the interior), and drops down the left side back to the
+  // station. Many hills => a track several times longer, the way a real coaster
+  // snakes back and forth. Built as waypoints, then Catmull-Rom-smoothed so the
+  // corners flow like real track.
+  const hills = Math.max(5, Math.round(b.width / 1.8)); // ~one hill per ~1.8 tiles
+  const valley = B - (B - T) * 0.34; // how far the hills dip toward the station band
+  const wp: { x: number; y: number }[] = [];
+  wp.push({ x: cx, y: B }); // 0: station centre (front, by the gate)
+  wp.push({ x: R, y: B }); // bottom-right corner
+  wp.push({ x: R, y: T }); // up the right side to the top
+  // Camel-back hills marching right -> left along the top.
+  const steps = hills * 2;
+  for (let i = 1; i < steps; i += 1) {
+    wp.push({
+      x: R + ((L - R) * i) / steps,
+      y: i % 2 === 0 ? T : valley, // crest at the top edge, dip toward the station
     });
+  }
+  wp.push({ x: L, y: T }); // top-left
+  wp.push({ x: L, y: B }); // down the left side to the bottom
+  // ...then the bottom straight back to the station centre closes the loop.
+
+  // Catmull-Rom sample the closed waypoint loop into smooth, evenly-ish dense pts.
+  const n = wp.length;
+  const PER = 10;
+  const pts: { x: number; y: number; lift: number }[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const p0 = wp[(i - 1 + n) % n];
+    const p1 = wp[i];
+    const p2 = wp[(i + 1) % n];
+    const p3 = wp[(i + 2) % n];
+    for (let j = 0; j < PER; j += 1) {
+      const t = j / PER;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const x =
+        0.5 *
+        (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+      const y =
+        0.5 *
+        (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+      pts.push({ x, y, lift: Math.max(0, Math.min(1, (B - y) / (B - T))) });
+    }
   }
   return pts;
 }
@@ -1411,27 +1447,27 @@ function drawFunfair(graphics: Graphics, building: Building) {
   graphics.stroke({ color: 0xb5613a, width: 3, alpha: 1 });
   trace();
   graphics.stroke({ color: 0xe6a86c, width: 1, alpha: 0.75 });
-  // Support posts with a little shadow, sparser around the loop.
-  for (let i = 0; i < N; i += 6) {
+  // Support posts with a little shadow, spaced out around the long loop.
+  for (let i = 0; i < N; i += 12) {
     const p = pts[i];
-    graphics.rect(p.x - 0.8, p.y + 1, 1.6, 4 + p.lift * 5);
+    graphics.rect(p.x - 0.8, p.y + 1, 1.6, 4 + p.lift * 6);
     graphics.fill({ color: 0x3a2c1d, alpha: 0.7 });
   }
   // Boarding station: a wooden platform at the front, by the entrance gate.
   const board = pts[0];
-  graphics.roundRect(board.x - 9, board.y + 2, 18, 7, 1.5);
+  graphics.roundRect(board.x - 10, board.y + 2, 20, 7, 1.5);
   graphics.fill({ color: 0x8a6a44, alpha: 0.95 });
-  graphics.roundRect(board.x - 9, board.y + 2, 18, 7, 1.5);
+  graphics.roundRect(board.x - 10, board.y + 2, 20, 7, 1.5);
   graphics.stroke({ color: 0x4a3722, width: 1, alpha: 0.9 });
   // A small "board here" gate/turnstile marker on the platform edge.
   graphics.rect(board.x - 1, board.y + 1, 2, 4);
   graphics.fill(0xe8d27a);
   graphics.poly([board.x - 3, board.y - 1, board.x, board.y - 4, board.x + 3, board.y - 1]);
   graphics.fill({ color: 0xe8d27a, alpha: 0.9 });
-  // A parked car (train of two) at the station, colourful so it pops.
-  const carColors = [0xd84f4f, 0x4f7dd8];
-  for (let c = 0; c < 2; c += 1) {
-    const t = pts[(c * 2) % N];
+  // A parked train of cars at the station, colourful so it pops.
+  const carColors = [0xd84f4f, 0x4f7dd8, 0xe0a83c, 0x4fb86a];
+  for (let c = 0; c < carColors.length; c += 1) {
+    const t = pts[(c * 3) % N];
     graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
     graphics.fill(carColors[c]);
     graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
