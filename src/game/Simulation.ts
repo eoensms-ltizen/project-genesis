@@ -243,6 +243,7 @@ type SavedAgent = Omit<
   | "buildTarget"
   | "gatherWood"
   | "funAt"
+  | "rideSlot"
 >;
 
 type SaveData = {
@@ -665,6 +666,99 @@ export class Simulation {
 
   hasAnyFunfair(): boolean {
     return this.buildings.some((b) => b.kind === "funfair");
+  }
+
+  // --- The coaster track + train (shared by the renderer and riding residents) ---
+
+  // The winding loop, as normalised waypoints across the map (see also the flat
+  // rail rendering in PixiRenderer, which draws the same points).
+  private static readonly COASTER_WAYPOINTS: { x: number; y: number }[] = [
+    { x: 0.5, y: 0.86 },
+    { x: 0.76, y: 0.85 },
+    { x: 0.89, y: 0.71 },
+    { x: 0.9, y: 0.5 },
+    { x: 0.78, y: 0.4 },
+    { x: 0.62, y: 0.49 },
+    { x: 0.66, y: 0.64 },
+    { x: 0.54, y: 0.7 },
+    { x: 0.45, y: 0.6 },
+    { x: 0.5, y: 0.45 },
+    { x: 0.62, y: 0.33 },
+    { x: 0.76, y: 0.22 },
+    { x: 0.6, y: 0.13 },
+    { x: 0.4, y: 0.15 },
+    { x: 0.23, y: 0.24 },
+    { x: 0.12, y: 0.46 },
+    { x: 0.17, y: 0.69 },
+    { x: 0.31, y: 0.82 },
+  ];
+  private static readonly COASTER_LOOP_SECONDS = 26; // one full circuit
+  private static readonly COASTER_CARS = 6; // cars in the train (= rider capacity)
+  private static readonly COASTER_GAP = 0.014; // spacing between cars, as a loop fraction
+  private coasterTilesCache: { key: string; pts: Vec2[] } | null = null;
+
+  /** The coaster centreline as a dense, smooth loop of TILE coordinates. */
+  coasterTrackTiles(): Vec2[] {
+    const key = `${this.world.width}x${this.world.height}`;
+    if (this.coasterTilesCache && this.coasterTilesCache.key === key) {
+      return this.coasterTilesCache.pts;
+    }
+    const wp = Simulation.COASTER_WAYPOINTS.map((p) => ({
+      x: p.x * this.world.width,
+      y: p.y * this.world.height,
+    }));
+    const n = wp.length;
+    const PER = 10;
+    const pts: Vec2[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const p0 = wp[(i - 1 + n) % n];
+      const p1 = wp[i];
+      const p2 = wp[(i + 1) % n];
+      const p3 = wp[(i + 2) % n];
+      for (let j = 0; j < PER; j += 1) {
+        const t = j / PER;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const cr = (a: number, b: number, c: number, d: number) =>
+          0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        pts.push({ x: cr(p0.x, p1.x, p2.x, p3.x), y: cr(p0.y, p1.y, p2.y, p3.y) });
+      }
+    }
+    this.coasterTilesCache = { key, pts };
+    return pts;
+  }
+
+  /** Sample the track at a loop fraction (0..1), interpolating between points. */
+  private coasterAt(frac: number): Vec2 {
+    const pts = this.coasterTrackTiles();
+    const N = pts.length;
+    const f = (((frac % 1) + 1) % 1) * N;
+    const i0 = Math.floor(f) % N;
+    const i1 = (i0 + 1) % N;
+    const tt = f - Math.floor(f);
+    const a = pts[i0];
+    const b = pts[i1];
+    return { x: a.x + (b.x - a.x) * tt, y: a.y + (b.y - a.y) * tt };
+  }
+
+  /** Current loop fraction of the train's lead car (advances with sim time). */
+  private coasterPhase(): number {
+    return this.elapsedSeconds / Simulation.COASTER_LOOP_SECONDS;
+  }
+
+  /** How many riders the train holds (one per car). */
+  coasterCapacity(): number {
+    return Simulation.COASTER_CARS;
+  }
+
+  /** Tile position of car `slot` (0 = lead) right now. */
+  coasterCarTile(slot: number): Vec2 {
+    return this.coasterAt(this.coasterPhase() - slot * Simulation.COASTER_GAP);
+  }
+
+  /** Tile positions of every car right now (for the renderer). */
+  coasterCarTiles(): Vec2[] {
+    return Array.from({ length: Simulation.COASTER_CARS }, (_, c) => this.coasterCarTile(c));
   }
 
   /**

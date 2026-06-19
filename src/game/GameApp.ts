@@ -178,7 +178,8 @@ export class GameApp {
       this.simulation.items,
       this.simulation.grainStock,
       this.simulation.meatStock,
-      this.simulation.elapsedTime,
+      this.simulation.hasAnyFunfair() ? this.simulation.coasterTrackTiles() : [],
+      this.simulation.hasAnyFunfair() ? this.simulation.coasterCarTiles() : [],
     );
   }
 }

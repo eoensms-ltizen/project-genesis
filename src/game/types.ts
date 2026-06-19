@@ -359,6 +359,9 @@ export type Agent = {
   // Sim-time (seconds) this resident last rode the amusement park. Recent riders
   // shrug off low-mood breaks for a while (mental protection). Transient.
   funAt?: number;
+  // Which coaster car this resident is riding (0 = lead). Set while in the Ride
+  // state; their position tracks that car around the loop. Transient.
+  rideSlot?: number;
 };
 
 export type GameLogEntry = {

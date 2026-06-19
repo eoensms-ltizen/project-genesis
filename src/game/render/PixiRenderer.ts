@@ -326,7 +326,8 @@ export class PixiRenderer {
     items: ItemStack[] = [],
     grainStock = 0,
     meatStock = 0,
-    time = 0,
+    coasterTrack: Vec2[] = [],
+    coasterCars: Vec2[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -420,12 +421,12 @@ export class PixiRenderer {
     }
 
     this.agentGraphics.clear();
-    // The flat coaster railway + its train, drawn first (on the ground, under the
-    // residents) once a fairground station exists — same flat style as the train.
-    if (buildings.some((b) => b.kind === "funfair" && b.stage === "built")) {
-      const track = coasterTrack(world);
-      drawCoasterRails(this.agentGraphics, track);
-      drawCoasterTrain(this.agentGraphics, track, time);
+    // The flat coaster railway + its cars, drawn first (on the ground, under the
+    // residents — riders sit on top) once a fairground station exists. Track and
+    // car positions come from the simulation so riding residents line up exactly.
+    if (coasterTrack.length > 0 && buildings.some((b) => b.kind === "funfair" && b.stage === "built")) {
+      drawCoasterRails(this.agentGraphics, coasterTrack);
+      drawCoasterCars(this.agentGraphics, coasterCars);
     }
     for (const animal of animals) {
       drawAnimal(this.agentGraphics, animal);
@@ -1351,92 +1352,43 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
   }
 }
 
-// A long winding rail track that loops across the map, drawn FLAT and top-down
-// like the game's railway (two rails + crossties) — no fake perspective, no
-// loop-the-loops (they read as unnatural from above). A train of cars runs it,
-// in the same flat style as the village train. Fixed normalised waypoints,
-// scaled to the map and Catmull-Rom-smoothed into a flowing curve.
-const COASTER_WAYPOINTS: { x: number; y: number }[] = [
-  { x: 0.5, y: 0.86 }, // station (front)
-  { x: 0.76, y: 0.85 },
-  { x: 0.89, y: 0.71 },
-  { x: 0.9, y: 0.5 },
-  { x: 0.78, y: 0.4 },
-  { x: 0.62, y: 0.49 },
-  { x: 0.66, y: 0.64 }, // inner curl
-  { x: 0.54, y: 0.7 },
-  { x: 0.45, y: 0.6 },
-  { x: 0.5, y: 0.45 },
-  { x: 0.62, y: 0.33 },
-  { x: 0.76, y: 0.22 },
-  { x: 0.6, y: 0.13 },
-  { x: 0.4, y: 0.15 },
-  { x: 0.23, y: 0.24 },
-  { x: 0.12, y: 0.46 },
-  { x: 0.17, y: 0.69 },
-  { x: 0.31, y: 0.82 },
-];
-
-type CoasterPoint = { x: number; y: number };
-let coasterCache: { key: string; pts: CoasterPoint[] } | null = null;
-
-/** The map-wide coaster centreline (flat ground px), Catmull-Rom-smoothed. */
-function coasterTrack(world: WorldMap): CoasterPoint[] {
-  const key = `${world.width}x${world.height}`;
-  if (coasterCache && coasterCache.key === key) {
-    return coasterCache.pts;
-  }
-  const W = world.width * TILE_SIZE;
-  const H = world.height * TILE_SIZE;
-  const wp = COASTER_WAYPOINTS.map((p) => ({ x: p.x * W, y: p.y * H }));
-  const n = wp.length;
-  const PER = 10;
-  const pts: CoasterPoint[] = [];
-  for (let i = 0; i < n; i += 1) {
-    const p0 = wp[(i - 1 + n) % n];
-    const p1 = wp[i];
-    const p2 = wp[(i + 1) % n];
-    const p3 = wp[(i + 2) % n];
-    for (let j = 0; j < PER; j += 1) {
-      const t = j / PER;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const cr = (a: number, b: number, c: number, d: number) =>
-        0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-      pts.push({ x: cr(p0.x, p1.x, p2.x, p3.x), y: cr(p0.y, p1.y, p2.y, p3.y) });
-    }
-  }
-  coasterCache = { key, pts };
-  return pts;
-}
+// The coaster railway + train are drawn FLAT and top-down, in the village train's
+// style — no fake perspective, no loops. The centreline and the car positions
+// come from the simulation in TILE coords (so riding residents line up exactly
+// with the cars); here we just scale to pixels and draw.
 
 /** Unit normal (perpendicular) to the track at point i, for rail offset / ties. */
-function coasterNormal(pts: CoasterPoint[], i: number): { x: number; y: number } {
-  const N = pts.length;
-  const a = pts[(i - 1 + N) % N];
-  const b = pts[(i + 1) % N];
+function coasterNormal(track: Vec2[], i: number): { x: number; y: number } {
+  const N = track.length;
+  const a = track[(i - 1 + N) % N];
+  const b = track[(i + 1) % N];
   const tx = b.x - a.x;
   const ty = b.y - a.y;
   const l = Math.hypot(tx, ty) || 1;
   return { x: -ty / l, y: tx / l };
 }
 
-/** Draw the flat railway: a sleeper bed, crossties, and two steel rails. */
-function drawCoasterRails(graphics: Graphics, pts: CoasterPoint[]) {
-  const N = pts.length;
+/** Draw the flat railway from the tile-coord centreline: sleeper bed, ties, rails. */
+function drawCoasterRails(graphics: Graphics, track: Vec2[]) {
+  const N = track.length;
+  if (N < 2) {
+    return;
+  }
+  const sx = (p: Vec2) => p.x * TILE_SIZE + TILE_SIZE / 2;
+  const sy = (p: Vec2) => p.y * TILE_SIZE + TILE_SIZE / 2;
   // Sleeper bed (a dark band under the rails).
   for (let i = 0; i <= N; i += 1) {
-    const p = pts[i % N];
-    if (i === 0) graphics.moveTo(p.x, p.y);
-    else graphics.lineTo(p.x, p.y);
+    const p = track[i % N];
+    if (i === 0) graphics.moveTo(sx(p), sy(p));
+    else graphics.lineTo(sx(p), sy(p));
   }
   graphics.stroke({ color: 0x5a4631, width: 6, alpha: 0.95 });
   // Crossties.
   for (let i = 0; i < N; i += 2) {
-    const p = pts[i];
-    const nrm = coasterNormal(pts, i);
-    graphics.moveTo(p.x - nrm.x * 3.4, p.y - nrm.y * 3.4);
-    graphics.lineTo(p.x + nrm.x * 3.4, p.y + nrm.y * 3.4);
+    const p = track[i];
+    const nrm = coasterNormal(track, i);
+    graphics.moveTo(sx(p) - nrm.x * 3.4, sy(p) - nrm.y * 3.4);
+    graphics.lineTo(sx(p) + nrm.x * 3.4, sy(p) + nrm.y * 3.4);
     graphics.stroke({ color: 0x3a2c1d, width: 1.6, alpha: 0.95 });
   }
   // Two steel rails, offset either side of the centreline.
@@ -1444,10 +1396,10 @@ function drawCoasterRails(graphics: Graphics, pts: CoasterPoint[]) {
   for (const side of [-1, 1]) {
     for (let i = 0; i <= N; i += 1) {
       const idx = i % N;
-      const p = pts[idx];
-      const nrm = coasterNormal(pts, idx);
-      const x = p.x + nrm.x * GAUGE * side;
-      const y = p.y + nrm.y * GAUGE * side;
+      const p = track[idx];
+      const nrm = coasterNormal(track, idx);
+      const x = sx(p) + nrm.x * GAUGE * side;
+      const y = sy(p) + nrm.y * GAUGE * side;
       if (i === 0) graphics.moveTo(x, y);
       else graphics.lineTo(x, y);
     }
@@ -1456,47 +1408,16 @@ function drawCoasterRails(graphics: Graphics, pts: CoasterPoint[]) {
 }
 
 const COASTER_CAR_COLORS = [0xff4d4d, 0x4f8de0, 0xf2c33a, 0x57c46a, 0xb066d8, 0xff944d];
-const COASTER_LOOP_SECONDS = 22; // time for the train to make one full circuit
 
-/** Draw the moving train: a string of cars riding the flat track, oriented along it. */
-function drawCoasterTrain(graphics: Graphics, pts: CoasterPoint[], time: number) {
-  const N = pts.length;
-  if (N < 2) {
-    return;
-  }
-  const at = (f: number) => {
-    const i0 = ((Math.floor(f) % N) + N) % N;
-    const i1 = (i0 + 1) % N;
-    const tt = f - Math.floor(f);
-    const a = pts[i0];
-    const b = pts[i1];
-    return { x: a.x + (b.x - a.x) * tt, y: a.y + (b.y - a.y) * tt, tx: b.x - a.x, ty: b.y - a.y };
-  };
-  const head = ((time / COASTER_LOOP_SECONDS) * N) % N;
-  const CARS = 7;
-  const GAP = 1.8;
-  for (let c = 0; c < CARS; c += 1) {
-    const p = at(((head - c * GAP) % N + N) % N);
-    const l = Math.hypot(p.tx, p.ty) || 1;
-    const ux = p.tx / l;
-    const uy = p.ty / l;
-    const nx = -uy;
-    const ny = ux;
-    const HL = 3.2; // half length (along the track)
-    const HW = 2.1; // half width
-    const quad = [
-      p.x + ux * HL + nx * HW,
-      p.y + uy * HL + ny * HW,
-      p.x + ux * HL - nx * HW,
-      p.y + uy * HL - ny * HW,
-      p.x - ux * HL - nx * HW,
-      p.y - uy * HL - ny * HW,
-      p.x - ux * HL + nx * HW,
-      p.y - uy * HL + ny * HW,
-    ];
-    graphics.poly(quad);
+/** Draw the train cars at their current tile positions — riders sit on top of them. */
+function drawCoasterCars(graphics: Graphics, cars: Vec2[]) {
+  for (let c = 0; c < cars.length; c += 1) {
+    const cx = cars[c].x * TILE_SIZE + TILE_SIZE / 2;
+    const cy = cars[c].y * TILE_SIZE + TILE_SIZE / 2;
+    const w = 7.5;
+    graphics.roundRect(cx - w / 2, cy - w / 2, w, w, 1.8);
     graphics.fill(c === 0 ? 0x2c3138 : COASTER_CAR_COLORS[(c - 1) % COASTER_CAR_COLORS.length]);
-    graphics.poly(quad);
+    graphics.roundRect(cx - w / 2, cy - w / 2, w, w, 1.8);
     graphics.stroke({ color: 0x20160c, width: 0.7, alpha: 0.9 });
   }
 }

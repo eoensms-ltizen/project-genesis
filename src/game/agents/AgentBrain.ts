@@ -159,7 +159,7 @@ const PRAY_DURATION_SECONDS = 8;
 const RELAX_DURATION_SECONDS = 6;
 // A ride on the coaster: a long, joyful break that tops up leisure and lifts the
 // spirits, and shields the rider from low-mood breaks for a while afterwards.
-const RIDE_DURATION_SECONDS = 7;
+const RIDE_DURATION_SECONDS = 26; // ~one full circuit (matches the coaster loop time)
 const RIDE_LEISURE_FILL = 70;
 const RIDE_MOOD_BOOST = 22;
 const FUN_PROTECT_SECONDS = 240; // recent riders resist despondent breaks this long
@@ -761,18 +761,66 @@ export class AgentBrain {
     return true;
   }
 
-  /** Ride the roller coaster: a big lift in leisure and spirits (mental boost). */
+  /** A coaster car not currently taken by another rider, nearest the station so
+   *  boarding looks like hopping onto a passing car. */
+  private freeRideSlot(simulation: Simulation): number | undefined {
+    const taken = new Set(
+      simulation.agents
+        .filter((a) => a.state === "Ride" && a.rideSlot !== undefined)
+        .map((a) => a.rideSlot),
+    );
+    const funfair = simulation.getFunfair();
+    const station = funfair ? simulation.funfairBoardingTile(funfair) : { x: 0, y: 0 };
+    let best: number | undefined;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (let slot = 0; slot < simulation.coasterCapacity(); slot += 1) {
+      if (taken.has(slot)) {
+        continue;
+      }
+      const car = simulation.coasterCarTile(slot);
+      const d = (car.x - station.x) ** 2 + (car.y - station.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = slot;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Ride the roller coaster: the resident boards a car and is carried around the
+   * whole loop (their position tracks the car), then steps off at the station with
+   * a big lift in leisure and spirits (and mental protection for a while).
+   */
   private ride(agent: Agent, simulation: Simulation, deltaSeconds: number) {
-    if (agent.actionTimer === 0) {
+    if (agent.rideSlot === undefined) {
+      const slot = this.freeRideSlot(simulation);
+      if (slot === undefined) {
+        // Every car is full — give up boarding this time and rethink.
+        this.setState(agent, simulation, "Idle");
+        return;
+      }
+      agent.rideSlot = slot;
+      agent.actionTimer = 0;
+      agent.path = undefined;
+      agent.target = undefined;
       simulation.log(tr(`${agent.name} is riding the roller coaster! 🎢`, `${agent.name}이(가) 롤러코스터를 탄다! 🎢`));
     }
+    // Sit on the moving car: the resident is carried along the track.
+    agent.position = simulation.coasterCarTile(agent.rideSlot);
     agent.actionTimer += deltaSeconds;
     if (agent.actionTimer < RIDE_DURATION_SECONDS) {
       return;
     }
+    // Step off at the station, exhilarated.
     agent.needs.leisure = clampNeed(agent.needs.leisure + RIDE_LEISURE_FILL);
     agent.mood = Math.min(100, (agent.mood ?? 60) + RIDE_MOOD_BOOST);
     agent.funAt = simulation.elapsedTime; // recent riders resist low-mood breaks
+    const funfair = simulation.getFunfair();
+    if (funfair) {
+      agent.position = { ...simulation.funfairBoardingTile(funfair) };
+    }
+    agent.rideSlot = undefined;
     agent.target = undefined;
     agent.path = undefined;
     this.setState(agent, simulation, "Idle");
