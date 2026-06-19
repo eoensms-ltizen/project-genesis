@@ -1408,10 +1408,13 @@ function coasterTrack(world: WorldMap): CoasterPoint[] {
       });
     }
   }
-  // Signature features: vertical loop-the-loops, spliced in along straight-ish
-  // stretches (highest index first so earlier indices stay valid).
-  insertVerticalLoop(pts, Math.floor(pts.length * 0.62), 18);
-  insertVerticalLoop(pts, Math.floor(pts.length * 0.08), 16);
+  // Signature features, spliced in highest-index-first so earlier indices stay
+  // valid: a helix (spiral tower) and several big vertical loops.
+  insertHelix(pts, Math.floor(pts.length * 0.8), 3, 24, 1.5);
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.62), 24);
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.42), 22);
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.22), 24);
+  insertVerticalLoop(pts, Math.floor(pts.length * 0.08), 22);
   coasterCache = { key, pts };
   return pts;
 }
@@ -1419,33 +1422,51 @@ function coasterTrack(world: WorldMap): CoasterPoint[] {
 type CoasterPoint = { x: number; y: number; elev: number; noPillar?: boolean };
 
 /**
- * Splice a vertical loop-the-loop into the track at `atIndex`: a circle standing
- * in the plane of the track's local direction, so it reads as a real coaster
- * loop in the 2.5D view. It returns to the entry point, so the track flows on.
+ * Splice a vertical loop-the-loop into the track at `atIndex`. Drawn as a circle
+ * in the screen-x / height plane (camera-facing), so it's always cleanly round
+ * (radius R) regardless of which way the track runs there, and returns to the
+ * entry point so the track flows on.
  */
 function insertVerticalLoop(pts: CoasterPoint[], atIndex: number, R: number) {
-  const m = pts.length;
   const a = pts[atIndex];
-  const b = pts[(atIndex + 1) % m];
-  let dx = b.x - a.x;
-  let dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  dx /= len;
-  dy /= len;
   const loop: CoasterPoint[] = [];
-  const STEPS = 28;
+  const STEPS = 30;
   for (let k = 1; k < STEPS; k += 1) {
     const th = (k / STEPS) * Math.PI * 2;
-    const along = R * Math.sin(th);
     loop.push({
-      x: a.x + dx * along,
-      y: a.y + dy * along,
-      // Rise as a circle in screen space: peak 2R at the top of the loop.
-      elev: a.elev + (R * (dy * Math.sin(th) + (1 - Math.cos(th)))) / COASTER_LIFT_PX,
+      x: a.x + R * Math.sin(th),
+      y: a.y,
+      elev: a.elev + (R * (1 - Math.cos(th))) / COASTER_LIFT_PX, // peak 2R at the top
       noPillar: true,
     });
   }
   pts.splice(atIndex + 1, 0, ...loop);
+}
+
+/**
+ * Splice a helix (spiral tower) into the track at `atIndex`: the track winds
+ * `turns` times around a centre (radius R) while it climbs to a peak and back,
+ * so the stacked loops read as a corkscrew tower in the 2.5D view. Returns to the
+ * entry point and entry height, so the loop stays closed.
+ */
+function insertHelix(pts: CoasterPoint[], atIndex: number, turns: number, R: number, peak: number) {
+  const a = pts[atIndex];
+  const cx = a.x - R; // so theta=0 starts at the entry point
+  const cy = a.y;
+  const helix: CoasterPoint[] = [];
+  const PER_TURN = 20;
+  const total = turns * PER_TURN;
+  for (let k = 1; k < total; k += 1) {
+    const th = (k / PER_TURN) * Math.PI * 2;
+    const frac = k / total;
+    helix.push({
+      x: cx + R * Math.cos(th),
+      y: cy + R * Math.sin(th),
+      elev: a.elev + peak * Math.sin(frac * Math.PI), // up to the peak, then back down
+      noPillar: true,
+    });
+  }
+  pts.splice(atIndex + 1, 0, ...helix);
 }
 
 const COASTER_LIFT_PX = 34; // screen-px an elev-1 stretch rises above its footprint
