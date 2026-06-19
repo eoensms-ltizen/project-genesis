@@ -115,6 +115,8 @@ export default function App() {
   const [era, setEra] = useState(0);
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
+  const [grainStock, setGrainStock] = useState(0);
+  const [meatStock, setMeatStock] = useState(0);
   const [litter, setLitter] = useState(0);
   const [unrest, setUnrest] = useState(0);
   const [steel, setSteel] = useState(0);
@@ -154,6 +156,8 @@ export default function App() {
         setEra(snapshot.era);
         setSupportedPop(snapshot.supportedPopulation);
         setFoodStock(snapshot.foodStock);
+        setGrainStock(snapshot.grainStock);
+        setMeatStock(snapshot.meatStock);
         setMeals(snapshot.meals);
         setLitter(snapshot.litter);
         setUnrest(snapshot.unrest);
@@ -284,8 +288,8 @@ export default function App() {
                   {clock.isNight ? "🌙" : "☀️"}
                 </span>
                 <span className="hud-stats">
-                  {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{foodStock} · 🍲
-                  {meals}
+                  {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{grainStock} · 🥩
+                  {meatStock} · 🍲{meals}
                   {woodStock > 0 ? ` · 🪵${woodStock}` : ""}
                   {stoneStock > 0 ? ` · 🪨${stoneStock}` : ""}
                   {oreStock > 0 ? ` · ⛏️${oreStock}` : ""}

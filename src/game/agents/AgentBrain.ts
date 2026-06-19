@@ -1018,12 +1018,20 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "none" {
-    let kind: "warehouse" | "kitchen" | "cemetery" | "pasture" | undefined;
+    let kind: "warehouse" | "granary" | "kitchen" | "cemetery" | "pasture" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (simulation.needsCemetery()) {
       // The dead must be laid to rest — built far from where people live.
       kind = "cemetery";
+    } else if (
+      // Food needs a proper home: once there's a harvest to keep, raise a granary
+      // to store grain and meat (separate from the material warehouse).
+      !simulation.hasAnyGranary() &&
+      simulation.getWarehouse() &&
+      simulation.foodStock >= 6
+    ) {
+      kind = "granary";
     } else if (
       !simulation.hasAnyKitchen() &&
       simulation.getWarehouse() &&
@@ -2078,6 +2086,7 @@ export class AgentBrain {
       // than raising a big box up front. A 4×4 warehouse begins with a 2×2
       // stockpile; a 4×4 kitchen has room for the stove, then grows for diners.
       warehouse: [4, 4],
+      granary: [4, 4],
       kitchen: [4, 4],
       church: [3, 3],
       powerplant: [3, 3],
@@ -2171,20 +2180,20 @@ export class AgentBrain {
     ) {
       return false;
     }
-    // Ingredients live in the warehouse pantry; without one there's nowhere to
-    // fetch them from.
-    const warehouse = simulation.getWarehouse();
-    if (!warehouse) {
+    // Ingredients live in the granary (or the warehouse before one is built);
+    // without a pantry there's nowhere to fetch them from.
+    const pantry = simulation.foodPantry();
+    if (!pantry) {
       return false;
     }
-    const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+    const path = findPath(simulation.world, { start: agent.position, goal: pantry.door });
     if (!path) {
       return false;
     }
     // Hold the stove for the whole trip so no one else starts cooking on it.
     simulation.claimStove(stove, agent.id);
     agent.cookStove = { ...stove };
-    agent.target = { ...warehouse.door };
+    agent.target = { ...pantry.door };
     agent.path = path;
     this.setState(agent, simulation, "MoveToPantry");
     return true;
@@ -2602,12 +2611,12 @@ export class AgentBrain {
       }
     }
 
-    const warehouse = simulation.getWarehouse();
-    if (warehouse && simulation.foodStock > 0) {
-      const path = findPath(simulation.world, { start: agent.position, goal: warehouse.door });
+    const pantry = simulation.foodPantry();
+    if (pantry && simulation.foodStock > 0) {
+      const path = findPath(simulation.world, { start: agent.position, goal: pantry.door });
       if (path) {
         agent.eatPlan = "warehouse";
-        agent.target = { ...warehouse.door };
+        agent.target = { ...pantry.door };
         agent.path = path;
         this.setState(agent, simulation, "MoveToFood");
         return;
@@ -3680,6 +3689,7 @@ function buildingNameKo(kind: BuildingKind): string {
     house: "집",
     bedroom: "침실",
     warehouse: "창고",
+    granary: "식량창고",
     kitchen: "부엌",
     church: "교회",
     pasture: "목초지",
@@ -3714,6 +3724,7 @@ const BUILDING_WOOD_COST: Record<BuildingKind, number> = {
   // fallback; their real cost is the foundation plus each wall/door tile.
   bedroom: FOUNDATION_WOOD,
   warehouse: WAREHOUSE_WOOD_COST,
+  granary: WAREHOUSE_WOOD_COST,
   kitchen: KITCHEN_WOOD_COST,
   church: CHURCH_WOOD_COST,
   pasture: PASTURE_WOOD_COST,

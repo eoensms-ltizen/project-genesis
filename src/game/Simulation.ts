@@ -1899,6 +1899,8 @@ export class Simulation {
       clock: this.getClock(),
       era: this.era,
       foodStock: this.foodStock,
+      grainStock: this.grainStock,
+      meatStock: this.meatStock,
       meals: this.meals,
       buildings: this.buildings.map((building) => ({
         ...building,
@@ -2677,6 +2679,45 @@ export class Simulation {
 
   hasAnyWarehouse(): boolean {
     return this.buildings.some((building) => building.kind === "warehouse");
+  }
+
+  getGranary(): Building | undefined {
+    return this.buildings.find(
+      (building) => building.kind === "granary" && building.stage === "built",
+    );
+  }
+
+  hasAnyGranary(): boolean {
+    return this.buildings.some((building) => building.kind === "granary");
+  }
+
+  /**
+   * Where food is fetched and eaten: the granary once one is built, otherwise
+   * the general warehouse (the larder lives there until a granary exists).
+   */
+  foodPantry(): Building | undefined {
+    return this.getGranary() ?? this.getWarehouse();
+  }
+
+  /** Which shelf a food belongs on: grain (crops/berries) vs meat (game/fish). */
+  static foodGroup(kind: FoodKind): "grain" | "meat" {
+    return kind === "berry" || kind === "wheat" || kind === "rice" ? "grain" : "meat";
+  }
+
+  /** Total grain (crops + berries) in the larder. */
+  get grainStock(): number {
+    return this.foods.reduce(
+      (sum, b) => sum + (Simulation.foodGroup(b.kind) === "grain" ? b.amount : 0),
+      0,
+    );
+  }
+
+  /** Total meat (game, herd, fish) in the larder. */
+  get meatStock(): number {
+    return this.foods.reduce(
+      (sum, b) => sum + (Simulation.foodGroup(b.kind) === "meat" ? b.amount : 0),
+      0,
+    );
   }
 
   // --- Physical goods: loose ground piles and warehouse stock ---------------

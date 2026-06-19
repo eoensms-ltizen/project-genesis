@@ -134,6 +134,10 @@ export type BuildingKind =
   // only sleeps here, so it never counts toward housing capacity/occupancy.
   | "bedroom"
   | "warehouse"
+  // A granary: the food store. Keeps grain (crops/berries) and meat (the hunt,
+  // the herd, the river) — the larder's visible home, separate from the
+  // material warehouse.
+  | "granary"
   | "kitchen"
   | "church"
   | "pasture"
@@ -155,6 +159,7 @@ export const ROOM_BUILDING_KINDS: ReadonlySet<BuildingKind> = new Set([
   "house",
   "bedroom",
   "warehouse",
+  "granary",
   "kitchen",
   "church",
   "powerplant",
@@ -365,6 +370,9 @@ export type SimulationSnapshot = {
   clock: GameClock;
   era: number;
   foodStock: number;
+  // The larder split by shelf: grain (crops/berries) and meat (game/herd/fish).
+  grainStock: number;
+  meatStock: number;
   meals: number;
   buildings: Building[];
   animals: Animal[];

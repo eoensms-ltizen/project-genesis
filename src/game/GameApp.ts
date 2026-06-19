@@ -162,6 +162,8 @@ export class GameApp {
       this.simulation.getPoweredBuildingIds(),
       this.simulation.litter,
       this.simulation.items,
+      this.simulation.grainStock,
+      this.simulation.meatStock,
     );
   }
 }

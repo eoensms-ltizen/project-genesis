@@ -123,6 +123,7 @@ const KIND_NAMES: Record<Building["kind"], () => string> = {
   house: () => tr("house", "집"),
   bedroom: () => tr("bedroom", "침실"),
   warehouse: () => tr("warehouse", "창고"),
+  granary: () => tr("granary", "식량창고"),
   kitchen: () => tr("kitchen", "부엌"),
   church: () => tr("church", "교회"),
   pasture: () => tr("pasture", "목초지"),

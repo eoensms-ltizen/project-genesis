@@ -324,6 +324,8 @@ export class PixiRenderer {
     poweredBuildingIds: string[] = [],
     litter: Vec2[] = [],
     items: ItemStack[] = [],
+    grainStock = 0,
+    meatStock = 0,
   ) {
     if (!this.initialized) {
       return;
@@ -454,6 +456,15 @@ export class PixiRenderer {
         this.overlayGraphics.rect(sx + 3, ly, 10, 2);
         this.overlayGraphics.stroke({ width: 0.6, color: 0x1c130a, alpha: 0.9 });
       }
+    }
+
+    // The granary's larder, shown as stores on its floor: grain sacks (tan) and
+    // meat (red haunches), more of each the fuller the shelf.
+    for (const building of buildings) {
+      if (building.kind !== "granary" || building.stage !== "built") {
+        continue;
+      }
+      drawGranaryFood(this.overlayGraphics, world, building, grainStock, meatStock);
     }
 
     // Doors swing open while a resident is passing through them.
@@ -978,6 +989,75 @@ function drawFence(graphics: Graphics, world: WorldMap, x: number, y: number, is
   graphics.fill({ color: POST_HI, alpha: 0.95 });
 }
 
+/** Draw the granary's stores: grain sacks and meat laid out on its floor. */
+function drawGranaryFood(
+  graphics: Graphics,
+  world: WorldMap,
+  building: Building,
+  grain: number,
+  meat: number,
+) {
+  const interior: Vec2[] = [];
+  for (let fy = 1; fy < building.height - 1; fy += 1) {
+    for (let fx = 1; fx < building.width - 1; fx += 1) {
+      const x = building.x + fx;
+      const y = building.y + fy;
+      if (world.getTile({ x, y })?.type === "Floor") {
+        interior.push({ x, y });
+      }
+    }
+  }
+  if (interior.length === 0) {
+    return;
+  }
+  interior.sort((a, b) => a.y - b.y || a.x - b.x);
+  const PER_TILE = 12; // one full sack/haunch ≈ this many units
+  let grainTiles = grain > 0 ? Math.max(1, Math.ceil(grain / PER_TILE)) : 0;
+  let meatTiles = meat > 0 ? Math.max(1, Math.ceil(meat / PER_TILE)) : 0;
+  if (grainTiles + meatTiles > interior.length) {
+    const total = grainTiles + meatTiles;
+    grainTiles = Math.round((interior.length * grainTiles) / total);
+    meatTiles = interior.length - grainTiles;
+  }
+  let idx = 0;
+  for (let i = 0; i < grainTiles && idx < interior.length; i += 1, idx += 1) {
+    drawGrainSack(graphics, interior[idx]);
+  }
+  for (let i = 0; i < meatTiles && idx < interior.length; i += 1, idx += 1) {
+    drawMeatStore(graphics, interior[idx]);
+  }
+}
+
+function drawGrainSack(graphics: Graphics, tile: Vec2) {
+  const px = tile.x * TILE_SIZE;
+  const py = tile.y * TILE_SIZE;
+  graphics.roundRect(px + 3.5, py + 5, 9, 8.5, 2);
+  graphics.fill({ color: 0xcaa15c });
+  graphics.roundRect(px + 3.5, py + 5, 9, 8.5, 2);
+  graphics.stroke({ width: 0.6, color: 0x6b4f23, alpha: 0.9 });
+  // cinched neck + tie
+  graphics.rect(px + 6, py + 3.6, 4, 2.4);
+  graphics.fill({ color: 0xb08a4c });
+  // a lit seam down the front
+  graphics.rect(px + 5, py + 8, 6, 1);
+  graphics.fill({ color: 0xe6c884, alpha: 0.7 });
+}
+
+function drawMeatStore(graphics: Graphics, tile: Vec2) {
+  const px = tile.x * TILE_SIZE;
+  const py = tile.y * TILE_SIZE;
+  graphics.ellipse(px + 8, py + 9, 5, 4);
+  graphics.fill({ color: 0xb05242 });
+  graphics.ellipse(px + 8, py + 9, 5, 4);
+  graphics.stroke({ width: 0.6, color: 0x5e231c, alpha: 0.9 });
+  // protruding bone
+  graphics.roundRect(px + 10.5, py + 8, 3.6, 1.8, 0.9);
+  graphics.fill({ color: 0xe8ddc8 });
+  // a streak of fat catching the light
+  graphics.ellipse(px + 6.6, py + 8, 1.7, 1);
+  graphics.fill({ color: 0xd98b78, alpha: 0.85 });
+}
+
 function resourcePileColors(resource: ResourceKind): [number, number] {
   switch (resource) {
     case "stone":
@@ -1215,6 +1295,7 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
     building.kind === "house" ||
     building.kind === "bedroom" || // a bedroom shows its bed inside, like a house
     building.kind === "warehouse" ||
+    building.kind === "granary" || // shows its grain/meat stores inside
     building.kind === "kitchen"
   ) {
     return;
@@ -1432,6 +1513,9 @@ function buildingPalette(kind: Building["kind"], level: number): { roof: number;
       return level >= 3 ? { roof: 0x4f5058, wall: 0x6f6552 } : { roof: 0x9c4a38, wall: 0x8a6a44 };
     case "warehouse":
       return { roof: 0x5d4f3a, wall: 0x7d6a4f };
+    case "granary":
+      // A warm barn: straw-gold roof over timber walls.
+      return { roof: 0xb98a3e, wall: 0x8a6a44 };
     case "kitchen":
       return { roof: 0x6f7a3e, wall: 0x8a6a44 };
     case "church":
