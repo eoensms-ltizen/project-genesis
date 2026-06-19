@@ -781,9 +781,9 @@ export class Simulation {
   /**
    * A plot for a 1×2/2×1 bed inside a home: two adjacent free floor tiles (head +
    * foot) with a third free tile beside them to build from (so the builder stands
-   * next to the bed, not on it). Falls back to a single tile (head only) when the
-   * room is too small for a full bed — e.g. a one-tile private annex. Tiles are
-   * ranked toward the room's centre. Returns nothing if no buildable spot exists.
+   * next to the bed, not on it). A bed is always a full two tiles — if one won't
+   * fit, nothing is returned (no cramped one-tile cots). Tiles are ranked toward
+   * the room's edges, leaving the centre as an aisle.
    */
   reserveBedPlot(
     building: Building,
@@ -888,19 +888,10 @@ export class Simulation {
         }
       }
     }
-    // Fallback: a single-tile bed where two won't fit (tiny rooms / annexes).
-    for (const head of interior) {
-      const reach = reachableWith([head]);
-      if (!reach) {
-        continue;
-      }
-      const stand = DIRS.map((s) => ({ x: head.x + s.x, y: head.y + s.y })).find(
-        (s) => reach.has(key(s)),
-      );
-      if (stand) {
-        return { head, stand };
-      }
-    }
+    // No single-tile fallback: a bed is always a full 1×2/2×1 piece. If a real
+    // bed won't fit, none is built (the sleeper rests on the floor) — that's the
+    // pressure that drives a roomier home or a private bedroom, rather than an
+    // ugly one-tile cot.
     return undefined;
   }
 
@@ -2697,6 +2688,26 @@ export class Simulation {
    */
   foodPantry(): Building | undefined {
     return this.getGranary() ?? this.getWarehouse();
+  }
+
+  /**
+   * Where to stand to fetch food from a pantry: an interior floor tile (so the
+   * resident steps inside to the shelves rather than loitering in the doorway),
+   * picking the one nearest the approach so several fetchers spread out. Falls
+   * back to the door if the interior can't be stood on.
+   */
+  pantryStand(pantry: Building, from: Vec2): Vec2 {
+    const interior = this.interiorTiles(pantry).filter(
+      (tile) => this.world.getTile(tile)?.type === "Floor",
+    );
+    if (interior.length === 0) {
+      return pantry.door;
+    }
+    interior.sort(
+      (a, b) =>
+        (a.x - from.x) ** 2 + (a.y - from.y) ** 2 - ((b.x - from.x) ** 2 + (b.y - from.y) ** 2),
+    );
+    return interior[0];
   }
 
   /** Which shelf a food belongs on: grain (crops/berries) vs meat (game/fish). */

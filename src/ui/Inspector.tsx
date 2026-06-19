@@ -559,7 +559,7 @@ function BuildingInfo({
         <dd>
           {building.width}x{building.height} ({building.x}, {building.y})
         </dd>
-        {building.kind === "warehouse" && larder.length > 0 && (
+        {(building.kind === "granary" || building.kind === "warehouse") && larder.length > 0 && (
           <>
             <dt>{tr("Larder", "식량")}</dt>
             <dd>

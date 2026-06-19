@@ -2186,14 +2186,16 @@ export class AgentBrain {
     if (!pantry) {
       return false;
     }
-    const path = findPath(simulation.world, { start: agent.position, goal: pantry.door });
+    // Step inside to the shelves to gather, rather than stopping in the doorway.
+    const stand = simulation.pantryStand(pantry, agent.position);
+    const path = findPath(simulation.world, { start: agent.position, goal: stand });
     if (!path) {
       return false;
     }
     // Hold the stove for the whole trip so no one else starts cooking on it.
     simulation.claimStove(stove, agent.id);
     agent.cookStove = { ...stove };
-    agent.target = { ...pantry.door };
+    agent.target = { ...stand };
     agent.path = path;
     this.setState(agent, simulation, "MoveToPantry");
     return true;
@@ -2613,10 +2615,12 @@ export class AgentBrain {
 
     const pantry = simulation.foodPantry();
     if (pantry && simulation.foodStock > 0) {
-      const path = findPath(simulation.world, { start: agent.position, goal: pantry.door });
+      // Step inside to the larder rather than eating in the doorway.
+      const stand = simulation.pantryStand(pantry, agent.position);
+      const path = findPath(simulation.world, { start: agent.position, goal: stand });
       if (path) {
         agent.eatPlan = "warehouse";
-        agent.target = { ...pantry.door };
+        agent.target = { ...stand };
         agent.path = path;
         this.setState(agent, simulation, "MoveToFood");
         return;

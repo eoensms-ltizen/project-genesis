@@ -96,6 +96,19 @@ export class GameApp {
     // right, even though they sit inside a building's footprint — clicking a bed
     // inspects the bed, not the whole building.
     const structureTile = this.simulation.world.getTile(position)?.type;
+    // Clicking inside the granary shows its food store (grain/meat), not the bare
+    // floor tile under the sacks.
+    const granaryHere = this.simulation.buildings.find(
+      (b) =>
+        b.kind === "granary" &&
+        position.x >= b.x &&
+        position.x < b.x + b.width &&
+        position.y >= b.y &&
+        position.y < b.y + b.height,
+    );
+    if (granaryHere && structureTile === "Floor") {
+      return { kind: "building", buildingId: granaryHere.id };
+    }
     if (
       structureTile === "Wall" ||
       structureTile === "Door" ||
