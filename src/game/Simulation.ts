@@ -242,6 +242,7 @@ type SavedAgent = Omit<
   | "bedFoot"
   | "buildTarget"
   | "gatherWood"
+  | "funAt"
 >;
 
 type SaveData = {
@@ -660,6 +661,22 @@ export class Simulation {
 
   getFunfair(): Building | undefined {
     return this.buildings.find((b) => b.kind === "funfair" && b.stage === "built");
+  }
+
+  hasAnyFunfair(): boolean {
+    return this.buildings.some((b) => b.kind === "funfair");
+  }
+
+  /**
+   * Where the fairground station sits — the coaster track's station waypoint
+   * (0.5, 0.86 of the map, matching COASTER_WAYPOINTS[0] in the renderer), so the
+   * built station lines up under the track that runs from it.
+   */
+  funfairSite(): Vec2 {
+    return {
+      x: Math.round(this.world.width * 0.5),
+      y: Math.round(this.world.height * 0.86),
+    };
   }
 
   /**

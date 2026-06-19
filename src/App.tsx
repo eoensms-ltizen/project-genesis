@@ -79,6 +79,8 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   Furnish: "가구 제작",
   MoveToBuildTile: "자재 놓으러 이동",
   BuildTile: "벽 쌓기",
+  MoveToFunfair: "놀이공원으로 이동",
+  Ride: "놀이기구 탑승",
   Wander: "배회",
   Rest: "쉬기",
 };

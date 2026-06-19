@@ -111,6 +111,8 @@ export type AgentState =
   | "Furnish" // building a piece of furniture
   | "MoveToBuildTile" // walking to a single planned wall/floor/door tile
   | "BuildTile" // laying one structure tile by hand
+  | "MoveToFunfair" // walking to the amusement park to ride
+  | "Ride" // riding the roller coaster (leisure + a lift in spirits)
   | "Wander"
   | "Rest";
 
@@ -354,6 +356,9 @@ export type Agent = {
   // chopping (carrying the logs) until holding this much wood, then go build —
   // so they fell a whole load at once instead of a tree-per-wall. Transient.
   gatherWood?: number;
+  // Sim-time (seconds) this resident last rode the amusement park. Recent riders
+  // shrug off low-mood breaks for a while (mental protection). Transient.
+  funAt?: number;
 };
 
 export type GameLogEntry = {

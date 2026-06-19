@@ -157,6 +157,12 @@ const NEED_DECAY = { social: 0.09, purpose: 0.05, faith: 0.045, leisure: 0.06, c
 const NEED_FILL = { social: 22, purpose: 3, faith: 6, leisure: 8, comfort: 12 };
 const PRAY_DURATION_SECONDS = 8;
 const RELAX_DURATION_SECONDS = 6;
+// A ride on the coaster: a long, joyful break that tops up leisure and lifts the
+// spirits, and shields the rider from low-mood breaks for a while afterwards.
+const RIDE_DURATION_SECONDS = 7;
+const RIDE_LEISURE_FILL = 70;
+const RIDE_MOOD_BOOST = 22;
+const FUN_PROTECT_SECONDS = 240; // recent riders resist despondent breaks this long
 // Crowding: homes packed within this radius drain comfort faster (the first
 // couple of neighbours are fine; beyond that it starts to feel cramped).
 // Living among a few close neighbours is cosy (a hamlet); being hemmed in by a
@@ -425,6 +431,12 @@ export class AgentBrain {
       case "BuildTile":
         this.buildTile(agent, simulation, deltaSeconds);
         break;
+      case "MoveToFunfair":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "Ride");
+        break;
+      case "Ride":
+        this.ride(agent, simulation, deltaSeconds);
+        break;
       case "Wander":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Idle");
         break;
@@ -674,6 +686,12 @@ export class AgentBrain {
         }
         return false;
       case "leisure":
+        // A day at the amusement park beats aimless wandering: if there's a
+        // funfair, go ride; otherwise stroll.
+        if (this.goRide(agent, simulation)) {
+          this.maybeLog(simulation, tr(`${agent.name} headed to the amusement park.`, `${agent.name}이(가) 놀이공원으로 향했다.`));
+          return true;
+        }
         this.wanderNearHome(agent, simulation);
         this.maybeLog(simulation, tr(`${agent.name} wandered off to take in the village.`, `${agent.name}이(가) 마을을 둘러보러 거닐었다.`));
         return true;
@@ -724,6 +742,40 @@ export class AgentBrain {
       agent.path = undefined;
       this.setState(agent, simulation, "Idle");
     }
+  }
+
+  /** Head to the amusement park's station to ride the coaster. */
+  private goRide(agent: Agent, simulation: Simulation): boolean {
+    const funfair = simulation.getFunfair();
+    if (!funfair) {
+      return false;
+    }
+    const board = simulation.funfairBoardingTile(funfair);
+    const path = findPath(simulation.world, { start: agent.position, goal: board });
+    if (!path) {
+      return false;
+    }
+    agent.target = { ...board };
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFunfair");
+    return true;
+  }
+
+  /** Ride the roller coaster: a big lift in leisure and spirits (mental boost). */
+  private ride(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    if (agent.actionTimer === 0) {
+      simulation.log(tr(`${agent.name} is riding the roller coaster! 🎢`, `${agent.name}이(가) 롤러코스터를 탄다! 🎢`));
+    }
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < RIDE_DURATION_SECONDS) {
+      return;
+    }
+    agent.needs.leisure = clampNeed(agent.needs.leisure + RIDE_LEISURE_FILL);
+    agent.mood = Math.min(100, (agent.mood ?? 60) + RIDE_MOOD_BOOST);
+    agent.funAt = simulation.elapsedTime; // recent riders resist low-mood breaks
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
   }
 
   private doProductiveWork(agent: Agent, simulation: Simulation): boolean {
@@ -1009,6 +1061,10 @@ export class AgentBrain {
     if (mood >= MOOD_BREAK_THRESHOLD) {
       return false;
     }
+    // A recent trip to the amusement park keeps the blues at bay for a while.
+    if (agent.funAt !== undefined && simulation.elapsedTime - agent.funAt < FUN_PROTECT_SECONDS) {
+      return false;
+    }
     const severity = (MOOD_BREAK_THRESHOLD - mood) / MOOD_BREAK_THRESHOLD; // 0..1
     // Kept modest so even a miserable resident still works between breaks.
     if (Math.random() >= severity * this.moodImpact(simulation) * 0.22) {
@@ -1027,7 +1083,7 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "none" {
-    let kind: "warehouse" | "granary" | "kitchen" | "cemetery" | "pasture" | undefined;
+    let kind: "warehouse" | "granary" | "kitchen" | "cemetery" | "pasture" | "funfair" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
     } else if (simulation.needsCemetery()) {
@@ -1059,6 +1115,15 @@ export class AgentBrain {
       kind = "granary";
     } else if (simulation.needsMoreOf("warehouse")) {
       kind = "warehouse";
+    } else if (
+      // A luxury for a settled, well-stocked town: build the amusement park once
+      // the basics are covered and there's plenty of wood to spare.
+      simulation.era >= 2 &&
+      !simulation.hasAnyFunfair() &&
+      simulation.agents.length >= 12 &&
+      simulation.stockOf("wood") >= buildCost("funfair") + WOOD_RESERVE_FLOOR
+    ) {
+      kind = "funfair";
     }
     // The cramped 1-tile civic rooms — church, police, smelter, power plant,
     // factory, station — are retired for now: they built as single-tile boxes
@@ -2125,6 +2190,9 @@ export class AgentBrain {
       pasture: [6, 6],
       cemetery: [3, 3],
       park: [3, 3],
+      // The fairground station is compact — the roller coaster itself is the
+      // map-wide elevated track drawn over everything, not a footprint.
+      funfair: [4, 3],
     };
     const [width, height] = SIZES[kind] ?? [3, 3];
     // The cemetery is sited remotely (away from the village centre and housing);
@@ -2156,6 +2224,15 @@ export class AgentBrain {
             isClaimed,
             { far: true, minDistance: 16 },
           )
+        : kind === "funfair"
+          ? // Site the station under the coaster's station waypoint so the track
+            // runs from it.
+            simulation.world.findBuildingSite(
+              simulation.funfairSite(),
+              width,
+              height,
+              isClaimed,
+            )
         : (adjoins
             ? simulation.findAdjoiningSite(width, height, roundVec(origin), isClaimed)
             : undefined) ??
