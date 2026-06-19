@@ -178,6 +178,7 @@ export class GameApp {
       this.simulation.items,
       this.simulation.grainStock,
       this.simulation.meatStock,
+      this.simulation.elapsedTime,
     );
   }
 }

@@ -326,6 +326,7 @@ export class PixiRenderer {
     items: ItemStack[] = [],
     grainStock = 0,
     meatStock = 0,
+    time = 0,
   ) {
     if (!this.initialized) {
       return;
@@ -476,7 +477,9 @@ export class PixiRenderer {
     // The map-wide roller coaster rides above everything on its pillars — drawn
     // here (over buildings and residents) once a fairground station exists.
     if (buildings.some((b) => b.kind === "funfair" && b.stage === "built")) {
-      drawCoaster(this.overlayGraphics, coasterTrack(world));
+      const track = coasterTrack(world);
+      drawCoaster(this.overlayGraphics, track);
+      drawCoasterTrain(this.overlayGraphics, track, time);
     }
 
     // Doors swing open while a resident is passing through them.
@@ -1514,6 +1517,42 @@ function drawCoaster(graphics: Graphics, pts: CoasterPoint[]) {
     graphics.moveTo(ax, ay);
     graphics.lineTo(bx, by);
     graphics.stroke({ color: 0xfff0a6, width: Math.max(0.6, w * 0.32), alpha: 0.7 }); // highlight
+  }
+}
+
+const COASTER_CAR_COLORS = [0xff4d4d, 0x4f8de0, 0xf2c33a, 0x57c46a, 0xb066d8, 0xff944d];
+const COASTER_LOOP_SECONDS = 16; // time for the train to make one full circuit
+
+/**
+ * Draw the moving train: a string of cars riding the elevated track, advancing
+ * by `time` so they sweep the whole circuit — through the loops and the helix.
+ */
+function drawCoasterTrain(graphics: Graphics, pts: CoasterPoint[], time: number) {
+  const N = pts.length;
+  if (N < 2) {
+    return;
+  }
+  const up = (p: CoasterPoint) => p.y - p.elev * COASTER_LIFT_PX;
+  const at = (f: number) => {
+    const i0 = ((Math.floor(f) % N) + N) % N;
+    const i1 = (i0 + 1) % N;
+    const tt = f - Math.floor(f);
+    const a = pts[i0];
+    const b = pts[i1];
+    return { x: a.x + (b.x - a.x) * tt, y: up(a) + (up(b) - up(a)) * tt, elev: a.elev + (b.elev - a.elev) * tt };
+  };
+  const head = ((time / COASTER_LOOP_SECONDS) * N) % N;
+  const CARS = 6;
+  const GAP = 2.4;
+  for (let c = CARS - 1; c >= 0; c -= 1) {
+    const p = at(((head - c * GAP) % N + N) % N);
+    const w = 4.4 + p.elev * 1.6; // a touch bigger up high, matching the track
+    graphics.roundRect(p.x - w / 2, p.y - w / 2, w, w, 1.6);
+    graphics.fill(COASTER_CAR_COLORS[c % COASTER_CAR_COLORS.length]);
+    graphics.roundRect(p.x - w / 2, p.y - w / 2, w, w, 1.6);
+    graphics.stroke({ color: 0x241509, width: 0.8, alpha: 0.95 });
+    graphics.circle(p.x, p.y - 1, 1); // a rider's head
+    graphics.fill({ color: 0xf0e0c0, alpha: 0.9 });
   }
 }
 

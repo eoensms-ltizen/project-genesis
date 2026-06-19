@@ -311,6 +311,10 @@ export class Simulation {
   private traffic = new Map<number, number>();
   private ambianceGrid = new Float32Array(0);
   private elapsedSeconds = 0;
+  /** Seconds of simulated time elapsed — drives time-based render animation. */
+  get elapsedTime(): number {
+    return this.elapsedSeconds;
+  }
   private natureTimer = 0;
   private autosaveTimer = 0;
   private uiEmitTimer = UI_EMIT_INTERVAL_SECONDS;
