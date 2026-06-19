@@ -473,6 +473,12 @@ export class PixiRenderer {
       drawGranaryFood(this.overlayGraphics, world, building, grainStock, meatStock);
     }
 
+    // The map-wide roller coaster rides above everything on its pillars — drawn
+    // here (over buildings and residents) once a fairground station exists.
+    if (buildings.some((b) => b.kind === "funfair" && b.stage === "built")) {
+      drawCoaster(this.overlayGraphics, coasterTrack(world));
+    }
+
     // Doors swing open while a resident is passing through them.
     const occupied = new Set(
       agents.map((a) => `${Math.round(a.position.x)},${Math.round(a.position.y)}`),
@@ -1343,53 +1349,47 @@ function drawRoomMarker(graphics: Graphics, building: Building) {
   }
 }
 
-/**
- * The roller-coaster track as a closed loop of pixel points within the fairground
- * footprint. Point 0 is the front/station (bottom-centre, by the entrance gate);
- * `lift` is how "high" that stretch reads (0 at the front, 1 at the back hill) for
- * later 2.5D shading and speed variation. Both the renderer and (later) the car
- * animation share this so the track and the boarding spot always agree.
- */
-function coasterTrack(b: Building): { x: number; y: number; lift: number }[] {
-  const px = b.x * TILE_SIZE;
-  const py = b.y * TILE_SIZE;
-  const W = b.width * TILE_SIZE;
-  const H = b.height * TILE_SIZE;
-  const m = Math.min(W, H) * 0.12;
-  const L = px + m;
-  const R = px + W - m;
-  const T = py + m;
-  const B = py + H - m;
-  const cx = (L + R) / 2;
-  // A long, winding circuit instead of a small oval: the bottom is the station
-  // straight (by the entrance); the train climbs the right side, then runs the
-  // length of the park as a row of camel-back hills (a zig-zag between the top
-  // edge and deep into the interior), and drops down the left side back to the
-  // station. Many hills => a track several times longer, the way a real coaster
-  // snakes back and forth. Built as waypoints, then Catmull-Rom-smoothed so the
-  // corners flow like real track.
-  const hills = Math.max(5, Math.round(b.width / 1.8)); // ~one hill per ~1.8 tiles
-  const valley = B - (B - T) * 0.34; // how far the hills dip toward the station band
-  const wp: { x: number; y: number }[] = [];
-  wp.push({ x: cx, y: B }); // 0: station centre (front, by the gate)
-  wp.push({ x: R, y: B }); // bottom-right corner
-  wp.push({ x: R, y: T }); // up the right side to the top
-  // Camel-back hills marching right -> left along the top.
-  const steps = hills * 2;
-  for (let i = 1; i < steps; i += 1) {
-    wp.push({
-      x: R + ((L - R) * i) / steps,
-      y: i % 2 === 0 ? T : valley, // crest at the top edge, dip toward the station
-    });
-  }
-  wp.push({ x: L, y: T }); // top-left
-  wp.push({ x: L, y: B }); // down the left side to the bottom
-  // ...then the bottom straight back to the station centre closes the loop.
+// A long, organic roller coaster that sprawls across the WHOLE map and rides up
+// on pillars over the rooftops (RollerCoaster-Tycoon style), not a small loop
+// boxed in a footprint. Fixed normalised waypoints (smoothly curved), scaled to
+// the map; each point carries `e` = height 0..1, which drives the 2.5D look:
+// higher track is lifted up-screen, drawn thicker (perspective), and over any
+// track it crosses.
+const COASTER_WAYPOINTS: { x: number; y: number; e: number }[] = [
+  { x: 0.5, y: 0.86, e: 0.0 }, // station (low, front)
+  { x: 0.74, y: 0.84, e: 0.18 },
+  { x: 0.88, y: 0.7, e: 0.5 },
+  { x: 0.91, y: 0.48, e: 0.95 }, // big lift hill (right)
+  { x: 0.76, y: 0.4, e: 0.6 },
+  { x: 0.62, y: 0.5, e: 0.28 },
+  { x: 0.67, y: 0.64, e: 0.12 }, // inner curl
+  { x: 0.55, y: 0.71, e: 0.2 },
+  { x: 0.45, y: 0.62, e: 0.42 },
+  { x: 0.47, y: 0.46, e: 0.66 },
+  { x: 0.58, y: 0.32, e: 0.4 },
+  { x: 0.74, y: 0.22, e: 0.7 },
+  { x: 0.6, y: 0.12, e: 0.9 }, // far hill (top)
+  { x: 0.4, y: 0.14, e: 0.55 },
+  { x: 0.22, y: 0.24, e: 0.8 }, // left hill
+  { x: 0.12, y: 0.46, e: 0.46 },
+  { x: 0.16, y: 0.68, e: 0.24 },
+  { x: 0.3, y: 0.82, e: 0.08 },
+];
 
-  // Catmull-Rom sample the closed waypoint loop into smooth, evenly-ish dense pts.
+let coasterCache: { key: string; pts: { x: number; y: number; elev: number }[] } | null = null;
+
+/** The map-wide coaster centreline (ground px + height), Catmull-Rom-smoothed. */
+function coasterTrack(world: WorldMap): { x: number; y: number; elev: number }[] {
+  const key = `${world.width}x${world.height}`;
+  if (coasterCache && coasterCache.key === key) {
+    return coasterCache.pts;
+  }
+  const W = world.width * TILE_SIZE;
+  const H = world.height * TILE_SIZE;
+  const wp = COASTER_WAYPOINTS.map((p) => ({ x: p.x * W, y: p.y * H, e: p.e }));
   const n = wp.length;
   const PER = 10;
-  const pts: { x: number; y: number; lift: number }[] = [];
+  const pts: { x: number; y: number; elev: number }[] = [];
   for (let i = 0; i < n; i += 1) {
     const p0 = wp[(i - 1 + n) % n];
     const p1 = wp[i];
@@ -1399,80 +1399,73 @@ function coasterTrack(b: Building): { x: number; y: number; lift: number }[] {
       const t = j / PER;
       const t2 = t * t;
       const t3 = t2 * t;
-      const x =
-        0.5 *
-        (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
-      const y =
-        0.5 *
-        (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-      pts.push({ x, y, lift: Math.max(0, Math.min(1, (B - y) / (B - T))) });
+      const cr = (a: number, b: number, c: number, d: number) =>
+        0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      pts.push({
+        x: cr(p0.x, p1.x, p2.x, p3.x),
+        y: cr(p0.y, p1.y, p2.y, p3.y),
+        elev: Math.max(0, Math.min(1, cr(p0.e, p1.e, p2.e, p3.e))),
+      });
     }
   }
+  coasterCache = { key, pts };
   return pts;
 }
 
-/** Draw a finished fairground's roller coaster: track, supports, station, car, gate. */
-function drawFunfair(graphics: Graphics, building: Building) {
-  const pts = coasterTrack(building);
+const COASTER_LIFT_PX = 34; // screen-px an elev-1 stretch rises above its footprint
+
+/**
+ * Draw the elevated coaster: purple pillars up from the ground footprint, a yellow
+ * track riding on top — lifted up-screen and drawn thicker the higher it climbs
+ * (perspective), with higher track drawn over the track it crosses.
+ */
+function drawCoaster(graphics: Graphics, pts: { x: number; y: number; elev: number }[]) {
   const N = pts.length;
-  const trace = () => {
-    for (let i = 0; i <= N; i += 1) {
-      const p = pts[i % N];
-      if (i === 0) {
-        graphics.moveTo(p.x, p.y);
-      } else {
-        graphics.lineTo(p.x, p.y);
-      }
-    }
-  };
-  // Crossties first (under the rails).
-  for (let i = 0; i < N; i += 1) {
+  const up = (p: { y: number; elev: number }) => p.y - p.elev * COASTER_LIFT_PX;
+  // Pillars from the ground up to the lifted track.
+  for (let i = 0; i < N; i += 3) {
+    const p = pts[i];
+    graphics.ellipse(p.x, p.y, 1.6, 0.9);
+    graphics.fill({ color: 0x2c1f49, alpha: 0.45 }); // foot shadow
+    graphics.moveTo(p.x, p.y);
+    graphics.lineTo(p.x, up(p));
+    graphics.stroke({ color: 0x7a57b0, width: 1.1 + p.elev * 1.9, alpha: 0.9 });
+  }
+  // Track segments, low elevation first so higher track overdraws crossings.
+  const order = Array.from({ length: N }, (_, i) => i).sort(
+    (a, b) => pts[a].elev + pts[(a + 1) % N].elev - (pts[b].elev + pts[(b + 1) % N].elev),
+  );
+  for (const i of order) {
     const a = pts[i];
     const b = pts[(i + 1) % N];
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
-    graphics.moveTo(mx - nx * 3.2, my - ny * 3.2);
-    graphics.lineTo(mx + nx * 3.2, my + ny * 3.2);
-    graphics.stroke({ color: 0x4a3722, width: 1.6, alpha: 0.85 });
+    const ax = a.x;
+    const ay = up(a);
+    const bx = b.x;
+    const by = up(b);
+    const e = (a.elev + b.elev) / 2;
+    const w = 3 + e * 5.5; // thicker the higher it climbs
+    graphics.moveTo(ax, ay);
+    graphics.lineTo(bx, by);
+    graphics.stroke({ color: 0x6e4a0c, width: w + 2.6, alpha: 1 }); // dark underside
+    graphics.moveTo(ax, ay);
+    graphics.lineTo(bx, by);
+    graphics.stroke({ color: 0xf2c83a, width: w, alpha: 1 }); // yellow track
+    graphics.moveTo(ax, ay);
+    graphics.lineTo(bx, by);
+    graphics.stroke({ color: 0xfff0a6, width: Math.max(0.6, w * 0.32), alpha: 0.7 }); // highlight
   }
-  // Track bed (dark), rails (warm), centre highlight.
-  trace();
-  graphics.stroke({ color: 0x2c2117, width: 5.5, alpha: 0.95 });
-  trace();
-  graphics.stroke({ color: 0xb5613a, width: 3, alpha: 1 });
-  trace();
-  graphics.stroke({ color: 0xe6a86c, width: 1, alpha: 0.75 });
-  // Support posts with a little shadow, spaced out around the long loop.
-  for (let i = 0; i < N; i += 12) {
-    const p = pts[i];
-    graphics.rect(p.x - 0.8, p.y + 1, 1.6, 4 + p.lift * 6);
-    graphics.fill({ color: 0x3a2c1d, alpha: 0.7 });
-  }
-  // Boarding station: a wooden platform at the front, by the entrance gate.
-  const board = pts[0];
-  graphics.roundRect(board.x - 10, board.y + 2, 20, 7, 1.5);
+}
+
+/** Draw a finished fairground's compact station (the coaster track is map-wide). */
+function drawFunfair(graphics: Graphics, building: Building) {
+  const cx = (building.x + building.width / 2) * TILE_SIZE;
+  const by = (building.y + building.height - 1) * TILE_SIZE;
+  graphics.roundRect(cx - 12, by - 9, 24, 9, 2);
   graphics.fill({ color: 0x8a6a44, alpha: 0.95 });
-  graphics.roundRect(board.x - 10, board.y + 2, 20, 7, 1.5);
+  graphics.roundRect(cx - 12, by - 9, 24, 9, 2);
   graphics.stroke({ color: 0x4a3722, width: 1, alpha: 0.9 });
-  // A small "board here" gate/turnstile marker on the platform edge.
-  graphics.rect(board.x - 1, board.y + 1, 2, 4);
+  graphics.rect(cx - 1, by - 12, 2, 4);
   graphics.fill(0xe8d27a);
-  graphics.poly([board.x - 3, board.y - 1, board.x, board.y - 4, board.x + 3, board.y - 1]);
-  graphics.fill({ color: 0xe8d27a, alpha: 0.9 });
-  // A parked train of cars at the station, colourful so it pops.
-  const carColors = [0xd84f4f, 0x4f7dd8, 0xe0a83c, 0x4fb86a];
-  for (let c = 0; c < carColors.length; c += 1) {
-    const t = pts[(c * 3) % N];
-    graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
-    graphics.fill(carColors[c]);
-    graphics.roundRect(t.x - 3, t.y - 3, 6, 6, 1.5);
-    graphics.stroke({ color: 0x2a1c12, width: 0.8, alpha: 0.9 });
-  }
 }
 
 function drawBuilding(graphics: Graphics, building: Building, flat: boolean) {
