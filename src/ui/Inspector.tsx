@@ -25,6 +25,14 @@ type InspectorProps = {
   following?: boolean;
   onToggleFollow?: () => void;
   onClose: () => void;
+  onDevSetAgent?: (agentId: string, patch: DevAgentPatch) => void;
+};
+
+export type DevAgentPatch = {
+  mood?: number;
+  hunger?: number;
+  stamina?: number;
+  needs?: Partial<Record<"social" | "purpose" | "faith" | "leisure" | "comfort", number>>;
 };
 
 export function Inspector({
@@ -41,6 +49,7 @@ export function Inspector({
   following,
   onToggleFollow,
   onClose,
+  onDevSetAgent,
 }: InspectorProps) {
   return (
     <section className="panel-section inspector">
@@ -58,6 +67,7 @@ export function Inspector({
           homeAmbiance={homeAmbiance}
           following={following}
           onToggleFollow={onToggleFollow}
+          onDevSet={onDevSetAgent}
         />
       )}
       {selection.kind === "building" && (
@@ -408,6 +418,7 @@ function AgentInfo({
   homeAmbiance,
   following,
   onToggleFollow,
+  onDevSet,
 }: {
   agent?: Agent;
   agents: Agent[];
@@ -415,6 +426,7 @@ function AgentInfo({
   homeAmbiance?: number;
   following?: boolean;
   onToggleFollow?: () => void;
+  onDevSet?: (agentId: string, patch: DevAgentPatch) => void;
 }) {
   if (!agent) {
     return <p className="muted">{tr("This resident is no longer with us.", "이 주민은 더 이상 없습니다.")}</p>;
@@ -504,7 +516,45 @@ function AgentInfo({
           ))}
         </div>
       )}
+      {onDevSet && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12 }}>🛠 {tr("Edit (dev)", "수정 (개발)")}</summary>
+          <DevRange label={tr("Food", "허기")} value={agent.health.hunger} onChange={(v) => onDevSet(agent.id, { hunger: v })} />
+          <DevRange label={tr("Energy", "체력")} value={agent.health.stamina} onChange={(v) => onDevSet(agent.id, { stamina: v })} />
+          <DevRange label={tr("Mood", "기분")} value={agent.mood ?? 60} onChange={(v) => onDevSet(agent.id, { mood: v })} />
+          <DevRange label={tr("Social", "사교")} value={agent.needs.social} onChange={(v) => onDevSet(agent.id, { needs: { social: v } })} />
+          <DevRange label={tr("Purpose", "목적")} value={agent.needs.purpose} onChange={(v) => onDevSet(agent.id, { needs: { purpose: v } })} />
+          <DevRange label={tr("Faith", "신앙")} value={agent.needs.faith} onChange={(v) => onDevSet(agent.id, { needs: { faith: v } })} />
+          <DevRange label={tr("Leisure", "여가")} value={agent.needs.leisure} onChange={(v) => onDevSet(agent.id, { needs: { leisure: v } })} />
+          <DevRange label={tr("Comfort", "쾌적")} value={agent.needs.comfort} onChange={(v) => onDevSet(agent.id, { needs: { comfort: v } })} />
+        </details>
+      )}
     </div>
+  );
+}
+
+function DevRange({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, margin: "2px 0" }}>
+      <span style={{ minWidth: 40, opacity: 0.75 }}>{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={Math.round(value)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ flex: 1 }}
+      />
+      <span style={{ minWidth: 24, textAlign: "right" }}>{Math.round(value)}</span>
+    </label>
   );
 }
 

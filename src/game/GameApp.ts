@@ -187,20 +187,37 @@ export class GameApp {
     this.render();
   }
 
-  /** Instantly raise a finished building near the village centre. Returns false
-   *  if no clear site was found. */
+  private static readonly DEV_BUILD_SIZES: Partial<Record<BuildingKind, [number, number]>> = {
+    house: [5, 5],
+    warehouse: [4, 4],
+    granary: [4, 4],
+    kitchen: [4, 4],
+    funfair: [8, 6],
+    pasture: [6, 6],
+    cemetery: [3, 3],
+    park: [3, 3],
+  };
+
+  private devRaise(kind: BuildingKind, x: number, y: number): boolean {
+    const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
+    const building = this.simulation.registerBuilding({
+      kind,
+      x,
+      y,
+      width: w,
+      height: h,
+      door: { x: x + Math.floor(w / 2), y: y + h - 1 },
+    });
+    this.simulation.claimBuildingFootprint(building);
+    this.simulation.setBuildingStage(building, "built");
+    this.simulation.notifyChanged();
+    this.render();
+    return true;
+  }
+
+  /** Instantly raise a finished building near the village centre. */
   devBuild(kind: BuildingKind): boolean {
-    const sizes: Partial<Record<BuildingKind, [number, number]>> = {
-      house: [5, 5],
-      warehouse: [4, 4],
-      granary: [4, 4],
-      kitchen: [4, 4],
-      funfair: [8, 6],
-      pasture: [6, 6],
-      cemetery: [3, 3],
-      park: [3, 3],
-    };
-    const [w, h] = sizes[kind] ?? [4, 4];
+    const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
     const c = this.simulation.villageCenter();
     const origin = { x: Math.round(c.x), y: Math.round(c.y) };
     const site = this.simulation.world.findBuildingSite(origin, w, h, (p) =>
@@ -209,19 +226,76 @@ export class GameApp {
     if (!site) {
       return false;
     }
-    const building = this.simulation.registerBuilding({
-      kind,
-      x: site.x,
-      y: site.y,
-      width: w,
-      height: h,
-      door: { x: site.x + Math.floor(w / 2), y: site.y + h - 1 },
-    });
-    this.simulation.claimBuildingFootprint(building);
-    this.simulation.setBuildingStage(building, "built");
+    return this.devRaise(kind, site.x, site.y);
+  }
+
+  /** Instantly raise a building centred on a clicked tile (click-to-place mode). */
+  devBuildAt(kind: BuildingKind, position: Vec2): boolean {
+    const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
+    const x = Math.round(position.x) - Math.floor(w / 2);
+    const y = Math.round(position.y) - Math.floor(h / 2);
+    return this.devRaise(kind, x, y);
+  }
+
+  /** Top up every material in the warehouse. */
+  devFillMaterials() {
+    this.simulation.store("wood", 300);
+    this.simulation.store("stone", 300);
+    this.simulation.store("ironOre", 200);
+    this.simulation.store("steel", 200);
     this.simulation.notifyChanged();
     this.render();
-    return true;
+  }
+
+  /** Set every resident's hunger (0 = full, 100 = starving). */
+  devSetAllHunger(hunger: number) {
+    for (const a of this.simulation.agents) {
+      a.health.hunger = Math.max(0, Math.min(100, hunger));
+    }
+    this.simulation.notifyChanged();
+    this.render();
+  }
+
+  /** Fast-forward the simulation by `seconds` of sim time (run in small steps). */
+  devAdvanceTime(seconds: number) {
+    const step = 0.5;
+    const n = Math.min(Math.ceil(seconds / step), 1500);
+    for (let i = 0; i < n; i += 1) {
+      this.simulation.update(step);
+    }
+    this.render();
+  }
+
+  /** Edit a single resident's needs / mood / vitals (dev sliders). */
+  devSetAgent(
+    agentId: string,
+    patch: {
+      mood?: number;
+      hunger?: number;
+      stamina?: number;
+      needs?: Partial<{
+        social: number;
+        purpose: number;
+        faith: number;
+        leisure: number;
+        comfort: number;
+      }>;
+    },
+  ) {
+    const a = this.simulation.agents.find((x) => x.id === agentId);
+    if (!a) {
+      return;
+    }
+    if (patch.mood !== undefined) a.mood = Math.max(0, Math.min(100, patch.mood));
+    if (patch.hunger !== undefined) a.health.hunger = Math.max(0, Math.min(100, patch.hunger));
+    if (patch.stamina !== undefined) a.health.stamina = Math.max(0, Math.min(100, patch.stamina));
+    if (patch.needs) {
+      for (const [k, v] of Object.entries(patch.needs)) {
+        (a.needs as unknown as Record<string, number>)[k] = Math.max(0, Math.min(100, v as number));
+      }
+    }
+    this.simulation.notifyChanged();
+    this.render();
   }
 
   destroy() {

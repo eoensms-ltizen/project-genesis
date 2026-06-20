@@ -137,6 +137,8 @@ export default function App() {
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [selection, setSelection] = useState<InspectionTarget | null>(null);
   const [followId, setFollowId] = useState<string | null>(null);
+  const [devPlaceKind, setDevPlaceKind] = useState<BuildingKind | null>(null);
+  const devPlaceKindRef = useRef<BuildingKind | null>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
@@ -177,6 +179,12 @@ export default function App() {
       },
       onTileClick: (position) => {
         if (!gameRef.current) {
+          return;
+        }
+        if (devPlaceKindRef.current) {
+          gameRef.current.devBuildAt(devPlaceKindRef.current, position);
+          devPlaceKindRef.current = null;
+          setDevPlaceKind(null);
           return;
         }
         if (gameRef.current.isPlacementMode()) {
@@ -244,8 +252,20 @@ export default function App() {
   const devResource = (resource: ResourceKind, amount: number) =>
     gameRef.current?.devGiveResource(resource, amount);
   const devFood = (kind: FoodKind, amount: number) => gameRef.current?.devGiveFood(kind, amount);
-  const devBuild = (kind: BuildingKind) => gameRef.current?.devBuild(kind);
   const devEra = (value: number) => gameRef.current?.devSetEra(value);
+  const devFillMaterials = () => gameRef.current?.devFillMaterials();
+  const devHungerAll = (hunger: number) => gameRef.current?.devSetAllHunger(hunger);
+  const devAdvanceTime = (seconds: number) => gameRef.current?.devAdvanceTime(seconds);
+  const devPlace = (kind: BuildingKind) => {
+    // Toggle: pick a building to drop with the next map click, or cancel.
+    const next = devPlaceKindRef.current === kind ? null : kind;
+    devPlaceKindRef.current = next;
+    setDevPlaceKind(next);
+  };
+  const devSetAgent = (
+    agentId: string,
+    patch: Parameters<NonNullable<typeof gameRef.current>["devSetAgent"]>[1],
+  ) => gameRef.current?.devSetAgent(agentId, patch);
 
   const changeSpeed = (value: number) => {
     speedRef.current = value;
@@ -403,6 +423,7 @@ export default function App() {
                 gameRef.current?.followAgent(next);
               }}
               onClose={() => setSelection(null)}
+              onDevSetAgent={devSetAgent}
             />
           </div>
         )}
@@ -433,9 +454,13 @@ export default function App() {
             <AgentCreator onCreate={addRandomAgent} />
             <DevPanel
               era={era}
+              placingKind={devPlaceKind}
               onResource={devResource}
               onFood={devFood}
-              onBuild={devBuild}
+              onFillMaterials={devFillMaterials}
+              onHungerAll={devHungerAll}
+              onAdvanceTime={devAdvanceTime}
+              onPlaceBuild={devPlace}
               onEra={devEra}
             />
           </>
