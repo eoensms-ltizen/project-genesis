@@ -4,12 +4,14 @@ import { tr } from "../i18n";
 type Props = {
   era: number;
   placingKind: BuildingKind | null;
+  instantBuild: boolean;
   onResource: (resource: ResourceKind, amount: number) => void;
   onFood: (kind: FoodKind, amount: number) => void;
   onFillMaterials: () => void;
   onHungerAll: (hunger: number) => void;
   onAdvanceTime: (seconds: number) => void;
   onPlaceBuild: (kind: BuildingKind) => void;
+  onInstantBuild: (instant: boolean) => void;
   onEra: (era: number) => void;
 };
 
@@ -42,12 +44,14 @@ const labelStyle: React.CSSProperties = { fontSize: 11, opacity: 0.7, minWidth: 
 export function DevPanel({
   era,
   placingKind,
+  instantBuild,
   onResource,
   onFood,
   onFillMaterials,
   onHungerAll,
   onAdvanceTime,
   onPlaceBuild,
+  onInstantBuild,
   onEra,
 }: Props) {
   return (
@@ -83,6 +87,24 @@ export function DevPanel({
       </div>
 
       <div style={rowStyle}>
+        <span style={labelStyle}>{tr("Mode", "방식")}</span>
+        <button
+          type="button"
+          data-active={instantBuild}
+          onClick={() => onInstantBuild(true)}
+        >
+          {tr("Instant", "즉시 완공")}
+        </button>
+        <button
+          type="button"
+          data-active={!instantBuild}
+          onClick={() => onInstantBuild(false)}
+        >
+          {tr("Stake site", "건설 목표만")}
+        </button>
+      </div>
+
+      <div style={rowStyle}>
         <span style={labelStyle}>{tr("Place", "배치")}</span>
         {BUILDINGS.map((b) => (
           <button
@@ -97,7 +119,9 @@ export function DevPanel({
       </div>
       {placingKind && (
         <p className="muted" style={{ fontSize: 11, margin: "2px 0" }}>
-          {tr("Click the map to place it.", "지도를 클릭해 배치하세요.")}
+          {instantBuild
+            ? tr("Click the map to place it (finished).", "지도를 클릭해 즉시 완공합니다.")
+            : tr("Click the map to stake a site — residents build it.", "지도를 클릭해 건설 목표만 세웁니다(주민이 직접 건설).")}
         </p>
       )}
 

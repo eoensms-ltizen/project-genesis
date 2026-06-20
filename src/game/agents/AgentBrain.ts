@@ -1242,7 +1242,9 @@ export class AgentBrain {
     let best: Building | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const b of simulation.buildings) {
-      if (b.stage === "built" || !ROOM_BUILDING_KINDS.has(b.kind)) {
+      // Any unfinished building can be pitched in on — rooms and open yards alike
+      // are raised tile by tile now (this also adopts dev-staked sites).
+      if (b.stage === "built") {
         continue;
       }
       const builders = simulation.agents.filter((a) => a.projectBuildingId === b.id).length;

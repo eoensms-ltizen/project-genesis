@@ -198,7 +198,7 @@ export class GameApp {
     park: [3, 3],
   };
 
-  private devRaise(kind: BuildingKind, x: number, y: number): boolean {
+  private devRaise(kind: BuildingKind, x: number, y: number, instant: boolean): boolean {
     const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
     const building = this.simulation.registerBuilding({
       kind,
@@ -209,14 +209,22 @@ export class GameApp {
       door: { x: x + Math.floor(w / 2), y: y + h - 1 },
     });
     this.simulation.claimBuildingFootprint(building);
-    this.simulation.setBuildingStage(building, "built");
+    if (instant) {
+      // Drop it down already finished.
+      this.simulation.setBuildingStage(building, "built");
+    } else {
+      // Just stake the plot: residents will adopt the site and raise it tile by
+      // tile (they fetch the wood and lay each wall/fence themselves).
+      this.simulation.setBuildingStage(building, "site");
+      this.simulation.reserveEntrance(building);
+    }
     this.simulation.notifyChanged();
     this.render();
     return true;
   }
 
-  /** Instantly raise a finished building near the village centre. */
-  devBuild(kind: BuildingKind): boolean {
+  /** Place a building near the village centre — finished (instant) or as a site. */
+  devBuild(kind: BuildingKind, instant = true): boolean {
     const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
     const c = this.simulation.villageCenter();
     const origin = { x: Math.round(c.x), y: Math.round(c.y) };
@@ -226,15 +234,15 @@ export class GameApp {
     if (!site) {
       return false;
     }
-    return this.devRaise(kind, site.x, site.y);
+    return this.devRaise(kind, site.x, site.y, instant);
   }
 
-  /** Instantly raise a building centred on a clicked tile (click-to-place mode). */
-  devBuildAt(kind: BuildingKind, position: Vec2): boolean {
+  /** Place a building centred on a clicked tile — finished (instant) or as a site. */
+  devBuildAt(kind: BuildingKind, position: Vec2, instant = true): boolean {
     const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
     const x = Math.round(position.x) - Math.floor(w / 2);
     const y = Math.round(position.y) - Math.floor(h / 2);
-    return this.devRaise(kind, x, y);
+    return this.devRaise(kind, x, y, instant);
   }
 
   /** Top up every material in the warehouse. */

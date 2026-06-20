@@ -139,6 +139,8 @@ export default function App() {
   const [followId, setFollowId] = useState<string | null>(null);
   const [devPlaceKind, setDevPlaceKind] = useState<BuildingKind | null>(null);
   const devPlaceKindRef = useRef<BuildingKind | null>(null);
+  const [devInstant, setDevInstant] = useState(true);
+  const devInstantRef = useRef(true);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
@@ -182,7 +184,7 @@ export default function App() {
           return;
         }
         if (devPlaceKindRef.current) {
-          gameRef.current.devBuildAt(devPlaceKindRef.current, position);
+          gameRef.current.devBuildAt(devPlaceKindRef.current, position, devInstantRef.current);
           devPlaceKindRef.current = null;
           setDevPlaceKind(null);
           return;
@@ -261,6 +263,10 @@ export default function App() {
     const next = devPlaceKindRef.current === kind ? null : kind;
     devPlaceKindRef.current = next;
     setDevPlaceKind(next);
+  };
+  const devSetInstant = (instant: boolean) => {
+    devInstantRef.current = instant;
+    setDevInstant(instant);
   };
   const devSetAgent = (
     agentId: string,
@@ -455,12 +461,14 @@ export default function App() {
             <DevPanel
               era={era}
               placingKind={devPlaceKind}
+              instantBuild={devInstant}
               onResource={devResource}
               onFood={devFood}
               onFillMaterials={devFillMaterials}
               onHungerAll={devHungerAll}
               onAdvanceTime={devAdvanceTime}
               onPlaceBuild={devPlace}
+              onInstantBuild={devSetInstant}
               onEra={devEra}
             />
           </>
