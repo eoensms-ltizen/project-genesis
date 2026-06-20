@@ -17,6 +17,7 @@ type Props = {
   onPlaceBuild: (kind: BuildingKind) => void;
   onInstantBuild: (instant: boolean) => void;
   onTileTool: (tool: DevTileTool) => void;
+  onClose: () => void;
   onEra: (era: number) => void;
 };
 
@@ -59,10 +60,20 @@ export function DevPanel({
   onPlaceBuild,
   onInstantBuild,
   onTileTool,
+  onClose,
   onEra,
 }: Props) {
   return (
-    <details className="panel-section">
+    <details
+      className="panel-section"
+      onToggle={(e) => {
+        // Collapsing the panel disarms any placement/tile tool, so the cursor ghost
+        // never lingers during normal play — it only shows while you're in here.
+        if (!(e.currentTarget as HTMLDetailsElement).open) {
+          onClose();
+        }
+      }}
+    >
       <summary style={{ cursor: "pointer" }}>🛠 {tr("Developer tools", "개발자 도구")}</summary>
 
       <div style={rowStyle}>

@@ -293,6 +293,14 @@ export default function App() {
     setDevPlaceKind(null);
     gameRef.current?.setPlacementPreview(null, next !== null);
   };
+  const devDisarm = () => {
+    // Drop every armed dev tool and clear the cursor ghost.
+    devPlaceKindRef.current = null;
+    setDevPlaceKind(null);
+    devTileToolRef.current = null;
+    setDevTileTool(null);
+    gameRef.current?.setPlacementPreview(null, false);
+  };
   const devSetInstant = (instant: boolean) => {
     devInstantRef.current = instant;
     setDevInstant(instant);
@@ -500,6 +508,7 @@ export default function App() {
               onPlaceBuild={devPlace}
               onInstantBuild={devSetInstant}
               onTileTool={devTool}
+              onClose={devDisarm}
               onEra={devEra}
             />
           </>
