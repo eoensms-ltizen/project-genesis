@@ -6,14 +6,18 @@ import type {
   AgentState,
   Animal,
   Building,
+  BuildingKind,
+  FoodKind,
   GameClock,
   GameLogEntry,
   InspectionTarget,
+  ResourceKind,
   Vec2,
 } from "./game/types";
 import { getLang, setLang, tr, type Lang } from "./i18n";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
+import { DevPanel } from "./ui/DevPanel";
 import { GameLog } from "./ui/GameLog";
 import { Inspector } from "./ui/Inspector";
 
@@ -237,6 +241,12 @@ export default function App() {
     setPendingPlacement(true);
   };
 
+  const devResource = (resource: ResourceKind, amount: number) =>
+    gameRef.current?.devGiveResource(resource, amount);
+  const devFood = (kind: FoodKind, amount: number) => gameRef.current?.devGiveFood(kind, amount);
+  const devBuild = (kind: BuildingKind) => gameRef.current?.devBuild(kind);
+  const devEra = (value: number) => gameRef.current?.devSetEra(value);
+
   const changeSpeed = (value: number) => {
     speedRef.current = value;
     setSpeed(value);
@@ -421,6 +431,13 @@ export default function App() {
               placementActive={pendingPlacement}
             />
             <AgentCreator onCreate={addRandomAgent} />
+            <DevPanel
+              era={era}
+              onResource={devResource}
+              onFood={devFood}
+              onBuild={devBuild}
+              onEra={devEra}
+            />
           </>
         )}
 

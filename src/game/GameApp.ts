@@ -1,6 +1,13 @@
 import { PixiRenderer } from "./render/PixiRenderer";
 import { Simulation } from "./Simulation";
-import type { InspectionTarget, SimulationSnapshot, Vec2 } from "./types";
+import type {
+  BuildingKind,
+  FoodKind,
+  InspectionTarget,
+  ResourceKind,
+  SimulationSnapshot,
+  Vec2,
+} from "./types";
 
 type GameAppOptions = {
   onChange: (snapshot: SimulationSnapshot) => void;
@@ -155,6 +162,66 @@ export class GameApp {
 
   setFlatBuildings(flat: boolean) {
     this.renderer.setFlatBuildings(flat);
+  }
+
+  // --- Developer cheats (debug panel only — not part of normal play) ---------
+
+  /** Add raw materials straight into the warehouse stock. */
+  devGiveResource(resource: ResourceKind, amount: number) {
+    this.simulation.store(resource, amount);
+    this.simulation.notifyChanged();
+    this.render();
+  }
+
+  /** Add food straight into the larder. */
+  devGiveFood(kind: FoodKind, amount: number) {
+    this.simulation.addFood(kind, amount);
+    this.simulation.notifyChanged();
+    this.render();
+  }
+
+  /** Jump the village to a chosen era. */
+  devSetEra(era: number) {
+    this.simulation.era = Math.max(0, Math.min(4, Math.round(era)));
+    this.simulation.notifyChanged();
+    this.render();
+  }
+
+  /** Instantly raise a finished building near the village centre. Returns false
+   *  if no clear site was found. */
+  devBuild(kind: BuildingKind): boolean {
+    const sizes: Partial<Record<BuildingKind, [number, number]>> = {
+      house: [5, 5],
+      warehouse: [4, 4],
+      granary: [4, 4],
+      kitchen: [4, 4],
+      funfair: [8, 6],
+      pasture: [6, 6],
+      cemetery: [3, 3],
+      park: [3, 3],
+    };
+    const [w, h] = sizes[kind] ?? [4, 4];
+    const c = this.simulation.villageCenter();
+    const origin = { x: Math.round(c.x), y: Math.round(c.y) };
+    const site = this.simulation.world.findBuildingSite(origin, w, h, (p) =>
+      this.simulation.isTileClaimed(p),
+    );
+    if (!site) {
+      return false;
+    }
+    const building = this.simulation.registerBuilding({
+      kind,
+      x: site.x,
+      y: site.y,
+      width: w,
+      height: h,
+      door: { x: site.x + Math.floor(w / 2), y: site.y + h - 1 },
+    });
+    this.simulation.claimBuildingFootprint(building);
+    this.simulation.setBuildingStage(building, "built");
+    this.simulation.notifyChanged();
+    this.render();
+    return true;
   }
 
   destroy() {
