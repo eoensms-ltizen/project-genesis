@@ -245,6 +245,27 @@ export class GameApp {
     return this.devRaise(kind, x, y, instant);
   }
 
+  /** Dev tool: pave the clicked ground tile into a road. */
+  devPaveRoadAt(position: Vec2): boolean {
+    const ok = this.simulation.devPaveRoad({ x: Math.round(position.x), y: Math.round(position.y) });
+    if (ok) this.render();
+    return ok;
+  }
+
+  /** Dev tool: demolish the single clicked tile (wall/floor/door/fence/road). */
+  devDemolishTileAt(position: Vec2): boolean {
+    const ok = this.simulation.devDemolishTile({ x: Math.round(position.x), y: Math.round(position.y) });
+    if (ok) this.render();
+    return ok;
+  }
+
+  /** Dev tool: tear down the whole building under the clicked tile. */
+  devDemolishBuildingAt(position: Vec2): boolean {
+    const ok = this.simulation.devDemolishBuildingAt({ x: Math.round(position.x), y: Math.round(position.y) });
+    if (ok) this.render();
+    return ok;
+  }
+
   /** Top up every material in the warehouse. */
   devFillMaterials() {
     this.simulation.store("wood", 300);

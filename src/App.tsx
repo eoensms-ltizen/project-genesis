@@ -17,7 +17,7 @@ import type {
 import { getLang, setLang, tr, type Lang } from "./i18n";
 import { AgentCreator } from "./ui/AgentCreator";
 import { ControlPanel } from "./ui/ControlPanel";
-import { DevPanel } from "./ui/DevPanel";
+import { DevPanel, type DevTileTool } from "./ui/DevPanel";
 import { GameLog } from "./ui/GameLog";
 import { Inspector } from "./ui/Inspector";
 
@@ -141,6 +141,8 @@ export default function App() {
   const devPlaceKindRef = useRef<BuildingKind | null>(null);
   const [devInstant, setDevInstant] = useState(true);
   const devInstantRef = useRef(true);
+  const [devTileTool, setDevTileTool] = useState<DevTileTool>(null);
+  const devTileToolRef = useRef<DevTileTool>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
@@ -187,6 +189,19 @@ export default function App() {
           gameRef.current.devBuildAt(devPlaceKindRef.current, position, devInstantRef.current);
           devPlaceKindRef.current = null;
           setDevPlaceKind(null);
+          return;
+        }
+        // Tile tools stay armed across clicks so you can pave or demolish a run
+        // of tiles in a row (e.g. tear out a whole wall, one tile at a time).
+        if (devTileToolRef.current) {
+          const tool = devTileToolRef.current;
+          if (tool === "road") {
+            gameRef.current.devPaveRoadAt(position);
+          } else if (tool === "demolishTile") {
+            gameRef.current.devDemolishTileAt(position);
+          } else if (tool === "demolishBuilding") {
+            gameRef.current.devDemolishBuildingAt(position);
+          }
           return;
         }
         if (gameRef.current.isPlacementMode()) {
@@ -263,6 +278,17 @@ export default function App() {
     const next = devPlaceKindRef.current === kind ? null : kind;
     devPlaceKindRef.current = next;
     setDevPlaceKind(next);
+    // Arming a building cancels any tile tool, so clicks don't do two things.
+    devTileToolRef.current = null;
+    setDevTileTool(null);
+  };
+  const devTool = (tool: DevTileTool) => {
+    // Toggle a sticky tile tool (road / demolish); arming one cancels building place.
+    const next = devTileToolRef.current === tool ? null : tool;
+    devTileToolRef.current = next;
+    setDevTileTool(next);
+    devPlaceKindRef.current = null;
+    setDevPlaceKind(null);
   };
   const devSetInstant = (instant: boolean) => {
     devInstantRef.current = instant;
@@ -462,6 +488,7 @@ export default function App() {
               era={era}
               placingKind={devPlaceKind}
               instantBuild={devInstant}
+              tileTool={devTileTool}
               onResource={devResource}
               onFood={devFood}
               onFillMaterials={devFillMaterials}
@@ -469,6 +496,7 @@ export default function App() {
               onAdvanceTime={devAdvanceTime}
               onPlaceBuild={devPlace}
               onInstantBuild={devSetInstant}
+              onTileTool={devTool}
               onEra={devEra}
             />
           </>

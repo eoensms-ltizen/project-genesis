@@ -37,6 +37,19 @@ const ROAD_WEAR_THRESHOLD = 9;
 const PATH_LOG_COOLDOWN_SECONDS = 8;
 
 const NATURE_TICK_SECONDS = 5;
+// How long a built structure may sit damaged (a wall/floor/door/fence torn out)
+// before the town raises a repair job. Left alone this long, residents mend it.
+const REPAIR_GRACE_SECONDS = 25;
+// The structural tiles a building is mended for. Interior ground (Plaza, Grass)
+// and decor (crops, graves) are deliberately excluded so a scuffed yard never
+// looks "damaged" — only a missing wall/floor/door/fence triggers a repair.
+const REPAIRABLE_TILES: ReadonlySet<TileType> = new Set([
+  "Wall",
+  "Door",
+  "Floor",
+  "Fence",
+  "FenceGate",
+]);
 // Forests are slow to recover so wood is a deliberate resource, not free and
 // instant — this is what pushes the colony toward stone and ore over time.
 const TREE_CAP = 240;
@@ -446,6 +459,7 @@ export class Simulation {
       this.runFactories();
       this.runSmelters();
       this.decayInfrastructure();
+      this.detectDamage();
       this.recomputeAmbiance();
       this.relocateMisplacedWork();
       this.spawnLitter();
@@ -2625,6 +2639,123 @@ export class Simulation {
       b.needs.comfort = Math.max(0, b.needs.comfort - QUARREL_COMFORT_HIT);
       this.log(tr(`${a.name} and ${b.name} quarreled — the village needs some order. 😠`, `${a.name}와(과) ${b.name}이(가) 다퉜다 — 마을에 질서가 필요하다. 😠`));
     }
+  }
+
+  // --- Damage & repair: demolished structures mend themselves over time -------
+
+  /**
+   * The structural tiles of a built building that are currently missing — a wall
+   * or floor or door that's been torn out (e.g. by the dev demolish tool, or a
+   * collapse). Interior ground (Plaza/Grass) and furniture are not counted: only
+   * genuine structure (wall/floor/door/fence/gate) is something to rebuild.
+   */
+  private missingStructureTiles(building: Building): BuildPlanTile[] {
+    const missing: BuildPlanTile[] = [];
+    for (const tile of this.buildingLayout(building)) {
+      if (!REPAIRABLE_TILES.has(tile.t)) {
+        continue; // open yard ground / plaza — not "broken" when scuffed
+      }
+      const current = this.world.getTile(tile)?.type;
+      // A floor tile carrying furniture (a bed, stove, table) is intact, not a hole.
+      const intact =
+        current === tile.t ||
+        (tile.t === "Floor" && Simulation.FURNITURE_TILES.has(current as TileType));
+      if (!intact) {
+        missing.push({ x: tile.x, y: tile.y, t: tile.t, done: false });
+      }
+    }
+    return missing;
+  }
+
+  /**
+   * Scan built structures for demolition damage. A building noticed broken is
+   * stamped with the time; if it's still broken after a grace period of neglect,
+   * the town raises a repair job — its `plan` is loaded with just the missing
+   * tiles and a resident re-lays each by hand (fetching wood like any build),
+   * all while the building stays "built" so its function never lapses.
+   */
+  private detectDamage() {
+    for (const building of this.buildings) {
+      if (building.stage !== "built" || building.repairing) {
+        continue; // sites/foundations build normally; a mend in progress is left
+      }
+      const missing = this.missingStructureTiles(building);
+      if (missing.length === 0) {
+        building.damagedAt = undefined;
+        continue;
+      }
+      if (building.damagedAt === undefined) {
+        building.damagedAt = this.elapsedSeconds;
+        continue; // just noticed — give it the grace period before acting
+      }
+      if (this.elapsedSeconds - building.damagedAt >= REPAIR_GRACE_SECONDS) {
+        building.repairing = true;
+        building.plan = missing;
+        this.log(
+          tr(
+            `A structure is damaged — someone will repair it. 🛠️`,
+            `건물이 파손되었다 — 주민이 수리할 것이다. 🛠️`,
+          ),
+        );
+        this.notifyChanged();
+      }
+    }
+  }
+
+  /**
+   * Wrap up a repair (called when the mend plan is fully laid): drop the repair
+   * state, restore the door approach (any road the demolition took out), and let
+   * the building carry on as before. The missing tiles were already stamped one
+   * by one as they were re-laid, so nothing needs repainting here.
+   */
+  finalizeRepair(building: Building) {
+    building.repairing = false;
+    building.plan = undefined;
+    building.damagedAt = undefined;
+    if (building.kind !== "bedroom") {
+      this.reserveEntrance(building);
+      this.paveApproach(building);
+    }
+    this.refreshDoors();
+    this.notifyChanged();
+  }
+
+  // --- Developer tools: free-form tile edits (place road, demolish) -----------
+
+  /** Dev tool: pave a single ground tile into Road. */
+  devPaveRoad(position: Vec2): boolean {
+    if (!ROADABLE.has(this.world.getTile(position)?.type as TileType)) {
+      return false; // only ground can be paved — never over a wall/tree/water
+    }
+    this.world.setTile(position, "Road");
+    this.notifyChanged();
+    return true;
+  }
+
+  /**
+   * Dev tool: demolish a single tile, returning it to bare ground. Works on any
+   * part of any structure — a wall, floor, door, fence or stretch of road. If the
+   * tile belonged to a building, the neglect-repair system will rebuild it later.
+   */
+  devDemolishTile(position: Vec2): boolean {
+    const type = this.world.getTile(position)?.type;
+    if (type === undefined) {
+      return false;
+    }
+    this.world.setTile(position, "Grass");
+    this.refreshDoors();
+    this.notifyChanged();
+    return true;
+  }
+
+  /** Dev tool: tear down the whole building under a tile (no repair follows). */
+  devDemolishBuildingAt(position: Vec2): boolean {
+    const building = this.buildingAt(position);
+    if (!building) {
+      return false;
+    }
+    this.removeBuilding(building);
+    return true;
   }
 
   /** Tear a building down, returning its footprint to open ground. */

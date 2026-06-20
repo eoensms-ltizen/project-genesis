@@ -206,6 +206,14 @@ export type Building = {
   // floor laid, walls re-wrapped). Tells the build/finish path to preserve the
   // existing interior (stockpile, stove, beds) instead of repainting it blank.
   expanding?: boolean;
+  // Elapsed-seconds stamp of when this built building was first noticed to be
+  // damaged (a structural tile demolished). Cleared once it's whole again. After
+  // a grace period of neglect the town raises a repair job (see `repairing`).
+  damagedAt?: number;
+  // True while a finished building is being mended: its `plan` holds only the
+  // missing structural tiles (done:false), and a resident re-lays each — exactly
+  // like a fresh build, but the stage stays "built" so its function never lapses.
+  repairing?: boolean;
 };
 
 // One tile of a building's construction plan — a wall, floor, or doorway that a

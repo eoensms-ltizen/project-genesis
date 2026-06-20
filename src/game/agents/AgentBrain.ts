@@ -1242,13 +1242,22 @@ export class AgentBrain {
     let best: Building | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const b of simulation.buildings) {
-      // Any unfinished building can be pitched in on — rooms and open yards alike
-      // are raised tile by tile now (this also adopts dev-staked sites).
-      if (b.stage === "built") {
-        continue;
-      }
       const builders = simulation.agents.filter((a) => a.projectBuildingId === b.id).length;
-      if (b.stage === "site") {
+      if (b.stage === "built") {
+        // A finished building only needs hands if it's been damaged and is now
+        // under repair — its plan holds the missing tiles to re-lay.
+        if (!b.repairing || !b.plan) {
+          continue;
+        }
+        const undone = b.plan.filter((t) => !t.done);
+        if (undone.length === 0 || undone.every((t) => t.claimedBy)) {
+          continue;
+        }
+        const cap = Math.max(1, Math.min(4, Math.ceil(undone.length / 3)));
+        if (builders >= cap) {
+          continue;
+        }
+      } else if (b.stage === "site") {
         // An orphaned stake (its planner wandered off) — adopt it to break ground,
         // so a building the town has decided it needs doesn't stall forever.
         if (builders > 0) {
@@ -2548,7 +2557,9 @@ export class AgentBrain {
     const building = agent.projectBuildingId
       ? simulation.getBuilding(agent.projectBuildingId)
       : undefined;
-    if (!building || building.stage === "built") {
+    // A "built" building is normally done — except one under repair, whose plan
+    // holds the missing tiles still to be re-laid.
+    if (!building || (building.stage === "built" && !building.repairing)) {
       agent.buildTarget = undefined;
       agent.target = undefined;
       agent.path = undefined;
@@ -2563,7 +2574,9 @@ export class AgentBrain {
 
     // Lay the foundation (and draw up the plan) the first time someone arrives:
     // pay the groundwork/floor material now. If short, fetch a fresh load first.
-    if (building.stage !== "foundation") {
+    // A repair skips this entirely — the building is already up; we only re-lay
+    // its missing tiles from the repair plan that's already attached.
+    if (building.stage !== "foundation" && !building.repairing) {
       if (agent.inventory.wood < FOUNDATION_WOOD) {
         if (!this.fetchWood(agent, simulation, load)) {
           this.backOff(agent, simulation);
@@ -2619,7 +2632,11 @@ export class AgentBrain {
     const building = agent.projectBuildingId
       ? simulation.getBuilding(agent.projectBuildingId)
       : undefined;
-    if (!building || !agent.buildTarget || building.stage === "built") {
+    if (
+      !building ||
+      !agent.buildTarget ||
+      (building.stage === "built" && !building.repairing)
+    ) {
       agent.buildTarget = undefined;
       this.setState(agent, simulation, building ? "BuildHouse" : "Idle");
       return;
@@ -2662,6 +2679,19 @@ export class AgentBrain {
 
   /** Finish a walled room: stamp it built, move in (houses) or open it (civic). */
   private finishBuilding(agent: Agent, simulation: Simulation, building: Building) {
+    // A repair: every missing tile was already re-laid as it was placed, so the
+    // building is whole again. Just clear the repair state and patch the approach
+    // road — don't re-stamp the stage (that would repaint over the interior).
+    if (building.repairing) {
+      simulation.finalizeRepair(building);
+      simulation.log(tr(`${agent.name} repaired the damage. 🛠️`, `${agent.name}이(가) 파손된 곳을 수리했다. 🛠️`), [agent]);
+      agent.projectBuildingId = undefined;
+      agent.buildTarget = undefined;
+      agent.target = undefined;
+      agent.path = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
     simulation.setBuildingStage(building, "built");
     simulation.releaseBuildingFootprint(building);
     if (building.kind === "bedroom") {

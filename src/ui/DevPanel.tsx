@@ -1,10 +1,14 @@
 import type { BuildingKind, FoodKind, ResourceKind } from "../game/types";
 import { tr } from "../i18n";
 
+/** A sticky map-click tool for free-form tile edits (null = none armed). */
+export type DevTileTool = "road" | "demolishTile" | "demolishBuilding" | null;
+
 type Props = {
   era: number;
   placingKind: BuildingKind | null;
   instantBuild: boolean;
+  tileTool: DevTileTool;
   onResource: (resource: ResourceKind, amount: number) => void;
   onFood: (kind: FoodKind, amount: number) => void;
   onFillMaterials: () => void;
@@ -12,6 +16,7 @@ type Props = {
   onAdvanceTime: (seconds: number) => void;
   onPlaceBuild: (kind: BuildingKind) => void;
   onInstantBuild: (instant: boolean) => void;
+  onTileTool: (tool: DevTileTool) => void;
   onEra: (era: number) => void;
 };
 
@@ -45,6 +50,7 @@ export function DevPanel({
   era,
   placingKind,
   instantBuild,
+  tileTool,
   onResource,
   onFood,
   onFillMaterials,
@@ -52,6 +58,7 @@ export function DevPanel({
   onAdvanceTime,
   onPlaceBuild,
   onInstantBuild,
+  onTileTool,
   onEra,
 }: Props) {
   return (
@@ -122,6 +129,43 @@ export function DevPanel({
           {instantBuild
             ? tr("Click the map to place it (finished).", "지도를 클릭해 즉시 완공합니다.")
             : tr("Click the map to stake a site — residents build it.", "지도를 클릭해 건설 목표만 세웁니다(주민이 직접 건설).")}
+        </p>
+      )}
+
+      <div style={rowStyle}>
+        <span style={labelStyle}>{tr("Tiles", "타일")}</span>
+        <button
+          type="button"
+          data-active={tileTool === "road"}
+          onClick={() => onTileTool("road")}
+        >
+          🛣️ {tr("Road", "도로")}
+        </button>
+        <button
+          type="button"
+          data-active={tileTool === "demolishTile"}
+          onClick={() => onTileTool("demolishTile")}
+        >
+          🧹 {tr("Demolish tile", "타일 철거")}
+        </button>
+        <button
+          type="button"
+          data-active={tileTool === "demolishBuilding"}
+          onClick={() => onTileTool("demolishBuilding")}
+        >
+          💥 {tr("Demolish building", "건물 철거")}
+        </button>
+      </div>
+      {tileTool && (
+        <p className="muted" style={{ fontSize: 11, margin: "2px 0" }}>
+          {tileTool === "road"
+            ? tr("Click ground tiles to pave roads.", "땅을 클릭해 도로를 깝니다.")
+            : tileTool === "demolishTile"
+              ? tr(
+                  "Click tiles to demolish them — left alone, residents repair structures.",
+                  "타일을 클릭해 철거합니다 — 방치하면 주민이 건물을 수리합니다.",
+                )
+              : tr("Click a building to tear it down entirely.", "건물을 클릭해 통째로 철거합니다.")}
         </p>
       )}
 
