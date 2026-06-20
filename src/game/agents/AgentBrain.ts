@@ -159,7 +159,7 @@ const PRAY_DURATION_SECONDS = 8;
 const RELAX_DURATION_SECONDS = 6;
 // A ride on the coaster: a long, joyful break that tops up leisure and lifts the
 // spirits, and shields the rider from low-mood breaks for a while afterwards.
-const RIDE_DURATION_SECONDS = 26; // ~one full circuit (matches the coaster loop time)
+const RIDE_DURATION_SECONDS = 9; // ~one full circuit (matches the coaster loop time)
 const RIDE_LEISURE_FILL = 70;
 const RIDE_MOOD_BOOST = 22;
 const FUN_PROTECT_SECONDS = 240; // recent riders resist despondent breaks this long
@@ -2238,9 +2238,8 @@ export class AgentBrain {
       pasture: [6, 6],
       cemetery: [3, 3],
       park: [3, 3],
-      // The fairground station is compact — the roller coaster itself is the
-      // map-wide elevated track drawn over everything, not a footprint.
-      funfair: [4, 3],
+      // The fairground holds a compact roller-coaster loop inside its footprint.
+      funfair: [8, 6],
     };
     const [width, height] = SIZES[kind] ?? [3, 3];
     // The cemetery is sited remotely (away from the village centre and housing);
@@ -2272,15 +2271,6 @@ export class AgentBrain {
             isClaimed,
             { far: true, minDistance: 16 },
           )
-        : kind === "funfair"
-          ? // Site the station under the coaster's station waypoint so the track
-            // runs from it.
-            simulation.world.findBuildingSite(
-              simulation.funfairSite(),
-              width,
-              height,
-              isClaimed,
-            )
         : (adjoins
             ? simulation.findAdjoiningSite(width, height, roundVec(origin), isClaimed)
             : undefined) ??
