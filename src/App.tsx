@@ -189,6 +189,7 @@ export default function App() {
           gameRef.current.devBuildAt(devPlaceKindRef.current, position, devInstantRef.current);
           devPlaceKindRef.current = null;
           setDevPlaceKind(null);
+          gameRef.current.setPlacementPreview(null, false);
           return;
         }
         // Tile tools stay armed across clicks so you can pave or demolish a run
@@ -281,6 +282,7 @@ export default function App() {
     // Arming a building cancels any tile tool, so clicks don't do two things.
     devTileToolRef.current = null;
     setDevTileTool(null);
+    gameRef.current?.setPlacementPreview(next, false);
   };
   const devTool = (tool: DevTileTool) => {
     // Toggle a sticky tile tool (road / demolish); arming one cancels building place.
@@ -289,6 +291,7 @@ export default function App() {
     setDevTileTool(next);
     devPlaceKindRef.current = null;
     setDevPlaceKind(null);
+    gameRef.current?.setPlacementPreview(null, next !== null);
   };
   const devSetInstant = (instant: boolean) => {
     devInstantRef.current = instant;

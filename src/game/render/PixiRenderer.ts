@@ -56,6 +56,10 @@ export class PixiRenderer {
   private dragMoved = false;
   private pinchStartDist = 0;
   private pinchStartZoom = 1;
+  // Latest tile the pointer is hovering (null when off-canvas), and the footprint
+  // to ghost there for a dev placement (null when no dev tool is armed).
+  private hoverTile: Vec2 | null = null;
+  private placementPreview: { w: number; h: number; tile: boolean } | null = null;
 
   constructor(host: HTMLElement, options: RendererOptions) {
     this.host = host;
@@ -108,6 +112,23 @@ export class PixiRenderer {
         this.pinchStartZoom = this.userZoom;
         this.dragStart = null;
       }
+    });
+
+    // Track the hovered tile so a dev placement can be ghosted under the cursor.
+    const updateHover = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const local = this.worldLayer.toLocal({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      this.hoverTile = {
+        x: Math.floor(local.x / TILE_SIZE),
+        y: Math.floor(local.y / TILE_SIZE),
+      };
+    };
+    canvas.addEventListener("pointermove", (event) => updateHover(event));
+    canvas.addEventListener("pointerleave", () => {
+      this.hoverTile = null;
     });
 
     canvas.addEventListener("pointermove", (event) => {
@@ -239,6 +260,15 @@ export class PixiRenderer {
     }
     this.flatBuildings = flat;
     this.lastBuildingsKey = ""; // force the building layer to redraw next frame
+  }
+
+  /**
+   * Arm (or clear) the placement ghost: while set, a translucent footprint of the
+   * given size is drawn under the cursor so you can see exactly what — and where —
+   * a dev placement will land before you click. `tile` true draws a single tile.
+   */
+  setPlacementPreview(spec: { w: number; h: number; tile: boolean } | null) {
+    this.placementPreview = spec;
   }
 
   /** Create one Graphics per CHUNK×CHUNK block of tiles, once we know the size. */
@@ -498,6 +528,32 @@ export class PixiRenderer {
         if (occupied.has(`${door.x},${door.y}`)) {
           drawOpenDoor(this.overlayGraphics, door.x, door.y, wallMask(world, door.x, door.y));
         }
+      }
+    }
+
+    // Placement ghost: a translucent outline of exactly what a dev tool will drop
+    // under the cursor (a building footprint centred on the hover tile, or a single
+    // highlighted tile for the road/demolish tools).
+    if (this.placementPreview && this.hoverTile) {
+      const { w, h, tile } = this.placementPreview;
+      const ox = tile ? this.hoverTile.x : this.hoverTile.x - Math.floor(w / 2);
+      const oy = tile ? this.hoverTile.y : this.hoverTile.y - Math.floor(h / 2);
+      const px = ox * TILE_SIZE;
+      const py = oy * TILE_SIZE;
+      const color = tile ? 0xffd24a : 0x5fd17a;
+      this.overlayGraphics.rect(px, py, w * TILE_SIZE, h * TILE_SIZE);
+      this.overlayGraphics.fill({ color, alpha: 0.18 });
+      this.overlayGraphics.rect(px, py, w * TILE_SIZE, h * TILE_SIZE);
+      this.overlayGraphics.stroke({ color, width: 1.5, alpha: 0.95 });
+      // For a building, also mark the doorway tile so the orientation is obvious.
+      if (!tile) {
+        this.overlayGraphics.rect(
+          (ox + Math.floor(w / 2)) * TILE_SIZE,
+          (oy + h - 1) * TILE_SIZE,
+          TILE_SIZE,
+          TILE_SIZE,
+        );
+        this.overlayGraphics.fill({ color: 0x3a7bd0, alpha: 0.5 });
       }
     }
 

@@ -728,6 +728,9 @@ export class Simulation {
   private coasterAt(frac: number): Vec2 {
     const pts = this.coasterTrackTiles();
     const N = pts.length;
+    if (N === 0) {
+      return { x: 0, y: 0 }; // no built coaster — nothing to sample
+    }
     const f = (((frac % 1) + 1) % 1) * N;
     const i0 = Math.floor(f) % N;
     const i1 = (i0 + 1) % N;

@@ -245,6 +245,22 @@ export class GameApp {
     return this.devRaise(kind, x, y, instant);
   }
 
+  /**
+   * Arm the placement ghost shown under the cursor. Pass a building kind to ghost
+   * its footprint, `tileTool` true to ghost a single tile (road/demolish), or
+   * neither to clear the preview.
+   */
+  setPlacementPreview(kind: BuildingKind | null, tileTool = false) {
+    if (kind) {
+      const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
+      this.renderer.setPlacementPreview({ w, h, tile: false });
+    } else if (tileTool) {
+      this.renderer.setPlacementPreview({ w: 1, h: 1, tile: true });
+    } else {
+      this.renderer.setPlacementPreview(null);
+    }
+  }
+
   /** Dev tool: pave the clicked ground tile into a road. */
   devPaveRoadAt(position: Vec2): boolean {
     const ok = this.simulation.devPaveRoad({ x: Math.round(position.x), y: Math.round(position.y) });
@@ -335,6 +351,7 @@ export class GameApp {
     if (!this.started) {
       return;
     }
+    const track = this.simulation.coasterTrackTiles();
     this.renderer.render(
       this.simulation.world,
       this.simulation.agents,
@@ -348,8 +365,11 @@ export class GameApp {
       this.simulation.items,
       this.simulation.grainStock,
       this.simulation.meatStock,
-      this.simulation.hasAnyFunfair() ? this.simulation.coasterTrackTiles() : [],
-      this.simulation.hasAnyFunfair() ? this.simulation.coasterCarTiles() : [],
+      // Only a BUILT funfair has a coaster. A staked/under-construction funfair
+      // returns an empty track, so guard the cars on the track being present —
+      // otherwise coasterCarTiles() would index an empty ring and crash.
+      track,
+      track.length > 0 ? this.simulation.coasterCarTiles() : [],
     );
   }
 }
