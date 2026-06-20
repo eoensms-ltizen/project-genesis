@@ -29,9 +29,12 @@ const BUILD_CARRY_WOOD = 12; // a generic load a builder hauls to site at once
 // tiles, instead of a tree-per-wall. A 5×5 house needs ~21 wood.
 const BUILD_LOAD_MAX = 30;
 
-/** Wood a single plan tile costs to lay (floors are covered by the foundation). */
+/** Wood a single plan tile costs to lay (interiors are covered by the foundation). */
 function tileWood(t: BuildPlanTile["t"]): number {
-  return t === "Wall" ? WALL_TILE_WOOD : t === "Door" ? DOOR_TILE_WOOD : 0;
+  if (t === "Wall" || t === "Fence") return WALL_TILE_WOOD;
+  if (t === "Door") return DOOR_TILE_WOOD;
+  if (t === "FenceGate") return WALL_TILE_WOOD;
+  return 0; // Floor, Grass, Plaza and other interior tiles are free
 }
 const EAT_DURATION_SECONDS = 1.5;
 const IDLE_THINK_SECONDS = 0.4;
@@ -2551,11 +2554,6 @@ export class AgentBrain {
       return;
     }
 
-    if (!ROOM_BUILDING_KINDS.has(building.kind)) {
-      this.buildOpenSpace(agent, simulation, building, deltaSeconds);
-      return;
-    }
-
     // How much wood to haul per supply run: enough to finish this building in one
     // trip (capped), so a builder fells/withdraws a whole load and then lays many
     // tiles, rather than fetching a tree's worth per wall.
@@ -2690,35 +2688,6 @@ export class AgentBrain {
     // A freshly finished room may sit against a neighbour with a redundant wall —
     // remodel the two into a shared single face.
     simulation.remodelDoubleWalls();
-    this.setState(agent, simulation, "Idle");
-  }
-
-  /** The old single-timer build, kept for open spaces (park/pasture/cemetery). */
-  private buildOpenSpace(
-    agent: Agent,
-    simulation: Simulation,
-    building: Building,
-    deltaSeconds: number,
-  ) {
-    if (agent.actionTimer === 0 && building.stage !== "foundation") {
-      simulation.setBuildingStage(building, "foundation");
-      simulation.log(
-        tr(`${agent.name} started building the ${building.kind}.`, `${agent.name}이(가) ${buildingNameKo(building.kind)}을(를) 짓기 시작했다.`),
-      );
-    }
-
-    agent.actionTimer += deltaSeconds;
-    if (agent.actionTimer < BUILD_DURATION_SECONDS) {
-      return;
-    }
-
-    simulation.setBuildingStage(building, "built");
-    simulation.releaseBuildingFootprint(building);
-    agent.inventory.wood = Math.max(0, agent.inventory.wood - buildCost(building.kind));
-    simulation.log(tr(`${agent.name} built the village ${building.kind}!`, `${agent.name}이(가) 마을 ${buildingNameKo(building.kind)}을(를) 지었다!`), [agent]);
-    agent.projectBuildingId = undefined;
-    agent.target = undefined;
-    agent.path = undefined;
     this.setState(agent, simulation, "Idle");
   }
 

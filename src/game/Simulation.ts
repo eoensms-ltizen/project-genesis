@@ -567,9 +567,52 @@ export class Simulation {
     return tiles;
   }
 
+  /** The fence/gate/interior layout of an open yard (pasture, fairground, etc.). */
+  private fencedYardLayout(building: Building, interior: TileType): BuildPlanTile[] {
+    const { x, y, width, height } = building;
+    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
+    const tiles: BuildPlanTile[] = [];
+    for (let fy = 0; fy < height; fy += 1) {
+      for (let fx = 0; fx < width; fx += 1) {
+        const pos = { x: x + fx, y: y + fy };
+        const edge = fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1;
+        const t: TileType = doorKeys.has(`${pos.x},${pos.y}`)
+          ? "FenceGate"
+          : edge
+            ? "Fence"
+            : interior;
+        tiles.push({ x: pos.x, y: pos.y, t });
+      }
+    }
+    return tiles;
+  }
+
+  /**
+   * The full tile layout of ANY building — walled rooms, fenced yards (pasture,
+   * cemetery, park), or the fairground plaza. Shared by the instant paint and the
+   * piecemeal construction plan, so every building can be raised tile by tile.
+   */
+  buildingLayout(building: Building): BuildPlanTile[] {
+    if (ROOM_BUILDING_KINDS.has(building.kind)) {
+      return this.roomLayout(building);
+    }
+    if (building.kind === "funfair") {
+      return this.fencedYardLayout(building, "Plaza");
+    }
+    // pasture, cemetery, park and any other open yard: a fenced grass plot.
+    return this.fencedYardLayout(building, "Grass");
+  }
+
   /** Paint a finished building as a walled room: perimeter walls, doorway(s), floor. */
   private paintWalledRoom(building: Building) {
     for (const tile of this.roomLayout(building)) {
+      this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
+    }
+  }
+
+  /** Stamp a building's full layout (used to assert a finished non-room building). */
+  private paintBuildingLayout(building: Building) {
+    for (const tile of this.buildingLayout(building)) {
       this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
     }
   }
@@ -617,47 +660,6 @@ export class Simulation {
       }
     }
     this.refreshDoors();
-  }
-
-  /** Paint a pasture as a fenced paddock: rail fence around the edge, one gate,
-   * open grass inside for the herd. */
-  private paintFencedYard(building: Building) {
-    const { x, y, width, height } = building;
-    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
-    for (let fy = 0; fy < height; fy += 1) {
-      for (let fx = 0; fx < width; fx += 1) {
-        const pos = { x: x + fx, y: y + fy };
-        const edge = fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1;
-        const type: TileType = doorKeys.has(`${pos.x},${pos.y}`)
-          ? "FenceGate"
-          : edge
-            ? "Fence"
-            : "Grass"; // open pasture to graze
-        this.world.setTile(pos, type);
-      }
-    }
-  }
-
-  /**
-   * A fairground: a paved plaza (walkable) inside a low fence, with a gate at the
-   * entrance. The roller coaster itself is render-only decor laid over the plaza;
-   * residents walk in through the gate to the boarding spot.
-   */
-  private paintFunfair(building: Building) {
-    const { x, y, width, height } = building;
-    const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
-    for (let fy = 0; fy < height; fy += 1) {
-      for (let fx = 0; fx < width; fx += 1) {
-        const pos = { x: x + fx, y: y + fy };
-        const edge = fx === 0 || fy === 0 || fx === width - 1 || fy === height - 1;
-        const type: TileType = doorKeys.has(`${pos.x},${pos.y}`)
-          ? "FenceGate"
-          : edge
-            ? "Fence"
-            : "Plaza"; // paved fairground, walkable
-        this.world.setTile(pos, type);
-      }
-    }
   }
 
   getFunfair(): Building | undefined {
@@ -773,8 +775,9 @@ export class Simulation {
    */
   ensureBuildPlan(building: Building): BuildPlanTile[] {
     if (!building.plan) {
-      const layout = this.roomLayout(building);
-      const order = (t: BuildPlanTile["t"]): number => (t === "Wall" ? 2 : t === "Door" ? 1 : 0);
+      const layout = this.buildingLayout(building);
+      const order = (t: TileType): number =>
+        t === "Wall" || t === "Fence" ? 2 : t === "Door" || t === "FenceGate" ? 1 : 0;
       building.plan = layout
         // A tile already showing its target type needs no laying. This is what
         // lets an annex share its parent's wall: those tiles are already Wall, so
@@ -815,9 +818,9 @@ export class Simulation {
       if (tile.claimedBy && tile.claimedBy !== builderId) {
         continue;
       }
-      // Walls come last (category 1) so the room is enclosed only once its
-      // interior and doorway are in place.
-      const category = tile.t === "Wall" ? 1 : 0;
+      // Solids (walls, fences) come last (category 1) so the perimeter closes
+      // only once the interior and doorway/gate are in place.
+      const category = tile.t === "Wall" || tile.t === "Fence" ? 1 : 0;
       const d = (tile.x - from.x) ** 2 + (tile.y - from.y) ** 2;
       const key = category * 1e6 + d;
       if (key < bestKey) {
@@ -1735,20 +1738,17 @@ export class Simulation {
       );
       building.durability = 100;
     }
-    // Walled rooms are built tile-by-tile: the moment the foundation is laid,
-    // draw up the construction plan so residents have walls/floor/door to place.
-    if (stage === "foundation" && ROOM_BUILDING_KINDS.has(building.kind)) {
+    // EVERY building is raised tile by tile: the moment its foundation is laid,
+    // draw up the construction plan (walls/floor/door for rooms; fence/gate plus
+    // grass or plaza for open yards) so residents place each tile one at a time.
+    if (stage === "foundation") {
       this.ensureBuildPlan(building);
     }
-    // Finished buildings are walled rooms (perimeter walls, a doorway, a floor
-    // interior). Open spaces — parks, pastures, cemeteries — stay solid/special.
-    if (stage === "built" && building.kind === "pasture") {
-      // A pasture is a fenced paddock: rail fence around the edge, a gate, open
-      // grass inside for the herd to graze.
-      this.paintFencedYard(building);
-    } else if (stage === "built" && building.kind === "funfair") {
-      // A fairground: a paved plaza inside a fence; the coaster is render decor.
-      this.paintFunfair(building);
+    if (stage === "built" && !ROOM_BUILDING_KINDS.has(building.kind)) {
+      // Open yards (pasture, fairground, cemetery, park): assert their final
+      // fence / gate / interior layout once the tiles are all laid.
+      this.paintBuildingLayout(building);
+      building.plan = undefined;
     } else if (stage === "built" && ROOM_BUILDING_KINDS.has(building.kind)) {
       // An enlarged room keeps its interior (stockpile, stove, beds); a fresh one
       // is painted blank. Either way the perimeter and floor are asserted.
@@ -1799,8 +1799,8 @@ export class Simulation {
         }
       }
     } else {
-      const tileType: TileType =
-        stage === "site" ? "HouseSite" : stage === "foundation" ? "HouseFoundation" : "House";
+      // Site or foundation: lay the walkable base residents build over.
+      const tileType: TileType = stage === "site" ? "HouseSite" : "HouseFoundation";
       for (const position of footprintTiles(building)) {
         // Never stamp over a finished wall or doorway: an annex's footprint
         // overlaps its parent house's shared wall, which must stay standing while
@@ -1819,19 +1819,6 @@ export class Simulation {
     // becomes Road, so a building can never be sealed in by neighbours.
     if (!annex) {
       this.reserveEntrance(building);
-    }
-    if (stage === "built") {
-      for (const door of this.buildingDoors(building)) {
-        // Walled rooms keep a Door tile and the fenced yards (pasture, fairground)
-        // keep their gate; other open spaces (park, cemetery) pave their doorway.
-        if (
-          !ROOM_BUILDING_KINDS.has(building.kind) &&
-          building.kind !== "pasture" &&
-          building.kind !== "funfair"
-        ) {
-          this.world.setTile(door, "Road");
-        }
-      }
     }
     if (stage === "built" && !annex) {
       this.paveApproach(building);

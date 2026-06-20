@@ -213,7 +213,9 @@ export type Building = {
 export type BuildPlanTile = {
   x: number;
   y: number;
-  t: "Wall" | "Floor" | "Door";
+  // The tile this spot becomes once laid — a room's Wall/Floor/Door, or a yard's
+  // Fence/FenceGate/Grass/Plaza. Any building is now raised tile by tile.
+  t: TileType;
   done?: boolean;
   // Id of the builder currently walking to lay this tile, so several builders can
   // raise one room at once without two of them converging on the same tile.

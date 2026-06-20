@@ -398,23 +398,27 @@ export class PixiRenderer {
       // floor/door tiles (in the terrain layer), so it only gets an emblem here;
       // a room under construction shows its rising tiles and gets no block.
       for (const building of [...buildings].sort((a, b) => a.y - b.y)) {
-        if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "built") {
-          drawRoomMarker(this.buildingGraphics, building);
+        // Under construction (foundation): every building shows its rising tiles
+        // from the terrain layer — no block or work-site box on top.
+        if (building.stage === "foundation") {
           continue;
         }
-        if (ROOM_BUILDING_KINDS.has(building.kind) && building.stage === "foundation") {
-          continue;
-        }
-        // A finished pasture is drawn from its fence/gate/grass tiles in the
-        // terrain layer, like a walled room — no solid body here.
-        if (building.kind === "pasture" && building.stage === "built") {
-          continue;
-        }
-        // A finished fairground: plaza/fence come from the terrain layer; the
-        // roller-coaster track, supports, station and car are drawn on top here.
-        if (building.kind === "funfair" && building.stage === "built") {
-          drawFunfair(this.buildingGraphics, building);
-          continue;
+        if (building.stage === "built") {
+          // Finished buildings are drawn from their own tiles in the terrain layer
+          // (walls/floor for rooms, fence/grass/plaza for yards). Rooms get a
+          // purpose emblem; the fairground gets its coaster station on top.
+          if (ROOM_BUILDING_KINDS.has(building.kind)) {
+            drawRoomMarker(this.buildingGraphics, building);
+            continue;
+          }
+          if (building.kind === "funfair") {
+            drawFunfair(this.buildingGraphics, building);
+            continue;
+          }
+          if (building.kind === "pasture") {
+            continue;
+          }
+          // cemetery / park keep their decorative body drawn over their tiles.
         }
         drawBuilding(this.buildingGraphics, building, this.flatBuildings);
       }
