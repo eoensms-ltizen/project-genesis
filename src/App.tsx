@@ -147,6 +147,9 @@ export default function App() {
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
   );
+  const [skinMode, setSkinMode] = useState(
+    () => localStorage.getItem("pg-skin-mode") === "1",
+  );
   const [lang, setLangState] = useState<Lang>(() => getLang());
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -217,6 +220,7 @@ export default function App() {
 
     gameRef.current = game;
     game.setFlatBuildings(localStorage.getItem("pg-flat-buildings") === "1");
+    game.setSkinMode(localStorage.getItem("pg-skin-mode") === "1");
     if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
       (window as unknown as { __genesis?: GameApp }).__genesis = game;
     }
@@ -346,10 +350,17 @@ export default function App() {
     localStorage.setItem("pg-flat-buildings", next ? "1" : "0");
   };
 
+  const toggleSkinMode = () => {
+    const next = !skinMode;
+    setSkinMode(next);
+    gameRef.current?.setSkinMode(next);
+    localStorage.setItem("pg-skin-mode", next ? "1" : "0");
+  };
+
   const speedOptions = [0, 1, 2, 4] as const;
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-skin-mode={skinMode}>
       <section className="game-surface" aria-label="Project Genesis map">
         <div ref={canvasHostRef} className="canvas-host" />
 
@@ -409,6 +420,15 @@ export default function App() {
               }
             >
               {flatBuildings ? "▦" : "🏙"}
+            </button>
+            <button
+              type="button"
+              className="hud-speed"
+              onClick={toggleSkinMode}
+              data-active={skinMode}
+              title={skinMode ? "Skin mode (tap for base)" : "Base mode (tap for skin)"}
+            >
+              {skinMode ? "Skin" : "Base"}
             </button>
             <button
               type="button"

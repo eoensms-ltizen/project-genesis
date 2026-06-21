@@ -164,6 +164,11 @@ export class GameApp {
     this.renderer.setFlatBuildings(flat);
   }
 
+  setSkinMode(enabled: boolean) {
+    this.renderer.setSkinMode(enabled);
+    this.render();
+  }
+
   // --- Developer cheats (debug panel only — not part of normal play) ---------
 
   /** Add raw materials straight into the warehouse stock. */

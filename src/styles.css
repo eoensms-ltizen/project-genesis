@@ -103,6 +103,31 @@ button[data-active="true"] {
   backdrop-filter: blur(3px);
 }
 
+.app-shell[data-skin-mode="true"] .hud-clock,
+.app-shell[data-skin-mode="true"] .hud-speed {
+  border-color: #6c5839;
+  background: rgba(23, 20, 14, 0.78);
+}
+
+.app-shell[data-skin-mode="true"] .side-panel {
+  border-left-color: #4a3b28;
+  background: #1c2119;
+}
+
+.app-shell[data-skin-mode="true"] button {
+  border-color: #574832;
+  background: #2a2f22;
+}
+
+.app-shell[data-skin-mode="true"] button:hover {
+  background: #333929;
+}
+
+.app-shell[data-skin-mode="true"] button[data-active="true"] {
+  border-color: #d1ad63;
+  background: #d1ad63;
+}
+
 .inspector-overlay {
   position: absolute;
   left: 8px;

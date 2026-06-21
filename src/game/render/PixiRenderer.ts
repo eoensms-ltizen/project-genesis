@@ -1,4 +1,5 @@
-import { Application, Container, Graphics } from "pixi.js";
+import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
+import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
 import type { Agent, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
@@ -27,6 +28,7 @@ export class PixiRenderer {
   // its neighbours — not all 4096 tiles. Building bodies sit in their own layer,
   // rebuilt only when the building set changes.
   private readonly terrainLayer = new Container();
+  private skinTextureLayer: TilingSprite | null = null;
   private chunkGraphics: Graphics[] = [];
   private chunkCols = 0;
   private chunkRows = 0;
@@ -37,6 +39,8 @@ export class PixiRenderer {
   private readonly nightGraphics = new Graphics();
   private lastBuildingsKey = "";
   private flatBuildings = false;
+  private skinMode = false;
+  private forceTerrainRedraw = false;
   private initialized = false;
   // Cached lamp tile centres, refreshed only when the world changes.
   private lampCenters: { x: number; y: number }[] = [];
@@ -73,6 +77,17 @@ export class PixiRenderer {
       resizeTo: this.host,
     });
 
+    const skinTexture = await Assets.load<Texture>(skinGroundTextureUrl);
+    const skinTextureLayer = new TilingSprite({
+      texture: skinTexture,
+      width: 1,
+      height: 1,
+      tileScale: { x: 0.82, y: 0.82 },
+    });
+    skinTextureLayer.alpha = 0;
+    skinTextureLayer.visible = false;
+    this.skinTextureLayer = skinTextureLayer;
+
     this.host.appendChild(this.app.canvas);
     this.app.stage.addChild(this.worldLayer);
     this.app.stage.addChild(this.agentLayer);
@@ -80,6 +95,7 @@ export class PixiRenderer {
     // z-order within the world: terrain chunks, then building bodies above them
     // (so a raised 2.5D body overlaps the terrain behind it), then loose overlays.
     this.worldLayer.addChild(this.terrainLayer);
+    this.worldLayer.addChild(skinTextureLayer);
     this.worldLayer.addChild(this.buildingGraphics);
     this.worldLayer.addChild(this.overlayGraphics);
     this.agentLayer.addChild(this.agentGraphics);
@@ -262,6 +278,16 @@ export class PixiRenderer {
     this.lastBuildingsKey = ""; // force the building layer to redraw next frame
   }
 
+  setSkinMode(enabled: boolean) {
+    if (this.skinMode === enabled) {
+      return;
+    }
+    this.skinMode = enabled;
+    this.forceTerrainRedraw = true;
+    this.lastBuildingsKey = "";
+    this.updateSkinTextureLayer();
+  }
+
   /**
    * Arm (or clear) the placement ghost: while set, a translucent footprint of the
    * given size is drawn under the cursor so you can see exactly what — and where —
@@ -290,6 +316,18 @@ export class PixiRenderer {
       this.chunkGraphics.push(g);
       this.terrainLayer.addChild(g);
     }
+  }
+
+  private updateSkinTextureLayer(world?: WorldMap) {
+    const layer = this.skinTextureLayer;
+    if (!layer) {
+      return;
+    }
+    if (world) {
+      layer.setSize(world.width * TILE_SIZE, world.height * TILE_SIZE);
+    }
+    layer.visible = this.skinMode;
+    layer.alpha = this.skinMode ? 0.22 : 0;
   }
 
   /** Chunk index containing tile (tx,ty), or -1 if out of bounds. */
@@ -337,7 +375,7 @@ export class PixiRenderer {
           // A chair faces its table, so it needs to know which side the table is on.
           drawChair(g, world, tx, ty);
         } else {
-          drawTile(g, tx, ty, tile.type);
+          drawTile(g, tx, ty, tile.type, this.skinMode);
         }
       }
     }
@@ -377,11 +415,13 @@ export class PixiRenderer {
 
     this.layoutWorld(world);
     this.ensureChunks(world);
+    this.updateSkinTextureLayer(world);
 
     // Terrain: redraw only the chunks whose tiles changed since last frame (plus
     // neighbours, so wall/rock autotiling seams across chunk borders stay right).
     const dirty = world.consumeDirty();
-    if (dirty.all) {
+    if (dirty.all || this.forceTerrainRedraw) {
+      this.forceTerrainRedraw = false;
       this.lampCenters = [];
       for (const tile of world.tiles) {
         if (tile.type === "Lamp") {
@@ -419,6 +459,7 @@ export class PixiRenderer {
     // or stages change — construction tile changes never touch this.
     const buildingsKey =
       (this.flatBuildings ? "f" : "r") +
+      (this.skinMode ? "s" : "c") +
       buildings.map((b) => `${b.id}:${b.stage}:${b.level ?? 0}`).join("|");
     if (dirty.all || buildingsKey !== this.lastBuildingsKey) {
       this.lastBuildingsKey = buildingsKey;
@@ -450,7 +491,7 @@ export class PixiRenderer {
           }
           // cemetery / park keep their decorative body drawn over their tiles.
         }
-        drawBuilding(this.buildingGraphics, building, this.flatBuildings);
+        drawBuilding(this.buildingGraphics, building, this.flatBuildings, this.skinMode);
       }
     }
 
@@ -746,10 +787,10 @@ function drawBedSite(graphics: Graphics, world: WorldMap, x: number, y: number) 
   graphics.fill({ color: 0xb98ab2, alpha: 0.7 });
 }
 
-function drawTile(graphics: Graphics, x: number, y: number, type: TileType) {
+function drawTile(graphics: Graphics, x: number, y: number, type: TileType, skinMode = false) {
   const px = x * TILE_SIZE;
   const py = y * TILE_SIZE;
-  const color = tileColor(type);
+  const color = tileColor(type, skinMode);
 
   graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
   graphics.fill(color);
@@ -1494,7 +1535,7 @@ function drawFunfair(graphics: Graphics, building: Building) {
   graphics.fill(0xe8d27a);
 }
 
-function drawBuilding(graphics: Graphics, building: Building, flat: boolean) {
+function drawBuilding(graphics: Graphics, building: Building, flat: boolean, skinMode = false) {
   const px = building.x * TILE_SIZE;
   const py = building.y * TILE_SIZE;
   const w = building.width * TILE_SIZE;
@@ -1602,7 +1643,7 @@ function drawBuilding(graphics: Graphics, building: Building, flat: boolean) {
         : (building.capacity ?? 1) >= 6
           ? 2
           : 1);
-  const palette = buildingPalette(building.kind, level);
+  const palette = buildingPalette(building.kind, level, skinMode);
 
   // Flat (top-down) mode: just the footprint, so the layout is easy to read
   // while the town is being built. No raised "lid" obscuring what's underneath.
@@ -1682,7 +1723,34 @@ function buildingLift(kind: Building["kind"], level: number): number {
   }
 }
 
-function buildingPalette(kind: Building["kind"], level: number): { roof: number; wall: number } {
+function buildingPalette(kind: Building["kind"], level: number, skinMode = false): { roof: number; wall: number } {
+  if (skinMode) {
+    switch (kind) {
+      case "house":
+        return level >= 3 ? { roof: 0x45484a, wall: 0x675943 } : { roof: 0x6d4a2e, wall: 0x7b5a38 };
+      case "warehouse":
+        return { roof: 0x4d4330, wall: 0x6c5b42 };
+      case "granary":
+        return { roof: 0x8a6931, wall: 0x725133 };
+      case "kitchen":
+        return { roof: 0x4f5c34, wall: 0x765536 };
+      case "church":
+        return { roof: 0x697283, wall: 0x9d9584 };
+      case "powerplant":
+        return { roof: 0x62666a, wall: 0x4b5052 };
+      case "factory":
+        return { roof: 0x3e3832, wall: 0x5b3f34 };
+      case "station":
+        return { roof: 0x74402f, wall: 0x65482e };
+      case "police":
+        return { roof: 0x334c72, wall: 0x777d84 };
+      case "smelter":
+        return { roof: 0x443d36, wall: 0x5b4c3f };
+      default:
+        return { roof: 0x6d4a2e, wall: 0x7b5a38 };
+    }
+  }
+
   switch (kind) {
     case "house":
       return level >= 3 ? { roof: 0x4f5058, wall: 0x6f6552 } : { roof: 0x9c4a38, wall: 0x8a6a44 };
@@ -1859,7 +1927,69 @@ function drawTarget(graphics: Graphics, target: Vec2) {
   graphics.stroke({ color: 0xffffff, width: 1, alpha: 0.65 });
 }
 
-function tileColor(type: TileType): number {
+function tileColor(type: TileType, skinMode = false): number {
+  if (skinMode) {
+    switch (type) {
+      case "Grass":
+        return 0x25331f;
+      case "Tree":
+        return 0x1c2d18;
+      case "Water":
+        return 0x1c3f45;
+      case "Dirt":
+        return 0x4c3827;
+      case "Road":
+        return 0x655f55;
+      case "HouseSite":
+        return 0x343927;
+      case "HouseFoundation":
+        return 0x473a2e;
+      case "House":
+        return 0x4d3d29;
+      case "Wall":
+        return 0x62594f;
+      case "Floor":
+      case "Door":
+      case "Stove":
+      case "Counter":
+      case "Bed":
+      case "BedFoot":
+      case "BedSite":
+      case "Table":
+      case "Chair":
+        return 0x463421;
+      case "RockSandstone":
+        return 0x8a7854;
+      case "RockLimestone":
+        return 0x807f76;
+      case "RockGranite":
+        return 0x646066;
+      case "OreIron":
+        return 0x625e58;
+      case "RockFloor":
+        return 0x49453e;
+      case "Fence":
+      case "FenceGate":
+        return 0x374d25;
+      case "Berry":
+        return 0x283f24;
+      case "FieldEmpty":
+      case "FieldGrowing":
+        return 0x483622;
+      case "FieldRipe":
+        return 0x4f3d24;
+      case "Stump":
+        return 0x25331f;
+      case "Plaza":
+      case "Fountain":
+      case "Statue":
+      case "Lamp":
+        return 0x7f776a;
+      case "Rail":
+        return 0x343533;
+    }
+  }
+
   switch (type) {
     case "Grass":
       return 0x243c24;
