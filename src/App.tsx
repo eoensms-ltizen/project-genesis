@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
-import { ERA_NAMES, SAVE_KEY } from "./game/Simulation";
+import { ERA_NAMES, NEW_GAME_MODE_KEY, SAVE_KEY } from "./game/Simulation";
 import type {
   Agent,
   AgentState,
@@ -8,6 +8,7 @@ import type {
   Building,
   BuildingKind,
   FoodKind,
+  GameMode,
   GameClock,
   GameLogEntry,
   InspectionTarget,
@@ -17,6 +18,7 @@ import type {
 } from "./game/types";
 import { getLang, setLang, tr, type Lang } from "./i18n";
 import { AgentCreator } from "./ui/AgentCreator";
+import { ArchitectPanel } from "./ui/ArchitectPanel";
 import { ControlPanel } from "./ui/ControlPanel";
 import { DevPanel, type DevTileTool } from "./ui/DevPanel";
 import { GameLog } from "./ui/GameLog";
@@ -30,6 +32,10 @@ const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
 function eraName(era: number): string {
   return tr(ERA_NAMES[era] ?? "?", ERA_LABELS_KO[era] ?? "?");
+}
+
+function gameModeName(mode: GameMode): string {
+  return mode === "architect" ? tr("Architect", "설계자") : tr("Auto", "자동");
 }
 
 const STATE_LABELS_KO: Record<AgentState, string> = {
@@ -136,6 +142,7 @@ export default function App() {
   const [logs, setLogs] = useState<GameLogEntry[]>([]);
   const [clock, setClock] = useState<GameClock | null>(null);
   const [weather, setWeather] = useState<WeatherState>(DEFAULT_WEATHER);
+  const [gameMode, setGameMode] = useState<GameMode>("auto");
   const [era, setEra] = useState(0);
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
@@ -176,6 +183,13 @@ export default function App() {
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
 
   useEffect(() => {
+    if (gameMode === "architect" && devInstantRef.current) {
+      devInstantRef.current = false;
+      setDevInstant(false);
+    }
+  }, [gameMode]);
+
+  useEffect(() => {
     if (!canvasHostRef.current) {
       return;
     }
@@ -190,6 +204,7 @@ export default function App() {
         setLogs(snapshot.logs);
         setClock(snapshot.clock);
         setWeather(snapshot.weather);
+        setGameMode(snapshot.gameMode);
         setEra(snapshot.era);
         setSupportedPop(snapshot.supportedPopulation);
         setFoodStock(snapshot.foodStock);
@@ -353,11 +368,12 @@ export default function App() {
     setLangState(next);
   };
 
-  const resetWorld = () => {
+  const resetWorld = (mode: GameMode) => {
+    const label = gameModeName(mode);
     if (
       !window.confirm(
         tr(
-          "Start a new world? The current village will be lost.",
+          `Start a new ${label} world? The current village will be lost.`,
           "새 세계를 시작할까요? 현재 마을은 사라집니다.",
         ),
       )
@@ -366,6 +382,7 @@ export default function App() {
     }
     gameRef.current?.simulation.disableSaving();
     localStorage.removeItem(SAVE_KEY);
+    localStorage.setItem(NEW_GAME_MODE_KEY, mode);
     window.location.reload();
   };
 
@@ -412,7 +429,7 @@ export default function App() {
                   {clock.isNight ? "🌙" : "☀️"} {weatherLabel(weather)}
                 </span>
                 <span className="hud-stats">
-                  {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{grainStock} · 🥩
+                  {eraName(era)} · {gameModeName(gameMode)} · 👥{agents.length}/{supportedPop} · 🌾{grainStock} · 🥩
                   {meatStock} · 🍲{meals}
                   {woodStock > 0 ? ` · 🪵${woodStock}` : ""}
                   {stoneStock > 0 ? ` · 🪨${stoneStock}` : ""}
@@ -560,7 +577,19 @@ export default function App() {
               onPlaceAgent={enablePlacement}
               onReset={resetWorld}
               placementActive={pendingPlacement}
+              gameMode={gameMode}
             />
+            {gameMode === "architect" && (
+              <ArchitectPanel
+                placingKind={devPlaceKind}
+                instantBuild={devInstant}
+                tileTool={devTileTool}
+                onPlaceBuild={devPlace}
+                onInstantBuild={devSetInstant}
+                onTileTool={devTool}
+                onClose={devDisarm}
+              />
+            )}
             <AgentCreator onCreate={addRandomAgent} />
             <DevPanel
               era={era}

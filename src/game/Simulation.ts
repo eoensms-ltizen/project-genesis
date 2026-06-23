@@ -11,6 +11,7 @@ import type {
   BuildPlanTile,
   FoodBatch,
   FoodKind,
+  GameMode,
   GameClock,
   GameLogEntry,
   ItemStack,
@@ -82,6 +83,7 @@ const NIGHT_START_HOUR = 21;
 const NIGHT_END_HOUR = 6;
 
 export const SAVE_KEY = "project-genesis-save";
+export const NEW_GAME_MODE_KEY = "project-genesis-new-mode";
 const SAVE_VERSION = 10;
 
 // Residents age one year per in-game day; children come of age at 12,
@@ -262,6 +264,7 @@ type SavedAgent = Omit<
 
 type SaveData = {
   version: number;
+  gameMode?: GameMode;
   elapsedSeconds: number;
   lastBirthAt: number;
   worldWidth: number;
@@ -287,6 +290,7 @@ type SaveData = {
 
 export class Simulation {
   readonly world: WorldMap;
+  readonly gameMode: GameMode;
   readonly agents: Agent[] = [];
   readonly buildings: Building[] = [];
   readonly animals: Animal[] = [];
@@ -346,7 +350,12 @@ export class Simulation {
   constructor(options: SimulationOptions) {
     this.onChange = options.onChange;
 
+    const newGameMode = loadNewGameMode();
     const saved = loadSaveData();
+    const savedGameMode =
+      saved?.gameMode === "auto" || saved?.gameMode === "architect" ? saved.gameMode : undefined;
+    this.gameMode = savedGameMode ?? newGameMode ?? "auto";
+    clearNewGameMode();
     if (saved) {
       this.world =
         WorldMap.fromSerializedTiles(saved.worldWidth, saved.worldHeight, saved.tiles) ??
@@ -1854,10 +1863,10 @@ export class Simulation {
     const annex = building.kind === "bedroom";
     // Every entrance keeps a clear approach: the tile in front of each door
     // becomes Road, so a building can never be sealed in by neighbours.
-    if (!annex) {
+    if (!annex && this.gameMode === "auto") {
       this.reserveEntrance(building);
     }
-    if (stage === "built" && !annex) {
+    if (stage === "built" && !annex && this.gameMode === "auto") {
       this.paveApproach(building);
     }
     this.refreshDoors();
@@ -1870,6 +1879,9 @@ export class Simulation {
    * so a clustered neighbour can't drop its footprint onto a doorway first.
    */
   reserveEntrance(building: Building) {
+    if (this.gameMode === "architect") {
+      return;
+    }
     for (const door of this.buildingDoors(building)) {
       const front = this.doorFront(building, door);
       if (ROADABLE.has(this.world.getTile(front)?.type as TileType)) {
@@ -1966,6 +1978,7 @@ export class Simulation {
     try {
       const data: SaveData = {
         version: SAVE_VERSION,
+        gameMode: this.gameMode,
         elapsedSeconds: this.elapsedSeconds,
         lastBirthAt: this.lastBirthAt,
         worldWidth: this.world.width,
@@ -2052,7 +2065,7 @@ export class Simulation {
     if (tile.type === "Grass" && count >= PATH_WEAR_THRESHOLD) {
       this.world.setTile(tile, "Dirt");
       this.logPathEvent(tr("A footpath is being worn into the grass.", "풀밭에 오솔길이 나기 시작한다."));
-    } else if (tile.type === "Dirt" && count >= ROAD_WEAR_THRESHOLD) {
+    } else if (this.gameMode === "auto" && tile.type === "Dirt" && count >= ROAD_WEAR_THRESHOLD) {
       this.world.setTile(tile, "Road");
       this.traffic.delete(index);
       this.logPathEvent(tr("A well-trodden path has become a road.", "잘 다져진 길이 도로가 되었다."));
@@ -2143,6 +2156,7 @@ export class Simulation {
       logs: [...this.logs],
       clock: this.getClock(),
       weather: this.getWeather(),
+      gameMode: this.gameMode,
       era: this.era,
       foodStock: this.foodStock,
       grainStock: this.grainStock,
@@ -2736,7 +2750,7 @@ export class Simulation {
     building.repairing = false;
     building.plan = undefined;
     building.damagedAt = undefined;
-    if (building.kind !== "bedroom") {
+    if (building.kind !== "bedroom" && this.gameMode === "auto") {
       this.reserveEntrance(building);
       this.paveApproach(building);
     }
@@ -4524,6 +4538,23 @@ export class Simulation {
     }
 
     return { x: 0, y: 0 };
+  }
+}
+
+function loadNewGameMode(): GameMode | undefined {
+  try {
+    const raw = localStorage.getItem(NEW_GAME_MODE_KEY);
+    return raw === "auto" || raw === "architect" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function clearNewGameMode() {
+  try {
+    localStorage.removeItem(NEW_GAME_MODE_KEY);
+  } catch {
+    // Storage may be unavailable; the game falls back to auto mode.
   }
 }
 

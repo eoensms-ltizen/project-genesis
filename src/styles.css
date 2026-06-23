@@ -391,10 +391,56 @@ button[data-active="true"] {
   text-transform: uppercase;
 }
 
+.panel-title-row,
+.mode-row,
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title-row {
+  justify-content: space-between;
+}
+
+.mode-row {
+  justify-content: space-between;
+}
+
+.mode-pill {
+  border: 1px solid #4f5d50;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #d8c89a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tool-row button {
+  flex: 1;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.small-button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .button-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.compact-grid {
+  gap: 6px;
+}
+
+.compact-grid button {
+  min-height: 34px;
+  padding: 0 8px;
 }
 
 .agent-list {

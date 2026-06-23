@@ -543,6 +543,13 @@ export class AgentBrain {
       if (this.tryJoinSharedShelter(agent, simulation)) {
         return;
       }
+      if (simulation.gameMode === "architect") {
+        if (this.doProductiveWork(agent, simulation)) {
+          return;
+        }
+        this.wanderNearHome(agent, simulation);
+        return;
+      }
       if (!agent.homeSite) {
         this.setState(agent, simulation, "FindHouseSite");
         return;
@@ -558,7 +565,7 @@ export class AgentBrain {
     // A grown, unmarried adult leaves an overcrowded family home to start a
     // place of their own nearby — this is how the town spreads into a cluster
     // of homes instead of cramming everyone into a few.
-    if (this.shouldMoveOut(agent, simulation)) {
+    if (simulation.gameMode === "auto" && this.shouldMoveOut(agent, simulation)) {
       agent.home = undefined;
       agent.homeBuildingId = undefined;
       agent.homeSite = undefined;
@@ -920,7 +927,7 @@ export class AgentBrain {
       }
     }
 
-    if (simulation.era >= 2 && this.findPaveWork(agent, simulation)) {
+    if (simulation.gameMode === "auto" && simulation.era >= 2 && this.findPaveWork(agent, simulation)) {
       return true;
     }
 
@@ -1134,6 +1141,9 @@ export class AgentBrain {
     agent: Agent,
     simulation: Simulation,
   ): "started" | "none" {
+    if (simulation.gameMode === "architect") {
+      return "none";
+    }
     let kind: "warehouse" | "granary" | "kitchen" | "cemetery" | "pasture" | "funfair" | undefined;
     if (!simulation.hasAnyWarehouse()) {
       kind = "warehouse";
@@ -1306,7 +1316,7 @@ export class AgentBrain {
         return this.findFarmWork(agent, simulation);
       case "builder":
         return (
-          (simulation.era >= 2 && this.findPaveWork(agent, simulation)) ||
+          (simulation.gameMode === "auto" && simulation.era >= 2 && this.findPaveWork(agent, simulation)) ||
           this.findFarmWork(agent, simulation)
         );
       case "woodcutter":
@@ -2118,6 +2128,9 @@ export class AgentBrain {
    * for) the project.
    */
   private tryBuildPrivateRoom(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.gameMode === "architect") {
+      return false;
+    }
     // Don't start a second project, and don't expand if you already have privacy.
     if (agent.projectBuildingId || !agent.home || !agent.homeBuildingId) {
       return false;
@@ -2172,6 +2185,10 @@ export class AgentBrain {
   }
 
   private findHouseSite(agent: Agent, simulation: Simulation) {
+    if (simulation.gameMode === "architect") {
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
     // Last check before raising a new hut: if a shelter has just gone up for
     // staking (e.g. another newcomer started one this tick), join it instead —
     // this stops a crowd of homeless settlers from each building their own.

@@ -395,11 +395,14 @@ export type WeatherState = {
   intensity: number;
 };
 
+export type GameMode = "auto" | "architect";
+
 export type SimulationSnapshot = {
   agents: Agent[];
   logs: GameLogEntry[];
   clock: GameClock;
   weather: WeatherState;
+  gameMode: GameMode;
   era: number;
   foodStock: number;
   // The larder split by shelf: grain (crops/berries) and meat (game/herd/fish).
