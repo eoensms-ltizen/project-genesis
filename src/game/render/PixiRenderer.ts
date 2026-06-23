@@ -1,6 +1,6 @@
 import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
-import type { Agent, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
+import type { Agent, AgentState, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
@@ -41,6 +41,7 @@ export class PixiRenderer {
   private flatBuildings = false;
   private skinMode = false;
   private forceTerrainRedraw = false;
+  private effectTime = 0;
   private initialized = false;
   // Cached lamp tile centres, refreshed only when the world changes.
   private lampCenters: { x: number; y: number }[] = [];
@@ -400,6 +401,7 @@ export class PixiRenderer {
     if (!this.initialized) {
       return;
     }
+    this.effectTime += this.app.ticker.deltaMS / 1000;
 
     // Resolve the follow target (if any) before laying out the camera. If the
     // followed resident is gone, drop follow mode.
@@ -510,6 +512,7 @@ export class PixiRenderer {
       drawTrain(this.agentGraphics, train, this.skinMode);
     }
     for (const agent of agents) {
+      drawWorkEffect(this.agentGraphics, agent, this.skinMode, this.effectTime);
       drawAgent(this.agentGraphics, agent, this.skinMode);
       if (agent.target) {
         drawTarget(this.agentGraphics, agent.target, this.skinMode);
@@ -2137,14 +2140,346 @@ const JOB_COLORS: Partial<Record<Agent["job"], number>> = {
   hauler: 0xc27b3e,
 };
 
+const WORK_EFFECT_DURATIONS: Partial<Record<AgentState, number>> = {
+  ChopTree: 1.8,
+  FarmWork: 2,
+  Pave: 1.5,
+  Cook: 3,
+  Worship: 4,
+  Transplant: 1.6,
+  Plant: 1.4,
+  Hunt: 1.2,
+  Tame: 2.5,
+  Clean: 1.5,
+  LoadWood: 0.6,
+  StoreWood: 0.6,
+  WithdrawWood: 0.6,
+  Mine: 3,
+  CraftTool: 3,
+  Furnish: 3,
+  BuildHouse: 6,
+  BuildTile: 0.45,
+  CollectIngredients: 0.7,
+  Serve: 0.8,
+  Ride: 1.2,
+};
+
+const HAND_WORK_STATES: ReadonlySet<AgentState> = new Set([
+  "ChopTree",
+  "FarmWork",
+  "Pave",
+  "Cook",
+  "Transplant",
+  "Plant",
+  "Hunt",
+  "Tame",
+  "Clean",
+  "LoadWood",
+  "StoreWood",
+  "WithdrawWood",
+  "Mine",
+  "CraftTool",
+  "Furnish",
+  "BuildHouse",
+  "BuildTile",
+  "CollectIngredients",
+  "Serve",
+]);
+
+function isWorkState(state: AgentState): boolean {
+  return WORK_EFFECT_DURATIONS[state] !== undefined;
+}
+
+function isMovingState(agent: Agent): boolean {
+  return agent.state.startsWith("Move") || agent.state === "Wander" || agent.state === "Patrol" || !!agent.path?.length;
+}
+
+function agentPose(agent: Agent): { x: number; y: number; working: boolean; moving: boolean } {
+  const working = isWorkState(agent.state);
+  const moving = isMovingState(agent);
+  if (working) {
+    return {
+      x: Math.sin(agent.actionTimer * 10) * 0.45,
+      y: Math.sin(agent.actionTimer * 13) * 0.35,
+      working,
+      moving,
+    };
+  }
+  if (moving) {
+    const phase = (agent.position.x + agent.position.y) * Math.PI * 2;
+    return { x: 0, y: Math.sin(phase) * 0.65, working, moving };
+  }
+  return { x: 0, y: 0, working, moving };
+}
+
+function workAnchor(agent: Agent): Vec2 {
+  if (agent.state === "BuildTile" && agent.buildTarget) {
+    return agent.buildTarget;
+  }
+  if (agent.state === "Cook" && agent.cookStove) {
+    return agent.cookStove;
+  }
+  return agent.target ?? agent.buildTarget ?? agent.position;
+}
+
+function drawWorkEffect(graphics: Graphics, agent: Agent, skinMode: boolean, time: number) {
+  const duration = WORK_EFFECT_DURATIONS[agent.state];
+  if (!duration || agent.actionTimer < 0.04) {
+    return;
+  }
+
+  const anchor = workAnchor(agent);
+  const ax = anchor.x * TILE_SIZE + TILE_SIZE / 2;
+  const ay = anchor.y * TILE_SIZE + TILE_SIZE / 2;
+  const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2;
+  const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2;
+  const timer = Math.max(0, agent.actionTimer);
+  const progress = Math.min(1, (timer % duration) / duration);
+  const pulse = 0.5 + Math.sin((timer + time) * 7) * 0.5;
+
+  if (agent.state !== "Ride" && agent.state !== "Worship") {
+    drawWorkProgress(graphics, px, py - 1, progress, skinMode);
+  }
+
+  switch (agent.state) {
+    case "ChopTree":
+      drawToolSwing(graphics, ax, ay, timer, skinMode ? 0xd0a25a : 0xf0c46c, skinMode ? 0x6f4521 : 0x8a5a2d);
+      drawScatter(graphics, ax, ay, timer, 0xb77737, skinMode ? 0x6f4521 : 0x9a6a35, 4, 4.8);
+      break;
+    case "Mine":
+      drawToolSwing(graphics, ax, ay, timer * 0.85, skinMode ? 0xb8b4a6 : 0xd7d4ca, skinMode ? 0xb46f38 : 0xf0a64e);
+      drawSparkBurst(graphics, ax, ay, timer, skinMode);
+      break;
+    case "BuildHouse":
+    case "BuildTile":
+    case "CraftTool":
+    case "Furnish":
+      drawHammerTap(graphics, ax, ay, timer, skinMode);
+      drawScatter(graphics, ax, ay + 2, timer, skinMode ? 0x8d6a3b : 0xb08a52, skinMode ? 0x4c3824 : 0x6f5230, 5, 3.6);
+      break;
+    case "FarmWork":
+    case "Plant":
+    case "Transplant":
+      drawFarmWork(graphics, ax, ay, timer, skinMode);
+      break;
+    case "Pave":
+      drawScatter(graphics, ax, ay, timer, skinMode ? 0xa99a80 : 0xc7baa1, skinMode ? 0x5f574b : 0x81786b, 6, 4.4);
+      drawStroke(graphics, ax - 5, ay + 4, ax + 5, ay - 1, skinMode ? 0x5b4930 : 0x7c6540, 1.2, 0.85);
+      break;
+    case "Cook":
+      drawSteam(graphics, ax, ay, timer, skinMode);
+      break;
+    case "Clean":
+      drawSweep(graphics, ax, ay, timer, skinMode);
+      break;
+    case "Hunt":
+      drawCrosshair(graphics, ax, ay, pulse, skinMode);
+      break;
+    case "Tame":
+      drawTameHearts(graphics, ax, ay, timer, skinMode);
+      break;
+    case "Worship":
+      drawWorshipPulse(graphics, px, py, timer, skinMode);
+      break;
+    case "LoadWood":
+    case "StoreWood":
+    case "WithdrawWood":
+    case "CollectIngredients":
+    case "Serve":
+      drawCarryPips(graphics, px, py, timer, skinMode);
+      break;
+    case "Ride":
+      drawRideTrail(graphics, px, py, timer, skinMode);
+      break;
+  }
+}
+
+function drawWorkProgress(graphics: Graphics, px: number, py: number, progress: number, skinMode: boolean) {
+  const r = 7.1;
+  graphics.circle(px, py, r);
+  graphics.stroke({ color: skinMode ? 0x1a120b : 0x131a10, width: 1.2, alpha: 0.35 });
+  if (progress <= 0.02) {
+    return;
+  }
+  graphics.arc(px, py, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  graphics.stroke({ color: skinMode ? 0xd6bd78 : 0xffdf6e, width: 1.6, alpha: 0.9 });
+}
+
+function drawToolSwing(
+  graphics: Graphics,
+  ax: number,
+  ay: number,
+  timer: number,
+  toolColor: number,
+  chipColor: number,
+) {
+  const phase = (timer * 2.4) % 1;
+  const angle = -1.25 + phase * 1.9;
+  const x1 = ax + Math.cos(angle) * 2.2;
+  const y1 = ay - 2 + Math.sin(angle) * 2.2;
+  const x2 = ax + Math.cos(angle) * 8;
+  const y2 = ay - 2 + Math.sin(angle) * 8;
+  drawStroke(graphics, x1, y1, x2, y2, toolColor, 1.35, 0.92);
+  if (phase > 0.62) {
+    graphics.circle(ax + 2, ay - 1, 1.4);
+    graphics.fill({ color: chipColor, alpha: 0.8 });
+  }
+}
+
+function drawHammerTap(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  const lift = Math.sin((timer * 14) % Math.PI) * 4;
+  const handle = skinMode ? 0x5c3c20 : 0x7a5630;
+  const head = skinMode ? 0xb3ad9b : 0xd8d2c3;
+  drawStroke(graphics, ax - 3, ay - 5 - lift, ax + 2, ay - 1, handle, 1.2, 0.9);
+  drawStroke(graphics, ax + 1, ay - 5 - lift, ax + 5, ay - 4 - lift, head, 2, 0.9);
+}
+
+function drawFarmWork(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  const sway = Math.sin(timer * 7) * 2.5;
+  drawStroke(graphics, ax - 5 + sway, ay + 4, ax + 4 + sway, ay - 3, skinMode ? 0x7a5832 : 0x91683a, 1.2, 0.85);
+  for (let i = 0; i < 3; i += 1) {
+    const lift = fract(timer * 0.65 + i * 0.27);
+    graphics.ellipse(ax - 4 + i * 4, ay + 3 - lift * 5, 1.2, 0.7);
+    graphics.fill({ color: skinMode ? 0x92a856 : 0x9fdc62, alpha: 0.7 * (1 - lift) });
+  }
+}
+
+function drawSteam(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  for (let i = 0; i < 3; i += 1) {
+    const lift = fract(timer * 0.34 + i * 0.31);
+    const x = ax - 3 + i * 3 + Math.sin(timer * 2 + i) * 0.7;
+    const y = ay - 5 - lift * 12;
+    graphics.circle(x, y, 1.5 + lift * 1.8);
+    graphics.fill({ color: skinMode ? 0xd8d0c0 : 0xf4ead8, alpha: 0.32 * (1 - lift) });
+  }
+}
+
+function drawSweep(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  const sweep = 0.4 + Math.sin(timer * 8) * 0.2;
+  graphics.arc(ax, ay + 3, 6.5, Math.PI * 0.1, Math.PI * (0.75 + sweep));
+  graphics.stroke({ color: skinMode ? 0xc2a164 : 0xf0d47c, width: 1.3, alpha: 0.75 });
+  drawScatter(graphics, ax, ay + 5, timer, skinMode ? 0x5b4930 : 0x6f5a39, skinMode ? 0x88704a : 0xa3895d, 4, 3.8);
+}
+
+function drawCrosshair(graphics: Graphics, ax: number, ay: number, pulse: number, skinMode: boolean) {
+  const r = 5 + pulse * 2;
+  const color = skinMode ? 0xc5714a : 0xff8a5a;
+  graphics.circle(ax, ay, r);
+  graphics.stroke({ color, width: 1, alpha: 0.75 });
+  drawStroke(graphics, ax - r - 2, ay, ax - r + 1, ay, color, 1, 0.7);
+  drawStroke(graphics, ax + r - 1, ay, ax + r + 2, ay, color, 1, 0.7);
+  drawStroke(graphics, ax, ay - r - 2, ax, ay - r + 1, color, 1, 0.7);
+  drawStroke(graphics, ax, ay + r - 1, ax, ay + r + 2, color, 1, 0.7);
+}
+
+function drawTameHearts(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  const color = skinMode ? 0xd98b8b : 0xff9aa8;
+  for (let i = 0; i < 2; i += 1) {
+    const lift = fract(timer * 0.42 + i * 0.45);
+    drawHeart(graphics, ax - 3 + i * 6, ay - 3 - lift * 12, 2.4, color, 0.85 * (1 - lift));
+  }
+}
+
+function drawWorshipPulse(graphics: Graphics, px: number, py: number, timer: number, skinMode: boolean) {
+  for (let i = 0; i < 2; i += 1) {
+    const phase = fract(timer * 0.18 + i * 0.5);
+    graphics.circle(px, py - 1, 6 + phase * 11);
+    graphics.stroke({ color: skinMode ? 0xd6bd78 : 0xffe38a, width: 1, alpha: 0.42 * (1 - phase) });
+  }
+}
+
+function drawCarryPips(graphics: Graphics, px: number, py: number, timer: number, skinMode: boolean) {
+  const color = skinMode ? 0xd6bd78 : 0xffdf6e;
+  for (let i = 0; i < 3; i += 1) {
+    const phase = fract(timer * 1.8 + i * 0.25);
+    graphics.circle(px - 4 + i * 4, py - 9 - phase * 2.4, 0.9 + phase * 0.5);
+    graphics.fill({ color, alpha: 0.75 * (1 - phase) });
+  }
+}
+
+function drawRideTrail(graphics: Graphics, px: number, py: number, timer: number, skinMode: boolean) {
+  const color = skinMode ? 0x9fb8c0 : 0xbfeaff;
+  for (let i = 0; i < 3; i += 1) {
+    const lag = i * 4 + fract(timer * 0.8 + i * 0.2) * 2;
+    drawStroke(graphics, px - 9 - lag, py - 3 + i * 2.2, px - 3 - lag, py - 2 + i * 2.2, color, 1, 0.36);
+  }
+}
+
+function drawSparkBurst(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
+  const color = skinMode ? 0xf0c982 : 0xffe18a;
+  for (let i = 0; i < 4; i += 1) {
+    const phase = fract(timer * 1.7 + i * 0.19);
+    const angle = i * 1.7 + timer * 0.45;
+    const dist = 2 + phase * 6;
+    drawStroke(
+      graphics,
+      ax + Math.cos(angle) * dist,
+      ay + Math.sin(angle) * dist,
+      ax + Math.cos(angle) * (dist + 1.8),
+      ay + Math.sin(angle) * (dist + 1.8),
+      color,
+      0.8,
+      0.75 * (1 - phase),
+    );
+  }
+}
+
+function drawScatter(
+  graphics: Graphics,
+  ax: number,
+  ay: number,
+  timer: number,
+  colorA: number,
+  colorB: number,
+  count: number,
+  radius: number,
+) {
+  for (let i = 0; i < count; i += 1) {
+    const phase = fract(timer * 1.4 + i * 0.23);
+    const angle = i * 2.1 + timer * 0.65;
+    const dist = 1.5 + phase * radius;
+    graphics.circle(ax + Math.cos(angle) * dist, ay + Math.sin(angle) * dist * 0.7, 0.7 + phase * 0.45);
+    graphics.fill({ color: i % 2 === 0 ? colorA : colorB, alpha: 0.72 * (1 - phase) });
+  }
+}
+
+function drawHeart(graphics: Graphics, cx: number, cy: number, size: number, color: number, alpha: number) {
+  graphics.circle(cx - size * 0.28, cy - size * 0.12, size * 0.34);
+  graphics.fill({ color, alpha });
+  graphics.circle(cx + size * 0.28, cy - size * 0.12, size * 0.34);
+  graphics.fill({ color, alpha });
+  graphics.poly([cx - size * 0.66, cy, cx + size * 0.66, cy, cx, cy + size * 0.76]);
+  graphics.fill({ color, alpha });
+}
+
+function drawStroke(
+  graphics: Graphics,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  color: number,
+  width: number,
+  alpha: number,
+) {
+  graphics.moveTo(x1, y1);
+  graphics.lineTo(x2, y2);
+  graphics.stroke({ color, width, alpha });
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
+}
+
 function drawAgent(graphics: Graphics, agent: Agent, skinMode = false) {
   if (skinMode) {
     drawSkinnedAgent(graphics, agent);
     return;
   }
 
-  const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2;
-  const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2;
+  const pose = agentPose(agent);
+  const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2 + pose.x;
+  const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2 + pose.y;
   const isChild = agent.age < 12;
   const radius = isChild ? 3 : 4.6;
 
@@ -2158,6 +2493,11 @@ function drawAgent(graphics: Graphics, agent: Agent, skinMode = false) {
   graphics.fill(isChild ? 0xf7ecd0 : 0xf2e6bd);
   graphics.circle(px + radius * 0.33, py - radius * 0.33, isChild ? 1 : 1.4);
   graphics.fill(0x20231d);
+
+  if (HAND_WORK_STATES.has(agent.state)) {
+    drawStroke(graphics, px - radius - 1.5, py - 0.5, px - radius + 2.2, py + 1.2, 0xe9d4a7, 1, 0.82);
+    drawStroke(graphics, px + radius - 2.2, py + 1.2, px + radius + 1.5, py - 0.5, 0xe9d4a7, 1, 0.82);
+  }
 
   // A resident carrying a load (hauled material, or wood for building) shows a
   // small bundle slung on their back, coloured by what it is.
@@ -2181,8 +2521,9 @@ function drawAgent(graphics: Graphics, agent: Agent, skinMode = false) {
 }
 
 function drawSkinnedAgent(graphics: Graphics, agent: Agent) {
-  const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2;
-  const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2;
+  const pose = agentPose(agent);
+  const px = agent.position.x * TILE_SIZE + TILE_SIZE / 2 + pose.x;
+  const py = agent.position.y * TILE_SIZE + TILE_SIZE / 2 + pose.y;
   const isChild = agent.age < 12;
   const bodyW = isChild ? 4.2 : 5.6;
   const bodyH = isChild ? 5.2 : 7.2;
@@ -2198,6 +2539,11 @@ function drawSkinnedAgent(graphics: Graphics, agent: Agent) {
 
   graphics.rect(px - bodyW / 2 + 0.6, py + 0.2, bodyW - 1.2, 1.1);
   graphics.fill({ color: jobColor, alpha: 0.72 });
+
+  if (HAND_WORK_STATES.has(agent.state)) {
+    drawStroke(graphics, px - bodyW / 2 - 2, py + 1.5, px - bodyW / 2 + 1.4, py + 3.2, 0xd8b884, 1.1, 0.9);
+    drawStroke(graphics, px + bodyW / 2 - 1.4, py + 3.2, px + bodyW / 2 + 2, py + 1.5, 0xd8b884, 1.1, 0.9);
+  }
 
   const headR = isChild ? 2.2 : 2.8;
   graphics.circle(px, py - 3.3, headR + 0.8);

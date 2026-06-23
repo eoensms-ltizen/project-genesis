@@ -99,6 +99,7 @@ button[data-active="true"] {
   min-width: 40px;
   min-height: 40px;
   padding: 0 8px;
+  white-space: nowrap;
   background: rgba(16, 19, 16, 0.72);
   backdrop-filter: blur(3px);
 }

@@ -22,6 +22,7 @@ import { GameLog } from "./ui/GameLog";
 import { Inspector } from "./ui/Inspector";
 
 const TICK_MS = 160;
+const SOUND_KEY = "pg-sound-enabled";
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -150,6 +151,9 @@ export default function App() {
   const [skinMode, setSkinMode] = useState(
     () => localStorage.getItem("pg-skin-mode") === "1",
   );
+  const [soundEnabled, setSoundEnabled] = useState(
+    () => localStorage.getItem(SOUND_KEY) !== "0",
+  );
   const [lang, setLangState] = useState<Lang>(() => getLang());
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
@@ -221,6 +225,7 @@ export default function App() {
     gameRef.current = game;
     game.setFlatBuildings(localStorage.getItem("pg-flat-buildings") === "1");
     game.setSkinMode(localStorage.getItem("pg-skin-mode") === "1");
+    game.setSoundEnabled(localStorage.getItem(SOUND_KEY) !== "0");
     if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
       (window as unknown as { __genesis?: GameApp }).__genesis = game;
     }
@@ -239,12 +244,17 @@ export default function App() {
         game.simulation.saveNow();
       }
     };
+    const unlockAudio = () => game.unlockAudio();
     document.addEventListener("visibilitychange", saveOnHide);
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
 
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", saveOnHide);
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
       game.simulation.saveNow();
       game.destroy();
       gameRef.current = null;
@@ -357,6 +367,16 @@ export default function App() {
     localStorage.setItem("pg-skin-mode", next ? "1" : "0");
   };
 
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    gameRef.current?.setSoundEnabled(next);
+    if (next) {
+      gameRef.current?.unlockAudio();
+    }
+    localStorage.setItem(SOUND_KEY, next ? "1" : "0");
+  };
+
   const speedOptions = [0, 1, 2, 4] as const;
 
   return (
@@ -420,6 +440,15 @@ export default function App() {
               }
             >
               {flatBuildings ? "▦" : "🏙"}
+            </button>
+            <button
+              type="button"
+              className="hud-speed"
+              onClick={toggleSound}
+              data-active={soundEnabled}
+              title={soundEnabled ? "Sound on (tap to mute)" : "Sound muted (tap to enable)"}
+            >
+              {soundEnabled ? "Snd" : "Mute"}
             </button>
             <button
               type="button"

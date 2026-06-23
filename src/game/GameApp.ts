@@ -1,3 +1,4 @@
+import { SoundManager } from "./audio/SoundManager";
 import { PixiRenderer } from "./render/PixiRenderer";
 import { Simulation } from "./Simulation";
 import type {
@@ -18,6 +19,7 @@ export class GameApp {
   readonly simulation: Simulation;
 
   private readonly renderer: PixiRenderer;
+  private readonly sound = new SoundManager();
   private placementMode = false;
   private started = false;
 
@@ -39,6 +41,7 @@ export class GameApp {
 
   tick(deltaSeconds: number) {
     this.simulation.update(deltaSeconds);
+    this.sound.tick(this.simulation.agents);
     this.render();
   }
 
@@ -167,6 +170,18 @@ export class GameApp {
   setSkinMode(enabled: boolean) {
     this.renderer.setSkinMode(enabled);
     this.render();
+  }
+
+  setSoundEnabled(enabled: boolean) {
+    this.sound.setEnabled(enabled);
+  }
+
+  isSoundEnabled(): boolean {
+    return this.sound.isEnabled();
+  }
+
+  unlockAudio() {
+    void this.sound.unlock();
   }
 
   // --- Developer cheats (debug panel only — not part of normal play) ---------
@@ -349,6 +364,7 @@ export class GameApp {
   }
 
   destroy() {
+    this.sound.destroy();
     this.renderer.destroy();
   }
 
