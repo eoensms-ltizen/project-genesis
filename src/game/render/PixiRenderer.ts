@@ -2301,7 +2301,7 @@ function drawWorkProgress(graphics: Graphics, px: number, py: number, progress: 
   if (progress <= 0.02) {
     return;
   }
-  graphics.arc(px, py, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  drawArc(graphics, px, py, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
   graphics.stroke({ color: skinMode ? 0xd6bd78 : 0xffdf6e, width: 1.6, alpha: 0.9 });
 }
 
@@ -2356,7 +2356,7 @@ function drawSteam(graphics: Graphics, ax: number, ay: number, timer: number, sk
 
 function drawSweep(graphics: Graphics, ax: number, ay: number, timer: number, skinMode: boolean) {
   const sweep = 0.4 + Math.sin(timer * 8) * 0.2;
-  graphics.arc(ax, ay + 3, 6.5, Math.PI * 0.1, Math.PI * (0.75 + sweep));
+  drawArc(graphics, ax, ay + 3, 6.5, Math.PI * 0.1, Math.PI * (0.75 + sweep));
   graphics.stroke({ color: skinMode ? 0xc2a164 : 0xf0d47c, width: 1.3, alpha: 0.75 });
   drawScatter(graphics, ax, ay + 5, timer, skinMode ? 0x5b4930 : 0x6f5a39, skinMode ? 0x88704a : 0xa3895d, 4, 3.8);
 }
@@ -2465,6 +2465,11 @@ function drawStroke(
   graphics.moveTo(x1, y1);
   graphics.lineTo(x2, y2);
   graphics.stroke({ color, width, alpha });
+}
+
+function drawArc(graphics: Graphics, cx: number, cy: number, radius: number, start: number, end: number) {
+  graphics.moveTo(cx + Math.cos(start) * radius, cy + Math.sin(start) * radius);
+  graphics.arc(cx, cy, radius, start, end);
 }
 
 function fract(value: number): number {

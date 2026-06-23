@@ -1,3 +1,19 @@
+import workBellUrl from "../../assets/audio/work-bell.ogg";
+import workChopUrl from "../../assets/audio/work-chop.ogg";
+import workCookOneUrl from "../../assets/audio/work-cook-1.ogg";
+import workCookTwoUrl from "../../assets/audio/work-cook-2.ogg";
+import workFarmOneUrl from "../../assets/audio/work-farm-1.ogg";
+import workFarmTwoUrl from "../../assets/audio/work-farm-2.ogg";
+import workGravelUrl from "../../assets/audio/work-gravel.ogg";
+import workHammerOneUrl from "../../assets/audio/work-hammer-1.ogg";
+import workHammerTwoUrl from "../../assets/audio/work-hammer-2.ogg";
+import workHuntUrl from "../../assets/audio/work-hunt.ogg";
+import workMineOneUrl from "../../assets/audio/work-mine-1.ogg";
+import workMineTwoUrl from "../../assets/audio/work-mine-2.ogg";
+import workPickupUrl from "../../assets/audio/work-pickup.ogg";
+import workRideUrl from "../../assets/audio/work-ride.ogg";
+import workSweepUrl from "../../assets/audio/work-sweep.ogg";
+import workTameUrl from "../../assets/audio/work-tame.ogg";
 import type { Agent, AgentState } from "../types";
 
 type SoundKind =
@@ -20,49 +36,68 @@ type Cue = {
   volume: number;
 };
 
+const SAMPLE_URLS: Record<SoundKind, string[]> = {
+  chop: [workChopUrl],
+  mine: [workMineOneUrl, workMineTwoUrl],
+  hammer: [workHammerOneUrl, workHammerTwoUrl],
+  farm: [workFarmOneUrl, workFarmTwoUrl],
+  cook: [workCookOneUrl, workCookTwoUrl],
+  sweep: [workSweepUrl],
+  gravel: [workGravelUrl],
+  bell: [workBellUrl],
+  tame: [workTameUrl],
+  hunt: [workHuntUrl],
+  pickup: [workPickupUrl],
+  ride: [workRideUrl],
+};
+
 const WORK_CUES: Partial<Record<AgentState, Cue>> = {
-  ChopTree: { kind: "chop", cadence: 0.45, volume: 0.9 },
-  Mine: { kind: "mine", cadence: 0.55, volume: 0.85 },
-  BuildHouse: { kind: "hammer", cadence: 0.38, volume: 0.75 },
-  BuildTile: { kind: "hammer", cadence: 0.28, volume: 0.72 },
-  CraftTool: { kind: "hammer", cadence: 0.5, volume: 0.62 },
-  Furnish: { kind: "hammer", cadence: 0.42, volume: 0.62 },
-  FarmWork: { kind: "farm", cadence: 0.62, volume: 0.55 },
-  Plant: { kind: "farm", cadence: 0.58, volume: 0.52 },
-  Transplant: { kind: "farm", cadence: 0.68, volume: 0.48 },
-  Pave: { kind: "gravel", cadence: 0.45, volume: 0.58 },
-  Cook: { kind: "cook", cadence: 0.76, volume: 0.5 },
-  Clean: { kind: "sweep", cadence: 0.55, volume: 0.55 },
-  Worship: { kind: "bell", cadence: 2.8, volume: 0.42 },
-  Hunt: { kind: "hunt", cadence: 0.9, volume: 0.48 },
-  Tame: { kind: "tame", cadence: 0.95, volume: 0.5 },
-  LoadWood: { kind: "pickup", cadence: 0.55, volume: 0.45 },
-  StoreWood: { kind: "pickup", cadence: 0.55, volume: 0.45 },
-  WithdrawWood: { kind: "pickup", cadence: 0.55, volume: 0.45 },
-  CollectIngredients: { kind: "pickup", cadence: 0.5, volume: 0.36 },
-  Serve: { kind: "pickup", cadence: 0.5, volume: 0.36 },
-  Ride: { kind: "ride", cadence: 1.2, volume: 0.38 },
+  ChopTree: { kind: "chop", cadence: 0.45, volume: 0.78 },
+  Mine: { kind: "mine", cadence: 0.65, volume: 0.72 },
+  BuildHouse: { kind: "hammer", cadence: 0.5, volume: 0.55 },
+  BuildTile: { kind: "hammer", cadence: 0.42, volume: 0.55 },
+  CraftTool: { kind: "hammer", cadence: 0.62, volume: 0.46 },
+  Furnish: { kind: "hammer", cadence: 0.58, volume: 0.46 },
+  FarmWork: { kind: "farm", cadence: 0.64, volume: 0.42 },
+  Plant: { kind: "farm", cadence: 0.64, volume: 0.4 },
+  Transplant: { kind: "farm", cadence: 0.78, volume: 0.38 },
+  Pave: { kind: "gravel", cadence: 0.58, volume: 0.46 },
+  Cook: { kind: "cook", cadence: 1.05, volume: 0.44 },
+  Clean: { kind: "sweep", cadence: 0.68, volume: 0.42 },
+  Worship: { kind: "bell", cadence: 3.6, volume: 0.34 },
+  Hunt: { kind: "hunt", cadence: 1.05, volume: 0.42 },
+  Tame: { kind: "tame", cadence: 1.1, volume: 0.36 },
+  LoadWood: { kind: "pickup", cadence: 0.7, volume: 0.34 },
+  StoreWood: { kind: "pickup", cadence: 0.7, volume: 0.34 },
+  WithdrawWood: { kind: "pickup", cadence: 0.7, volume: 0.34 },
+  CollectIngredients: { kind: "pickup", cadence: 0.62, volume: 0.3 },
+  Serve: { kind: "pickup", cadence: 0.62, volume: 0.3 },
+  Ride: { kind: "ride", cadence: 1.45, volume: 0.34 },
 };
 
 const KIND_MIN_GAP: Record<SoundKind, number> = {
-  chop: 0.1,
-  mine: 0.12,
-  hammer: 0.08,
-  farm: 0.14,
-  cook: 0.3,
-  sweep: 0.14,
-  gravel: 0.14,
-  bell: 0.8,
-  tame: 0.28,
-  hunt: 0.25,
-  pickup: 0.18,
-  ride: 0.45,
+  chop: 0.14,
+  mine: 0.2,
+  hammer: 0.16,
+  farm: 0.18,
+  cook: 0.45,
+  sweep: 0.2,
+  gravel: 0.2,
+  bell: 1,
+  tame: 0.36,
+  hunt: 0.34,
+  pickup: 0.24,
+  ride: 0.6,
 };
 
 export class SoundManager {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private enabled = true;
+  private loadingPromise: Promise<void> | null = null;
+  private loadFailed = false;
+  private readonly buffers = new Map<SoundKind, AudioBuffer[]>();
+  private readonly sampleCursor = new Map<SoundKind, number>();
   private readonly lastBeat = new Map<string, number>();
   private readonly lastKindAt = new Map<SoundKind, number>();
 
@@ -73,7 +108,7 @@ export class SoundManager {
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
     if (this.master) {
-      this.master.gain.setTargetAtTime(enabled ? 0.22 : 0.0001, this.context?.currentTime ?? 0, 0.04);
+      this.master.gain.setTargetAtTime(enabled ? 0.26 : 0.0001, this.context?.currentTime ?? 0, 0.04);
     }
   }
 
@@ -85,12 +120,15 @@ export class SoundManager {
     if (context.state === "suspended") {
       await context.resume();
     }
+    await this.ensureSamples();
   }
 
   tick(agents: Agent[]) {
     if (!this.enabled || !this.context || this.context.state !== "running") {
       return;
     }
+
+    void this.ensureSamples();
 
     const now = this.context.currentTime;
     const liveKeys = new Set<string>();
@@ -127,6 +165,9 @@ export class SoundManager {
     const context = this.context;
     this.context = null;
     this.master = null;
+    this.loadingPromise = null;
+    this.buffers.clear();
+    this.sampleCursor.clear();
     this.lastBeat.clear();
     this.lastKindAt.clear();
     void context?.close();
@@ -139,14 +180,73 @@ export class SoundManager {
 
     const context = new AudioContext();
     const master = context.createGain();
-    master.gain.value = this.enabled ? 0.22 : 0.0001;
+    master.gain.value = this.enabled ? 0.26 : 0.0001;
     master.connect(context.destination);
     this.context = context;
     this.master = master;
     return context;
   }
 
+  private ensureSamples(): Promise<void> {
+    if (this.loadingPromise) {
+      return this.loadingPromise;
+    }
+    const context = this.ensureContext();
+    this.loadingPromise = Promise.all(
+      Object.entries(SAMPLE_URLS).map(async ([kind, urls]) => {
+        const decoded = await Promise.all(
+          urls.map(async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) {
+              throw new Error(`Failed to load sound ${url}`);
+            }
+            return context.decodeAudioData(await response.arrayBuffer());
+          }),
+        );
+        this.buffers.set(kind as SoundKind, decoded);
+      }),
+    )
+      .then(() => {
+        this.loadFailed = false;
+      })
+      .catch((error) => {
+        console.warn("[sound] Falling back to procedural sound:", error);
+        this.loadFailed = true;
+      });
+    return this.loadingPromise;
+  }
+
   private play(kind: SoundKind, volume: number) {
+    const samples = this.buffers.get(kind);
+    if (samples?.length) {
+      this.playSample(kind, samples, volume);
+      return;
+    }
+    if (this.loadFailed) {
+      this.playFallback(kind, volume);
+    }
+  }
+
+  private playSample(kind: SoundKind, samples: AudioBuffer[], volume: number) {
+    const context = this.ensureContext();
+    if (!this.master) {
+      return;
+    }
+    const next = this.sampleCursor.get(kind) ?? 0;
+    const buffer = samples[next % samples.length];
+    this.sampleCursor.set(kind, next + 1);
+
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = 0.96 + Math.random() * 0.08;
+    gain.gain.value = Math.max(0.0001, volume * 0.7);
+    source.connect(gain);
+    gain.connect(this.master);
+    source.start();
+  }
+
+  private playFallback(kind: SoundKind, volume: number) {
     switch (kind) {
       case "chop":
         this.noise(0.055, volume * 0.2, "lowpass", 650);
