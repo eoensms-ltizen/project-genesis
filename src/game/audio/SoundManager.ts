@@ -82,7 +82,7 @@ const WORK_CUES: Partial<Record<AgentState, Cue>> = {
   Plant: { kind: "farm", cadence: 0.94, volume: 0.32 },
   Transplant: { kind: "farm", cadence: 1.1, volume: 0.3 },
   Pave: { kind: "gravel", cadence: 0.86, volume: 0.36 },
-  Cook: { kind: "cook", cadence: 1.65, volume: 0.36 },
+  Cook: { kind: "cook", cadence: 2.3, volume: 0.18 },
   Clean: { kind: "sweep", cadence: 1.05, volume: 0.32 },
   Worship: { kind: "bell", cadence: 5.2, volume: 0.26 },
   Hunt: { kind: "hunt", cadence: 1.35, volume: 0.32 },
@@ -100,7 +100,7 @@ const KIND_MIN_GAP: Record<SoundKind, number> = {
   mine: 0.48,
   hammer: 0.38,
   farm: 0.55,
-  cook: 0.85,
+  cook: 1.45,
   sweep: 0.62,
   gravel: 0.56,
   bell: 2.4,
@@ -115,7 +115,7 @@ const STATE_PRIORITY: Partial<Record<AgentState, number>> = {
   BuildHouse: 1.45,
   Mine: 1.45,
   ChopTree: 1.4,
-  Cook: 1.25,
+  Cook: 0.85,
   Hunt: 1.2,
   Worship: 1.15,
   Ride: 1.15,
@@ -350,17 +350,17 @@ export class SoundManager {
     const now = this.context.currentTime;
     const rainTarget =
       weather.kind === "storm"
-        ? 0.055 + weather.intensity * 0.04
+        ? 0.024 + weather.intensity * 0.02
         : weather.kind === "rain"
-          ? 0.032 + weather.intensity * 0.03
+          ? 0.012 + weather.intensity * 0.014
           : 0.0001;
     const windTarget =
       weather.kind === "storm"
-        ? 0.04 + weather.intensity * 0.035
+        ? 0.026 + weather.intensity * 0.024
         : weather.kind === "rain"
-          ? 0.022
+          ? 0.011
           : weather.kind === "cloudy"
-            ? 0.012 + weather.intensity * 0.012
+            ? 0.008 + weather.intensity * 0.008
             : 0.0001;
     this.rainLayer.gain.gain.setTargetAtTime(rainTarget, now, 1.2);
     this.windLayer.gain.gain.setTargetAtTime(windTarget, now, 1.8);

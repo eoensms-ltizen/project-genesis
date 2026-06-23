@@ -390,6 +390,7 @@ export class GameApp {
       this.simulation.items,
       this.simulation.grainStock,
       this.simulation.meatStock,
+      this.simulation.getWeather(),
       // Only a BUILT funfair has a coaster. A staked/under-construction funfair
       // returns an empty track, so guard the cars on the track being present —
       // otherwise coasterCarTiles() would index an empty ring and crash.

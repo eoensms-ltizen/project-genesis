@@ -1,6 +1,7 @@
 import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
-import type { Agent, AgentState, Animal, Building, ItemStack, ResourceKind, TileType, Vec2 } from "../types";
+import weatherNightOverlayUrl from "../../assets/skin/weather-night-overlay.png";
+import type { Agent, AgentState, Animal, Building, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
@@ -10,6 +11,7 @@ const TILE_SIZE = 16;
 const CHUNK = 8;
 // Zoom the camera snaps to when you start following a resident, so they're framed.
 const FOLLOW_ZOOM = 2.6;
+const CLEAR_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
 type RendererOptions = {
   onTileClick: (position: Vec2) => void;
@@ -29,6 +31,7 @@ export class PixiRenderer {
   // rebuilt only when the building set changes.
   private readonly terrainLayer = new Container();
   private skinTextureLayer: TilingSprite | null = null;
+  private weatherTextureLayer: TilingSprite | null = null;
   private chunkGraphics: Graphics[] = [];
   private chunkCols = 0;
   private chunkRows = 0;
@@ -78,7 +81,10 @@ export class PixiRenderer {
       resizeTo: this.host,
     });
 
-    const skinTexture = await Assets.load<Texture>(skinGroundTextureUrl);
+    const [skinTexture, weatherTexture] = await Promise.all([
+      Assets.load<Texture>(skinGroundTextureUrl),
+      Assets.load<Texture>(weatherNightOverlayUrl),
+    ]);
     const skinTextureLayer = new TilingSprite({
       texture: skinTexture,
       width: 1,
@@ -88,6 +94,15 @@ export class PixiRenderer {
     skinTextureLayer.alpha = 0;
     skinTextureLayer.visible = false;
     this.skinTextureLayer = skinTextureLayer;
+    const weatherTextureLayer = new TilingSprite({
+      texture: weatherTexture,
+      width: 1,
+      height: 1,
+      tileScale: { x: 1, y: 1 },
+    });
+    weatherTextureLayer.alpha = 0;
+    weatherTextureLayer.visible = false;
+    this.weatherTextureLayer = weatherTextureLayer;
 
     this.host.appendChild(this.app.canvas);
     this.app.stage.addChild(this.worldLayer);
@@ -101,6 +116,7 @@ export class PixiRenderer {
     this.worldLayer.addChild(this.overlayGraphics);
     this.agentLayer.addChild(this.agentGraphics);
     this.nightLayer.addChild(this.nightGraphics);
+    this.nightLayer.addChild(weatherTextureLayer);
     this.nightLayer.eventMode = "none";
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
@@ -364,6 +380,19 @@ export class PixiRenderer {
     layer.alpha = this.skinMode ? 0.22 : 0;
   }
 
+  private updateWeatherTextureLayer(world: WorldMap, darkness: number, weather: WeatherState) {
+    const layer = this.weatherTextureLayer;
+    if (!layer) {
+      return;
+    }
+    layer.setSize(world.width * TILE_SIZE, world.height * TILE_SIZE);
+    const wet = weather.kind === "storm" ? 1 : weather.kind === "rain" ? 0.7 : weather.kind === "cloudy" ? 0.24 : 0;
+    const alpha = Math.min(0.11, darkness * 0.04 + wet * 0.032 + (weather.kind === "storm" ? weather.intensity * 0.02 : 0));
+    layer.visible = alpha > 0.008;
+    layer.alpha = alpha;
+    layer.tilePosition.set(0, 0);
+  }
+
   /** Chunk index containing tile (tx,ty), or -1 if out of bounds. */
   private chunkAt(tx: number, ty: number): number {
     if (tx < 0 || ty < 0 || tx >= this.chunkCols * CHUNK || ty >= this.chunkRows * CHUNK) {
@@ -428,6 +457,7 @@ export class PixiRenderer {
     items: ItemStack[] = [],
     grainStock = 0,
     meatStock = 0,
+    weather: WeatherState = CLEAR_WEATHER,
     coasterTrack: Vec2[] = [],
     coasterCars: Vec2[] = [],
   ) {
@@ -451,6 +481,7 @@ export class PixiRenderer {
     this.layoutWorld(world);
     this.ensureChunks(world);
     this.updateSkinTextureLayer(world);
+    this.updateWeatherTextureLayer(world, darkness, weather);
 
     // Terrain: redraw only the chunks whose tiles changed since last frame (plus
     // neighbours, so wall/rock autotiling seams across chunk borders stay right).
@@ -634,32 +665,33 @@ export class PixiRenderer {
       }
     }
 
+    drawWeatherOverlay(this.overlayGraphics, world, weather, this.effectTime, this.skinMode);
+
     this.nightGraphics.clear();
     if (darkness > 0.02) {
       this.nightGraphics.rect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
-      this.nightGraphics.fill({ color: this.skinMode ? 0x080c19 : 0x0a1024, alpha: darkness * (this.skinMode ? 0.6 : 0.55) });
+      const stormTint = weather.kind === "storm" || weather.kind === "rain" ? 0.06 * weather.intensity : 0;
+      this.nightGraphics.fill({
+        color: this.skinMode ? 0x050914 : 0x07101e,
+        alpha: darkness * (this.skinMode ? 0.72 : 0.66) + stormTint,
+      });
 
       // Window light at night: warm for unpowered, bright electric when powered.
       const powered = new Set(poweredBuildingIds);
-      for (const building of buildings) {
+      for (const [index, building] of buildings.entries()) {
         if (building.stage !== "built") {
           continue;
         }
-        const cx = (building.x + building.width / 2) * TILE_SIZE;
-        const cy = (building.y + building.height / 2) * TILE_SIZE;
-        const isPowered = powered.has(building.id);
-        // A small warm glow near the building, not a room-filling blob: capped to
-        // the building's footprint so it reads as light through the windows.
-        const span = Math.min(building.width, building.height) * TILE_SIZE;
-        const outer = Math.min(isPowered ? 16 : 13, span * 0.45);
-        const haloColor = isPowered ? (this.skinMode ? 0xaed4ef : 0xbfe3ff) : this.skinMode ? 0xe7ad62 : 0xffc97a;
-        const coreColor = isPowered ? (this.skinMode ? 0xd7ecf7 : 0xeaf6ff) : this.skinMode ? 0xf0c982 : 0xffe1a6;
-        const haloAlpha = isPowered ? 0.22 : 0.14;
-        const coreAlpha = isPowered ? 0.42 : 0.26;
-        this.nightGraphics.circle(cx, cy, outer);
-        this.nightGraphics.fill({ color: haloColor, alpha: darkness * haloAlpha });
-        this.nightGraphics.circle(cx, cy, outer * 0.5);
-        this.nightGraphics.fill({ color: coreColor, alpha: darkness * coreAlpha });
+        drawNightBuildingLights(
+          this.nightGraphics,
+          building,
+          powered.has(building.id),
+          darkness,
+          this.skinMode,
+          index,
+          this.effectTime,
+          weather,
+        );
       }
 
       // Street lamps light the plaza after dark.
@@ -667,13 +699,10 @@ export class PixiRenderer {
         if (tile.type !== "Lamp") {
           continue;
         }
-        const lx = tile.x * TILE_SIZE + TILE_SIZE / 2;
-        const ly = tile.y * TILE_SIZE + TILE_SIZE / 2;
-        this.nightGraphics.circle(lx, ly, 20);
-        this.nightGraphics.fill({ color: this.skinMode ? 0xe7c076 : 0xffe6a0, alpha: darkness * 0.2 });
-        this.nightGraphics.circle(lx, ly, 8);
-        this.nightGraphics.fill({ color: this.skinMode ? 0xf0d49a : 0xfff0c0, alpha: darkness * 0.34 });
+        drawStreetLampGlow(this.nightGraphics, tile.x, tile.y, darkness, this.skinMode, weather);
       }
+
+      drawNightVignette(this.nightGraphics, world, darkness);
     }
   }
 
@@ -713,6 +742,154 @@ export class PixiRenderer {
       layer.position.set(left, top);
     }
   }
+}
+
+function drawWeatherOverlay(
+  graphics: Graphics,
+  world: WorldMap,
+  weather: WeatherState,
+  time: number,
+  skinMode: boolean,
+) {
+  if (weather.kind === "clear") {
+    return;
+  }
+
+  const worldW = world.width * TILE_SIZE;
+  const worldH = world.height * TILE_SIZE;
+  const intensity = weather.kind === "cloudy" ? weather.intensity * 0.55 : weather.intensity;
+  const tint = weather.kind === "storm" ? 0x6f84a8 : weather.kind === "rain" ? 0x476b82 : 0x465569;
+  graphics.rect(0, 0, worldW, worldH);
+  graphics.fill({ color: tint, alpha: weather.kind === "cloudy" ? 0.035 : 0.045 + intensity * 0.025 });
+
+  if (weather.kind === "cloudy") {
+    for (let i = 0; i < 18; i += 1) {
+      const x = fract(i * 0.372 + time * 0.006) * worldW;
+      const y = fract(i * 0.618 + Math.sin(time * 0.08) * 0.015) * worldH;
+      graphics.ellipse(x, y, 42 + (i % 4) * 13, 16 + (i % 3) * 6);
+      graphics.fill({ color: skinMode ? 0x273141 : 0x324051, alpha: 0.022 + intensity * 0.012 });
+    }
+    return;
+  }
+
+  const count = weather.kind === "storm" ? 135 : 90;
+  const streak = weather.kind === "storm" ? 12 : 8;
+  const speed = weather.kind === "storm" ? 0.74 : 0.48;
+  const color = weather.kind === "storm" ? 0xb8d2e7 : 0x9cbac9;
+  for (let i = 0; i < count; i += 1) {
+    const x = fract(i * 0.754877 + time * 0.035) * worldW;
+    const y = fract(i * 0.569841 + time * speed + Math.sin(i) * 0.02) * worldH;
+    const dx = weather.kind === "storm" ? -3.8 : -2.4;
+    drawStroke(graphics, x, y, x + dx, y + streak, color, weather.kind === "storm" ? 0.7 : 0.55, 0.11 + intensity * 0.06);
+  }
+
+  if (weather.kind === "storm") {
+    const flash = Math.pow(Math.max(0, Math.sin(time * 0.73 + 1.2)), 28) * intensity;
+    if (flash > 0.02) {
+      graphics.rect(0, 0, worldW, worldH);
+      graphics.fill({ color: 0xa8c8ff, alpha: flash * 0.12 });
+    }
+  }
+}
+
+function drawNightBuildingLights(
+  graphics: Graphics,
+  building: Building,
+  powered: boolean,
+  darkness: number,
+  skinMode: boolean,
+  index: number,
+  time: number,
+  weather: WeatherState,
+) {
+  const x = building.x * TILE_SIZE;
+  const y = building.y * TILE_SIZE;
+  const w = building.width * TILE_SIZE;
+  const h = building.height * TILE_SIZE;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const wetBoost = weather.kind === "rain" || weather.kind === "storm" ? 1.28 : 1;
+  const pulse = 0.9 + Math.sin(time * 2.2 + index * 1.7) * 0.1;
+  const accent = powered
+    ? [0x2fe7ef, 0xff3dbd, 0x8f5cff][index % 3]
+    : building.kind === "kitchen"
+      ? 0xff4eb8
+      : building.kind === "church"
+        ? 0xb48cff
+        : skinMode
+          ? [0x24d8e8, 0xff5bc8, 0xffa15c, 0x9e6dff][index % 4]
+          : 0xffc16f;
+  const core = powered ? (skinMode ? 0xaaf8ff : 0xb8fbff) : skinMode ? 0xffc28a : 0xffd09a;
+  const outer = Math.max(12, Math.min(24, Math.min(w, h) * (powered ? 0.52 : 0.38)));
+
+  graphics.circle(cx, cy, outer * 2.1);
+  graphics.fill({ color: accent, alpha: darkness * (skinMode ? 0.09 : 0.055) * wetBoost * pulse });
+  graphics.circle(cx, cy, outer * 0.86);
+  graphics.fill({ color: core, alpha: darkness * (skinMode ? 0.12 : 0.16) * wetBoost });
+  graphics.circle(cx, cy, outer * 0.34);
+  graphics.fill({ color: core, alpha: darkness * (skinMode ? 0.25 : 0.3) });
+
+  const stripAlpha = darkness * (skinMode ? (powered ? 0.92 : 0.76) : powered ? 0.74 : 0.38) * wetBoost;
+  const stripW = Math.max(7, Math.min(16, w * 0.24));
+  const stripH = 2.2;
+  const inset = 3;
+  graphics.rect(x + inset - 1, y + h - 5, stripW + 2, stripH + 2);
+  graphics.fill({ color: accent, alpha: stripAlpha * 0.18 });
+  graphics.rect(x + inset, y + h - 4, stripW, stripH);
+  graphics.fill({ color: accent, alpha: stripAlpha });
+  graphics.rect(x + w - stripW - inset - 1, y + 2, stripW + 2, stripH + 2);
+  graphics.fill({ color: accent, alpha: stripAlpha * 0.12 });
+  graphics.rect(x + w - stripW - inset, y + 3, stripW, stripH);
+  graphics.fill({ color: accent, alpha: stripAlpha * 0.68 });
+
+  if (powered || building.kind === "kitchen" || building.kind === "warehouse" || building.kind === "granary") {
+    const railH = Math.max(8, h * 0.36);
+    graphics.rect(x + w - 5, y + h * 0.24 - 1, 4.2, railH + 2);
+    graphics.fill({ color: accent, alpha: stripAlpha * 0.14 });
+    graphics.rect(x + w - 4, y + h * 0.24, 2.2, railH);
+    graphics.fill({ color: accent, alpha: stripAlpha * 0.84 });
+  }
+
+  if (weather.kind === "rain" || weather.kind === "storm") {
+    graphics.ellipse(cx, y + h + 3, w * 0.5, 4);
+    graphics.fill({ color: accent, alpha: darkness * 0.085 * weather.intensity });
+  }
+}
+
+function drawStreetLampGlow(
+  graphics: Graphics,
+  x: number,
+  y: number,
+  darkness: number,
+  skinMode: boolean,
+  weather: WeatherState,
+) {
+  const lx = x * TILE_SIZE + TILE_SIZE / 2;
+  const ly = y * TILE_SIZE + TILE_SIZE / 2;
+  const wetBoost = weather.kind === "rain" || weather.kind === "storm" ? 1.22 : 1;
+  graphics.circle(lx, ly, 32);
+  graphics.fill({ color: skinMode ? 0xd98a45 : 0xff9d54, alpha: darkness * 0.08 * wetBoost });
+  graphics.circle(lx, ly, 18);
+  graphics.fill({ color: skinMode ? 0xe7b566 : 0xffc178, alpha: darkness * 0.18 * wetBoost });
+  graphics.circle(lx, ly, 7);
+  graphics.fill({ color: skinMode ? 0xf0d49a : 0xfff0c0, alpha: darkness * 0.44 });
+}
+
+function drawNightVignette(graphics: Graphics, world: WorldMap, darkness: number) {
+  if (darkness < 0.35) {
+    return;
+  }
+  const w = world.width * TILE_SIZE;
+  const h = world.height * TILE_SIZE;
+  const edge = 70;
+  graphics.rect(0, 0, w, edge);
+  graphics.fill({ color: 0x000000, alpha: darkness * 0.12 });
+  graphics.rect(0, h - edge, w, edge);
+  graphics.fill({ color: 0x000000, alpha: darkness * 0.12 });
+  graphics.rect(0, 0, edge, h);
+  graphics.fill({ color: 0x000000, alpha: darkness * 0.1 });
+  graphics.rect(w - edge, 0, edge, h);
+  graphics.fill({ color: 0x000000, alpha: darkness * 0.1 });
 }
 
 /**
