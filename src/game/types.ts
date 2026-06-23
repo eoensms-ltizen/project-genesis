@@ -388,10 +388,18 @@ export type GameClock = {
   isNight: boolean;
 };
 
+export type WeatherKind = "clear" | "cloudy" | "rain" | "storm";
+
+export type WeatherState = {
+  kind: WeatherKind;
+  intensity: number;
+};
+
 export type SimulationSnapshot = {
   agents: Agent[];
   logs: GameLogEntry[];
   clock: GameClock;
+  weather: WeatherState;
   era: number;
   foodStock: number;
   // The larder split by shelf: grain (crops/berries) and meat (game/herd/fish).

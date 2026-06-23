@@ -13,6 +13,7 @@ import type {
   InspectionTarget,
   ResourceKind,
   Vec2,
+  WeatherState,
 } from "./game/types";
 import { getLang, setLang, tr, type Lang } from "./i18n";
 import { AgentCreator } from "./ui/AgentCreator";
@@ -23,6 +24,7 @@ import { Inspector } from "./ui/Inspector";
 
 const TICK_MS = 160;
 const SOUND_KEY = "pg-sound-enabled";
+const DEFAULT_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -94,6 +96,20 @@ function stateName(state: AgentState): string {
   return tr(state, STATE_LABELS_KO[state] ?? state);
 }
 
+function weatherLabel(weather: WeatherState): string {
+  switch (weather.kind) {
+    case "storm":
+      return "⛈";
+    case "rain":
+      return "🌧";
+    case "cloudy":
+      return "☁";
+    case "clear":
+    default:
+      return "☀";
+  }
+}
+
 const JOB_LABELS_KO: Record<Agent["job"], string> = {
   none: "주민",
   builder: "건축가",
@@ -119,6 +135,7 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [logs, setLogs] = useState<GameLogEntry[]>([]);
   const [clock, setClock] = useState<GameClock | null>(null);
+  const [weather, setWeather] = useState<WeatherState>(DEFAULT_WEATHER);
   const [era, setEra] = useState(0);
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
@@ -172,6 +189,7 @@ export default function App() {
         setAgents(snapshot.agents);
         setLogs(snapshot.logs);
         setClock(snapshot.clock);
+        setWeather(snapshot.weather);
         setEra(snapshot.era);
         setSupportedPop(snapshot.supportedPopulation);
         setFoodStock(snapshot.foodStock);
@@ -391,7 +409,7 @@ export default function App() {
                 <span className="hud-date">
                   Y{clock.year} · D{clock.day} ·{" "}
                   {String(clock.hour).padStart(2, "0")}:{String(clock.minute).padStart(2, "0")}{" "}
-                  {clock.isNight ? "🌙" : "☀️"}
+                  {clock.isNight ? "🌙" : "☀️"} {weatherLabel(weather)}
                 </span>
                 <span className="hud-stats">
                   {eraName(era)} · 👥{agents.length}/{supportedPop} · 🌾{grainStock} · 🥩

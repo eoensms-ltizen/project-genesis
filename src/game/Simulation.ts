@@ -18,6 +18,7 @@ import type {
   SimulationSnapshot,
   TileType,
   Vec2,
+  WeatherState,
 } from "./types";
 import { ROOM_BUILDING_KINDS } from "./types";
 import { WorldMap } from "./world/WorldMap";
@@ -500,6 +501,25 @@ export class Simulation {
 
   isNight(): boolean {
     return this.getClock().isNight;
+  }
+
+  getWeather(): WeatherState {
+    const period = DAY_LENGTH_SECONDS * 1.35;
+    const phase = (this.elapsedSeconds % period) / period;
+    const slow = Math.sin(this.elapsedSeconds / 74 + 0.8);
+    const slower = Math.sin(this.elapsedSeconds / 151 + 2.2) * 0.65;
+    const daily = Math.sin(phase * Math.PI * 2 - 0.9) * 0.35;
+    const wetness = Math.max(0, Math.min(1, (slow + slower + daily + 1.18) / 2.55));
+    if (wetness > 0.86) {
+      return { kind: "storm", intensity: (wetness - 0.86) / 0.14 };
+    }
+    if (wetness > 0.63) {
+      return { kind: "rain", intensity: 0.35 + ((wetness - 0.63) / 0.23) * 0.65 };
+    }
+    if (wetness > 0.42) {
+      return { kind: "cloudy", intensity: 0.3 + ((wetness - 0.42) / 0.21) * 0.45 };
+    }
+    return { kind: "clear", intensity: 1 - wetness };
   }
 
   /** 0 in daylight, 1 in deep night, with dusk/dawn ramps. */
@@ -2122,6 +2142,7 @@ export class Simulation {
       })),
       logs: [...this.logs],
       clock: this.getClock(),
+      weather: this.getWeather(),
       era: this.era,
       foodStock: this.foodStock,
       grainStock: this.grainStock,

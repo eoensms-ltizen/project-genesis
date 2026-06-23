@@ -41,8 +41,12 @@ export class GameApp {
 
   tick(deltaSeconds: number) {
     this.simulation.update(deltaSeconds);
-    this.sound.tick(this.simulation.agents);
     this.render();
+    this.sound.tick(this.simulation.agents, {
+      clock: this.simulation.getClock(),
+      weather: this.simulation.getWeather(),
+      focusWeights: this.renderer.audioFocusWeights(this.simulation.agents),
+    });
   }
 
   addRandomAgent(position: Vec2) {

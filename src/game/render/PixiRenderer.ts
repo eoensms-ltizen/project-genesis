@@ -270,6 +270,39 @@ export class PixiRenderer {
     return this.followAgentId === agentId;
   }
 
+  audioFocusWeights(agents: Agent[]): Map<string, number> {
+    const weights = new Map<string, number>();
+    const scale = this.baseScale * this.userZoom;
+    const left = this.baseLeft + this.panX;
+    const top = this.baseTop + this.panY;
+    const centerX = this.app.screen.width / 2;
+    const centerY = this.app.screen.height / 2;
+    const audibleRadius = Math.max(140, Math.min(this.app.screen.width, this.app.screen.height) * 0.55);
+    const margin = 48;
+
+    for (const agent of agents) {
+      const sx = left + (agent.position.x * TILE_SIZE + TILE_SIZE / 2) * scale;
+      const sy = top + (agent.position.y * TILE_SIZE + TILE_SIZE / 2) * scale;
+      if (
+        sx < -margin ||
+        sy < -margin ||
+        sx > this.app.screen.width + margin ||
+        sy > this.app.screen.height + margin
+      ) {
+        weights.set(agent.id, 0);
+        continue;
+      }
+
+      const distance = Math.hypot(sx - centerX, sy - centerY);
+      const centered = Math.max(0, 1 - distance / audibleRadius);
+      const visibleFloor = 0.14;
+      const focus = visibleFloor + centered * centered * (1 - visibleFloor);
+      weights.set(agent.id, agent.id === this.followAgentId ? Math.max(focus, 1.25) : focus);
+    }
+
+    return weights;
+  }
+
   /** Toggle the 2.5D building "lids" on/off; forces the building layer to redraw. */
   setFlatBuildings(flat: boolean) {
     if (this.flatBuildings === flat) {
