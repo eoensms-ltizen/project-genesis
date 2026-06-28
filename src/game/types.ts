@@ -214,6 +214,10 @@ export type Building = {
   // missing structural tiles (done:false), and a resident re-lays each — exactly
   // like a fresh build, but the stage stays "built" so its function never lapses.
   repairing?: boolean;
+  // Architect-mode buildings can be painted as arbitrary floor zones. They keep
+  // the same function/kind, while floors, walls and doors are authored separately.
+  customLayout?: boolean;
+  tiles?: Vec2[];
 };
 
 // One tile of a building's construction plan — a wall, floor, or doorway that a

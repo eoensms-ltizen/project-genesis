@@ -21,6 +21,7 @@ import type {
   Vec2,
   WeatherState,
 } from "./types";
+import { boundsForTiles, tileKey, uniqueTiles } from "./planning";
 import { ROOM_BUILDING_KINDS } from "./types";
 import { WorldMap } from "./world/WorldMap";
 import { tr } from "../i18n";
@@ -230,6 +231,20 @@ const ROADABLE: ReadonlySet<TileType> = new Set([
   "Lamp",
 ]);
 
+const FLOOR_ZONE_PAINTABLE: ReadonlySet<TileType> = new Set([
+  ...ROADABLE,
+  "Floor",
+  "RockFloor",
+]);
+
+const STRUCTURE_PAINTABLE: ReadonlySet<TileType> = new Set([
+  ...ROADABLE,
+  "Floor",
+  "Wall",
+  "Door",
+  "RockFloor",
+]);
+
 // Public order: crowding and discontent breed friction; police and a station
 // keep it in check. Unrest is a 0..100 meter that drives the police job and
 // occasionally erupts into a quarrel that dents the participants' comfort.
@@ -390,6 +405,12 @@ export class Simulation {
       }
       for (const building of saved.buildings) {
         // Tiers are gone; a saved house's old level/capacity is simply ignored.
+        building.door = { ...building.door };
+        building.doors = building.doors?.map((door) => ({ ...door }));
+        building.tiles = building.tiles?.map((tile) => ({ ...tile }));
+        if (building.customLayout) {
+          this.syncCustomBuildingBounds(building);
+        }
         this.buildings.push(building);
         if (building.stage !== "built") {
           this.claimBuildingFootprint(building);
@@ -420,6 +441,7 @@ export class Simulation {
       this.world = WorldMap.createRandom();
       this.log(tr("A new valley is ready.", "새로운 골짜기가 준비되었다."));
     }
+    this.refreshCustomBuildingEntrances();
     this.refreshDoors();
     // Heal any rooms a past redevelopment bug had stamped into solid blocks.
     this.repairWalledRooms();
@@ -559,6 +581,8 @@ export class Simulation {
     // Explicit entrance(s) — used by an annex, whose door is internal (it opens
     // onto its parent house, not a street) and so can't be auto-sited by road.
     doors?: Vec2[];
+    customLayout?: boolean;
+    tiles?: Vec2[];
   }): Building {
     // Civic buildings get road-facing doors as needed; a home keeps a single
     // entrance (a house with two doors wastes wall and isn't how anyone builds).
@@ -572,7 +596,7 @@ export class Simulation {
       id: `building-${this.nextBuildingId++}`,
       stage: "site",
       ...input,
-      door: doors[0],
+      door: doors[0] ?? input.door,
       doors,
     };
     this.buildings.push(building);
@@ -581,6 +605,15 @@ export class Simulation {
 
   /** The interior tile a resident calls home (centre of a walled room). */
   houseInterior(building: Building): Vec2 {
+    if (building.customLayout && building.tiles?.length) {
+      const bounds = boundsForTiles(building.tiles);
+      const center = bounds
+        ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+        : building.tiles[0];
+      return building.tiles
+        .slice()
+        .sort((a, b) => Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y))[0];
+    }
     return {
       x: building.x + Math.floor(building.width / 2),
       y: building.y + Math.floor(building.height / 2),
@@ -636,6 +669,9 @@ export class Simulation {
    * piecemeal construction plan, so every building can be raised tile by tile.
    */
   buildingLayout(building: Building): BuildPlanTile[] {
+    if (building.customLayout) {
+      return (building.tiles ?? []).map((tile) => ({ x: tile.x, y: tile.y, t: "Floor" }));
+    }
     if (ROOM_BUILDING_KINDS.has(building.kind)) {
       return this.roomLayout(building);
     }
@@ -657,6 +693,16 @@ export class Simulation {
   private paintBuildingLayout(building: Building) {
     for (const tile of this.buildingLayout(building)) {
       this.world.setTile({ x: tile.x, y: tile.y }, tile.t);
+    }
+  }
+
+  private paintCustomFloorZone(building: Building) {
+    for (const tile of building.tiles ?? []) {
+      const type = this.world.getTile(tile)?.type;
+      if (type === undefined || type === "Wall" || type === "Door") {
+        continue;
+      }
+      this.world.setTile(tile, "Floor");
     }
   }
 
@@ -813,6 +859,64 @@ export class Simulation {
     return undefined;
   }
 
+  private syncCustomBuildingBounds(building: Building): boolean {
+    const tiles = uniqueTiles(building.tiles ?? []).filter((tile) => this.world.inBounds(tile));
+    const bounds = boundsForTiles(tiles);
+    if (!bounds) {
+      return false;
+    }
+    building.tiles = tiles;
+    building.x = bounds.x;
+    building.y = bounds.y;
+    building.width = bounds.width;
+    building.height = bounds.height;
+    if (!building.door || !this.world.inBounds(building.door)) {
+      building.door = this.houseInterior(building);
+    }
+    return true;
+  }
+
+  private customBuildingTouches(building: Building, tileKeys: Set<string>): boolean {
+    for (const tile of building.tiles ?? []) {
+      for (const delta of [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ]) {
+        if (tileKeys.has(tileKey({ x: tile.x + delta.x, y: tile.y + delta.y }))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private removeTilesFromCustomBuildings(positions: Vec2[]): boolean {
+    const removeKeys = new Set(uniqueTiles(positions).map(tileKey));
+    if (removeKeys.size === 0) {
+      return false;
+    }
+    let changed = false;
+    for (let i = this.buildings.length - 1; i >= 0; i -= 1) {
+      const building = this.buildings[i];
+      if (!building.customLayout || !building.tiles?.length) {
+        continue;
+      }
+      const nextTiles = building.tiles.filter((tile) => !removeKeys.has(tileKey(tile)));
+      if (nextTiles.length === building.tiles.length) {
+        continue;
+      }
+      changed = true;
+      building.tiles = nextTiles;
+      if (!this.syncCustomBuildingBounds(building)) {
+        this.buildings.splice(i, 1);
+      }
+    }
+    return changed;
+  }
+
   /**
    * Lazily build the construction plan for a walled-room building: every wall,
    * floor and doorway tile, none yet laid. Residents place these one at a time.
@@ -906,6 +1010,7 @@ export class Simulation {
       entry.done = true;
       entry.claimedBy = undefined;
     }
+    this.refreshCustomBuildingEntrances();
     this.refreshDoors();
     this.notifyChanged();
   }
@@ -1120,6 +1225,21 @@ export class Simulation {
 
   /** The interior (non-wall, non-door) floor tiles of a walled room. */
   interiorTiles(building: Building): Vec2[] {
+    if (building.customLayout) {
+      return (building.tiles ?? []).filter((tile) => {
+        const type = this.world.getTile(tile)?.type;
+        return (
+          type === "Floor" ||
+          type === "Bed" ||
+          type === "BedFoot" ||
+          type === "BedSite" ||
+          type === "Table" ||
+          type === "Chair" ||
+          type === "Stove" ||
+          type === "Counter"
+        );
+      });
+    }
     const tiles: Vec2[] = [];
     const doorKeys = new Set(this.buildingDoors(building).map((d) => `${d.x},${d.y}`));
     for (let fy = 1; fy < building.height - 1; fy += 1) {
@@ -1335,6 +1455,96 @@ export class Simulation {
     this.refreshDoors();
     this.notifyChanged();
     return true;
+  }
+
+  devPaintFloorZone(kind: BuildingKind, positions: Vec2[]): number {
+    const tiles = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && FLOOR_ZONE_PAINTABLE.has(type);
+    });
+    if (tiles.length === 0) {
+      return 0;
+    }
+
+    const tileKeys = new Set(tiles.map(tileKey));
+    const mergeTargets = this.buildings.filter(
+      (building) =>
+        building.customLayout &&
+        building.kind === kind &&
+        this.customBuildingTouches(building, tileKeys),
+    );
+
+    this.removeTilesFromCustomBuildings(tiles);
+
+    let target = mergeTargets.find((building) => this.buildings.includes(building));
+    if (!target) {
+      const bounds = boundsForTiles(tiles);
+      if (!bounds) {
+        return 0;
+      }
+      target = this.registerBuilding({
+        kind,
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        door: tiles[0],
+        doors: [],
+        customLayout: true,
+        tiles,
+      });
+      target.stage = "built";
+      target.builtAtDay = Math.floor(
+        (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
+      );
+      target.durability = 100;
+    } else {
+      const merged = [...(target.tiles ?? []), ...tiles];
+      for (const other of mergeTargets) {
+        if (other === target || !this.buildings.includes(other)) {
+          continue;
+        }
+        merged.push(...(other.tiles ?? []));
+        const index = this.buildings.indexOf(other);
+        if (index >= 0) {
+          this.buildings.splice(index, 1);
+        }
+      }
+      target.tiles = uniqueTiles(merged);
+    }
+
+    this.syncCustomBuildingBounds(target);
+    this.paintCustomFloorZone(target);
+    this.refreshCustomBuildingEntrances();
+    this.refreshDoors();
+    this.notifyChanged();
+    return tiles.length;
+  }
+
+  devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): number {
+    const tiles = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && STRUCTURE_PAINTABLE.has(type);
+    });
+    if (tiles.length === 0) {
+      return 0;
+    }
+
+    this.removeTilesFromCustomBuildings(tiles);
+    let changed = 0;
+    for (const position of tiles) {
+      if (this.world.getTile(position)?.type === structure) {
+        continue;
+      }
+      this.world.setTile(position, structure);
+      changed += 1;
+    }
+    if (changed > 0) {
+      this.refreshCustomBuildingEntrances();
+      this.refreshDoors();
+      this.notifyChanged();
+    }
+    return changed;
   }
 
   /**
@@ -1768,7 +1978,57 @@ export class Simulation {
     return { x: building.x + building.width, y: door.y };
   }
 
+  private inferCustomBuildingDoors(building: Building): Vec2[] {
+    const tiles = building.tiles ?? [];
+    const floorKeys = new Set(tiles.map(tileKey));
+    const doors: Vec2[] = [];
+    const seen = new Set<string>();
+    const addDoor = (position: Vec2) => {
+      const key = tileKey(position);
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      doors.push(position);
+    };
+    for (const tile of tiles) {
+      if (this.world.getTile(tile)?.type === "Door") {
+        addDoor(tile);
+      }
+      for (const delta of [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ]) {
+        const neighbor = { x: tile.x + delta.x, y: tile.y + delta.y };
+        if (!this.world.inBounds(neighbor) || floorKeys.has(tileKey(neighbor))) {
+          continue;
+        }
+        if (this.world.getTile(neighbor)?.type === "Door") {
+          addDoor(neighbor);
+        }
+      }
+    }
+    return doors;
+  }
+
+  private refreshCustomBuildingEntrances() {
+    for (const building of this.buildings) {
+      if (!building.customLayout || building.stage !== "built") {
+        continue;
+      }
+      const doors = this.inferCustomBuildingDoors(building);
+      building.doors = doors;
+      building.door = doors[0] ?? this.houseInterior(building);
+    }
+  }
+
   private buildingDoors(building: Building): Vec2[] {
+    if (building.customLayout) {
+      const inferred = this.inferCustomBuildingDoors(building);
+      return inferred.length > 0 ? inferred : [building.door];
+    }
     return building.doors ?? [building.door];
   }
 
@@ -1790,7 +2050,10 @@ export class Simulation {
     if (stage === "foundation") {
       this.ensureBuildPlan(building);
     }
-    if (stage === "built" && !ROOM_BUILDING_KINDS.has(building.kind)) {
+    if (stage === "built" && building.customLayout) {
+      this.paintCustomFloorZone(building);
+      building.plan = undefined;
+    } else if (stage === "built" && !ROOM_BUILDING_KINDS.has(building.kind)) {
       // Open yards (pasture, fairground, cemetery, park): assert their final
       // fence / gate / interior layout once the tiles are all laid.
       this.paintBuildingLayout(building);
@@ -2008,6 +2271,8 @@ export class Simulation {
         buildings: this.buildings.map((building) => ({
           ...building,
           door: { ...building.door },
+          doors: building.doors?.map((door) => ({ ...door })),
+          tiles: building.tiles?.map((tile) => ({ ...tile })),
         })),
         nextBuildingId: this.nextBuildingId,
         era: this.era,
@@ -2780,7 +3045,9 @@ export class Simulation {
     if (type === undefined) {
       return false;
     }
+    this.removeTilesFromCustomBuildings([position]);
     this.world.setTile(position, "Grass");
+    this.refreshCustomBuildingEntrances();
     this.refreshDoors();
     this.notifyChanged();
     return true;
@@ -2820,10 +3087,12 @@ export class Simulation {
       if (type === undefined) {
         continue;
       }
+      this.removeTilesFromCustomBuildings([position]);
       this.world.setTile(position, "Grass");
       changed += 1;
     }
     if (changed > 0) {
+      this.refreshCustomBuildingEntrances();
       this.refreshDoors();
       this.notifyChanged();
     }
@@ -4467,10 +4736,12 @@ export class Simulation {
   private buildingAt(position: Vec2): Building | undefined {
     return this.buildings.find(
       (b) =>
-        position.x >= b.x &&
-        position.x < b.x + b.width &&
-        position.y >= b.y &&
-        position.y < b.y + b.height,
+        b.customLayout
+          ? (b.tiles ?? []).some((tile) => tile.x === position.x && tile.y === position.y)
+          : position.x >= b.x &&
+            position.x < b.x + b.width &&
+            position.y >= b.y &&
+            position.y < b.y + b.height,
     );
   }
 
@@ -4623,6 +4894,9 @@ function claimKey(position: Vec2): string {
 }
 
 export function footprintTiles(building: Building): Vec2[] {
+  if (building.customLayout) {
+    return uniqueTiles(building.tiles ?? []);
+  }
   const tiles: Vec2[] = [];
   for (let y = building.y; y < building.y + building.height; y += 1) {
     for (let x = building.x; x < building.x + building.width; x += 1) {

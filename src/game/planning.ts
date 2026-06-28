@@ -53,6 +53,43 @@ export function tileKey(tile: Vec2): string {
   return `${tile.x},${tile.y}`;
 }
 
+export function uniqueTiles(tiles: Vec2[]): Vec2[] {
+  const seen = new Set<string>();
+  const result: Vec2[] = [];
+  for (const tile of tiles) {
+    const rounded = { x: Math.round(tile.x), y: Math.round(tile.y) };
+    const key = tileKey(rounded);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(rounded);
+  }
+  return result;
+}
+
+export function boundsForTiles(tiles: Vec2[]): TileRect | undefined {
+  if (tiles.length === 0) {
+    return undefined;
+  }
+  let minX = tiles[0].x;
+  let maxX = tiles[0].x;
+  let minY = tiles[0].y;
+  let maxY = tiles[0].y;
+  for (const tile of tiles) {
+    minX = Math.min(minX, tile.x);
+    maxX = Math.max(maxX, tile.x);
+    minY = Math.min(minY, tile.y);
+    maxY = Math.max(maxY, tile.y);
+  }
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
 export function lineTiles(from: Vec2, to: Vec2): Vec2[] {
   const tiles: Vec2[] = [];
   let x = from.x;

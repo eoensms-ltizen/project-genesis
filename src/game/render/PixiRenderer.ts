@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
 import weatherNightOverlayUrl from "../../assets/skin/weather-night-overlay.png";
-import type { Agent, AgentState, Animal, Building, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
+import type { Agent, AgentState, Animal, Building, BuildingKind, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
@@ -22,7 +22,7 @@ type RendererOptions = {
 
 export type ArchitectDraftPreview =
   | { kind: "rect"; rect: { x: number; y: number; width: number; height: number } }
-  | { kind: "tiles"; tiles: Vec2[]; mode: "road" | "erase" };
+  | { kind: "tiles"; tiles: Vec2[]; mode: "floor" | "wall" | "door" | "road" | "erase"; building?: BuildingKind };
 
 export class PixiRenderer {
   private readonly host: HTMLElement;
@@ -567,7 +567,13 @@ export class PixiRenderer {
     const buildingsKey =
       (this.flatBuildings ? "f" : "r") +
       (this.skinMode ? "s" : "c") +
-      buildings.map((b) => `${b.id}:${b.stage}:${b.level ?? 0}`).join("|");
+      buildings
+        .map((b) =>
+          `${b.id}:${b.stage}:${b.level ?? 0}:${
+            b.customLayout ? (b.tiles ?? []).map((tile) => `${tile.x},${tile.y}`).join(";") : ""
+          }`,
+        )
+        .join("|");
     if (dirty.all || buildingsKey !== this.lastBuildingsKey) {
       this.lastBuildingsKey = buildingsKey;
       this.buildingGraphics.clear();
@@ -582,6 +588,10 @@ export class PixiRenderer {
           continue;
         }
         if (building.stage === "built") {
+          if (building.customLayout) {
+            drawCustomFloorZone(this.buildingGraphics, building, this.skinMode);
+            continue;
+          }
           // Finished buildings are drawn from their own tiles in the terrain layer
           // (walls/floor for rooms, fence/grass/plaza for yards). Rooms get a
           // purpose emblem; the fairground gets its coaster station on top.
@@ -809,15 +819,53 @@ function drawArchitectDraftPreview(
     return;
   }
 
-  const color =
-    preview.mode === "road" ? (skinMode ? 0xd6bd78 : 0xffd75f) : skinMode ? 0xdf6b6b : 0xff5a5a;
+  const color = architectPreviewColor(preview, skinMode);
+  const alpha =
+    preview.mode === "wall" || preview.mode === "door"
+      ? 0.32
+      : preview.mode === "erase"
+        ? 0.2
+        : 0.26;
   for (const tile of preview.tiles) {
     const px = tile.x * TILE_SIZE;
     const py = tile.y * TILE_SIZE;
     graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
-    graphics.fill({ color, alpha: preview.mode === "road" ? 0.26 : 0.2 });
+    graphics.fill({ color, alpha });
     graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
     graphics.stroke({ color, width: 1.2, alpha: 0.9 });
+    if (preview.mode === "door") {
+      graphics.rect(px + 4, py + 2, TILE_SIZE - 8, TILE_SIZE - 4);
+      graphics.fill({ color: skinMode ? 0x2a1b0f : 0x302218, alpha: 0.5 });
+    }
+  }
+}
+
+function architectPreviewColor(preview: Extract<ArchitectDraftPreview, { kind: "tiles" }>, skinMode: boolean): number {
+  if (preview.mode === "erase") {
+    return skinMode ? 0xdf6b6b : 0xff5a5a;
+  }
+  if (preview.mode === "wall") {
+    return skinMode ? 0x9a7a4a : 0x8b7a68;
+  }
+  if (preview.mode === "door") {
+    return skinMode ? 0xc48a45 : 0xb87832;
+  }
+  if (preview.mode === "road") {
+    return skinMode ? 0xd6bd78 : 0xffd75f;
+  }
+  switch (preview.building) {
+    case "warehouse":
+      return skinMode ? 0x8fb4c8 : 0x8eb9d6;
+    case "granary":
+      return skinMode ? 0xbca85a : 0xd2bd5f;
+    case "kitchen":
+      return skinMode ? 0xcc8c62 : 0xe08f62;
+    case "funfair":
+      return skinMode ? 0xb26bb5 : 0xd07ad8;
+    case "pasture":
+      return skinMode ? 0x78a45f : 0x7fbe64;
+    default:
+      return skinMode ? 0x6fa7c0 : 0x76c9e8;
   }
 }
 
@@ -2033,6 +2081,52 @@ function drawRoomMarker(graphics: Graphics, building: Building, skinMode = false
   } else if (building.kind === "smelter") {
     graphics.circle(cx, cy, 1.8);
     graphics.fill(skinMode ? 0xc96d36 : 0xe7873c);
+  }
+}
+
+function drawCustomFloorZone(graphics: Graphics, building: Building, skinMode = false) {
+  const tiles = building.tiles ?? [];
+  if (tiles.length === 0) {
+    return;
+  }
+  const color = zoneColorForKind(building.kind, skinMode);
+  let sx = 0;
+  let sy = 0;
+  for (const tile of tiles) {
+    const px = tile.x * TILE_SIZE;
+    const py = tile.y * TILE_SIZE;
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.fill({ color, alpha: skinMode ? 0.12 : 0.1 });
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.stroke({ color, width: 0.8, alpha: 0.28 });
+    sx += tile.x + 0.5;
+    sy += tile.y + 0.5;
+  }
+
+  const cx = (sx / tiles.length) * TILE_SIZE;
+  const cy = (sy / tiles.length) * TILE_SIZE;
+  graphics.circle(cx, cy, 4.2);
+  graphics.fill({ color, alpha: 0.9 });
+  graphics.circle(cx, cy, 4.2);
+  graphics.stroke({ color: skinMode ? 0x1a120b : 0x111111, width: 1, alpha: 0.45 });
+}
+
+function zoneColorForKind(kind: BuildingKind, skinMode = false): number {
+  switch (kind) {
+    case "warehouse":
+      return skinMode ? 0x8fb4c8 : 0x8eb9d6;
+    case "granary":
+      return skinMode ? 0xbca85a : 0xd2bd5f;
+    case "kitchen":
+      return skinMode ? 0xcc8c62 : 0xe08f62;
+    case "funfair":
+      return skinMode ? 0xb26bb5 : 0xd07ad8;
+    case "pasture":
+      return skinMode ? 0x78a45f : 0x7fbe64;
+    case "church":
+      return skinMode ? 0xd8cfb7 : 0xf0ead8;
+    default:
+      return skinMode ? 0x6fa7c0 : 0x76c9e8;
   }
 }
 

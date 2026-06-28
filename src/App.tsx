@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
-import { lineTiles, normalizeDraftRect, tileKey } from "./game/planning";
+import { lineTiles, tileKey } from "./game/planning";
 import type { ArchitectDraftPreview } from "./game/render/PixiRenderer";
 import { ERA_NAMES, NEW_GAME_MODE_KEY, SAVE_KEY } from "./game/Simulation";
 import type {
@@ -31,8 +31,8 @@ const SOUND_KEY = "pg-sound-enabled";
 const DEFAULT_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
 type ArchitectDraft =
-  | { kind: "building"; building: BuildingKind; start: Vec2; end: Vec2 }
-  | { kind: "tiles"; tool: "road" | "demolishTile"; tiles: Vec2[] };
+  | { kind: "building"; building: BuildingKind; tiles: Vec2[] }
+  | { kind: "tiles"; tool: "road" | "wall" | "door" | "demolishTile"; tiles: Vec2[] };
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -212,11 +212,11 @@ export default function App() {
     const building = devPlaceKindRef.current;
     if (building) {
       pauseForArchitectTool();
-      updateArchitectDraft(() => ({ kind: "building", building, start: position, end: position }));
+      updateArchitectDraft(() => ({ kind: "building", building, tiles: [position] }));
       return true;
     }
     const tool = devTileToolRef.current;
-    if (tool === "road" || tool === "demolishTile") {
+    if (tool === "road" || tool === "wall" || tool === "door" || tool === "demolishTile") {
       pauseForArchitectTool();
       updateArchitectDraft(() => ({ kind: "tiles", tool, tiles: [position] }));
       return true;
@@ -228,9 +228,6 @@ export default function App() {
     updateArchitectDraft((draft) => {
       if (!draft) {
         return draft;
-      }
-      if (draft.kind === "building") {
-        return { ...draft, end: position };
       }
       const tiles = [...draft.tiles];
       const seen = new Set(tiles.map(tileKey));
@@ -255,12 +252,20 @@ export default function App() {
       return null;
     }
     if (draft.kind === "building") {
-      return { kind: "rect" as const, rect: normalizeDraftRect(draft.building, draft.start, draft.end) };
+      return { kind: "tiles" as const, tiles: draft.tiles, mode: "floor" as const, building: draft.building };
     }
+    const mode =
+      draft.tool === "road"
+        ? ("road" as const)
+        : draft.tool === "wall"
+          ? ("wall" as const)
+          : draft.tool === "door"
+            ? ("door" as const)
+            : ("erase" as const);
     return {
       kind: "tiles" as const,
       tiles: draft.tiles,
-      mode: draft.tool === "road" ? ("road" as const) : ("erase" as const),
+      mode,
     };
   };
 
@@ -321,6 +326,10 @@ export default function App() {
           const tool = devTileToolRef.current;
           if (tool === "road") {
             gameRef.current.devPaveRoadAt(position);
+          } else if (tool === "wall") {
+            gameRef.current.devPaintStructureTiles([position], "Wall");
+          } else if (tool === "door") {
+            gameRef.current.devPaintStructureTiles([position], "Door");
           } else if (tool === "demolishTile") {
             gameRef.current.devDemolishTileAt(position);
           } else if (tool === "demolishBuilding") {
@@ -459,9 +468,13 @@ export default function App() {
       return;
     }
     if (draft.kind === "building") {
-      gameRef.current.devBuildRect(draft.building, draft.start, draft.end, devInstantRef.current);
+      gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
     } else if (draft.tool === "road") {
       gameRef.current.devPaveRoadTiles(draft.tiles);
+    } else if (draft.tool === "wall") {
+      gameRef.current.devPaintStructureTiles(draft.tiles, "Wall");
+    } else if (draft.tool === "door") {
+      gameRef.current.devPaintStructureTiles(draft.tiles, "Door");
     } else {
       gameRef.current.devDemolishTiles(draft.tiles);
     }

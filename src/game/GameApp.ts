@@ -75,6 +75,18 @@ export class GameApp {
     return this.placementMode;
   }
 
+  private buildingContains(building: { x: number; y: number; width: number; height: number; customLayout?: boolean; tiles?: Vec2[] }, position: Vec2): boolean {
+    if (building.customLayout) {
+      return (building.tiles ?? []).some((tile) => tile.x === position.x && tile.y === position.y);
+    }
+    return (
+      position.x >= building.x &&
+      position.x < building.x + building.width &&
+      position.y >= building.y &&
+      position.y < building.y + building.height
+    );
+  }
+
   /** What lives at the clicked tile: a resident, a building, or the terrain. */
   inspectAt(position: Vec2): InspectionTarget {
     let nearest: { id: string } | undefined;
@@ -120,12 +132,7 @@ export class GameApp {
     // Clicking inside the granary shows its food store (grain/meat), not the bare
     // floor tile under the sacks.
     const granaryHere = this.simulation.buildings.find(
-      (b) =>
-        b.kind === "granary" &&
-        position.x >= b.x &&
-        position.x < b.x + b.width &&
-        position.y >= b.y &&
-        position.y < b.y + b.height,
+      (b) => b.kind === "granary" && this.buildingContains(b, position),
     );
     if (granaryHere && structureTile === "Floor") {
       return { kind: "building", buildingId: granaryHere.id };
@@ -147,11 +154,7 @@ export class GameApp {
     }
 
     const building = this.simulation.buildings.find(
-      (candidate) =>
-        position.x >= candidate.x &&
-        position.x < candidate.x + candidate.width &&
-        position.y >= candidate.y &&
-        position.y < candidate.y + candidate.height,
+      (candidate) => this.buildingContains(candidate, position),
     );
     if (building) {
       return { kind: "building", buildingId: building.id };
@@ -290,6 +293,24 @@ export class GameApp {
   devBuildRect(kind: BuildingKind, start: Vec2, end: Vec2, instant = true): boolean {
     const rect = this.clampRectToWorld(normalizeDraftRect(kind, start, end));
     return this.devRaise(kind, rect.x, rect.y, instant, [rect.width, rect.height]);
+  }
+
+  devPaintFloorZone(kind: BuildingKind, positions: Vec2[]): boolean {
+    const ok = this.simulation.devPaintFloorZone(
+      kind,
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
+  devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): boolean {
+    const ok = this.simulation.devPaintStructureTiles(
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+      structure,
+    ) > 0;
+    if (ok) this.render();
+    return ok;
   }
 
   /**
