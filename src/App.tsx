@@ -138,6 +138,8 @@ const STATE_LABELS_KO: Record<AgentState, string> = {
   Furnish: "가구 제작",
   MoveToBuildTile: "자재 놓으러 이동",
   BuildTile: "벽 쌓기",
+  MoveToBlueprint: "설계도로 이동",
+  BuildBlueprint: "설계도 건설",
   MoveToFunfair: "놀이공원으로 이동",
   Ride: "놀이기구 탑승",
   Wander: "배회",
@@ -575,18 +577,34 @@ export default function App() {
     if (!draft || !gameRef.current) {
       return;
     }
+    // "주민 건설" (resident-build) queues walls/doors/furniture as blueprints for
+    // residents to construct with materials; "즉시" (instant) stamps them at once.
+    // Floor zones, fields, roads and demolition are always instant.
+    const residentBuild = !devInstantRef.current;
     if (draft.kind === "building") {
       gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
     } else if (isFurnitureTool(draft.tool)) {
-      gameRef.current.devPaintFurnitureTiles(draft.tool, draft.tiles);
+      if (residentBuild) {
+        gameRef.current.devPlanFurnitureTiles(draft.tool, draft.tiles);
+      } else {
+        gameRef.current.devPaintFurnitureTiles(draft.tool, draft.tiles);
+      }
     } else if (draft.tool === "field") {
       gameRef.current.devPaintFieldTiles(draft.tiles);
     } else if (draft.tool === "road") {
       gameRef.current.devPaveRoadTiles(draft.tiles);
     } else if (draft.tool === "wall") {
-      gameRef.current.devPaintStructureTiles(draft.tiles, "Wall");
+      if (residentBuild) {
+        gameRef.current.devPlanStructureTiles(draft.tiles, "Wall");
+      } else {
+        gameRef.current.devPaintStructureTiles(draft.tiles, "Wall");
+      }
     } else if (draft.tool === "door") {
-      gameRef.current.devPaintStructureTiles(draft.tiles, "Door");
+      if (residentBuild) {
+        gameRef.current.devPlanStructureTiles(draft.tiles, "Door");
+      } else {
+        gameRef.current.devPaintStructureTiles(draft.tiles, "Door");
+      }
     } else {
       gameRef.current.devDemolishTiles(draft.tiles);
     }

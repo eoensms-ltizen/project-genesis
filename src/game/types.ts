@@ -113,6 +113,8 @@ export type AgentState =
   | "Furnish" // building a piece of furniture
   | "MoveToBuildTile" // walking to a single planned wall/floor/door tile
   | "BuildTile" // laying one structure tile by hand
+  | "MoveToBlueprint" // walking to a player-ordered blueprint (Architect resident-build)
+  | "BuildBlueprint" // constructing one blueprint tile (wall/door/furniture)
   | "MoveToFunfair" // walking to the amusement park to ride
   | "Ride" // riding the roller coaster (leisure + a lift in spirits)
   | "Wander"
@@ -233,6 +235,22 @@ export type BuildPlanTile = {
   done?: boolean;
   // Id of the builder currently walking to lay this tile, so several builders can
   // raise one room at once without two of them converging on the same tile.
+  claimedBy?: string;
+};
+
+// A player-ordered build job in Architect "resident-build" mode: a single tile
+// (a wall, door, or piece of furniture) the player has designated, which a
+// resident hauls material for and constructs by hand. Until built it shows as a
+// translucent ghost. (Floors/fields/roads are applied instantly, not blueprinted.)
+export type Blueprint = {
+  id: string;
+  x: number;
+  y: number;
+  // The tile this becomes once a resident finishes it.
+  t: TileType;
+  // Wood the builder must carry to raise it.
+  cost: number;
+  // Id of the resident currently building it (so two don't both grab it).
   claimedBy?: string;
 };
 
@@ -368,6 +386,8 @@ export type Agent = {
   bedFoot?: Vec2;
   // The single structure tile this builder is currently walking to / laying.
   buildTarget?: Vec2;
+  // Id of the Architect blueprint this resident is currently building, if any.
+  blueprintId?: string;
   // While set, this builder is on a felling errand for their project: they keep
   // chopping (carrying the logs) until holding this much wood, then go build —
   // so they fell a whole load at once instead of a tree-per-wall. Transient.

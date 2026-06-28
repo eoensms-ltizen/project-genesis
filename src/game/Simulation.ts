@@ -5,6 +5,7 @@ import type {
   AgentJob,
   Animal,
   AnimalKind,
+  Blueprint,
   Building,
   BuildingKind,
   BuildingStage,
@@ -273,6 +274,26 @@ const FURNITURE_TILE: Record<Exclude<FurnitureKind, "bed">, TileType> = {
   chair: "Chair",
 };
 
+// Wood a resident must haul to raise each Architect blueprint by hand.
+const BLUEPRINT_COST: Partial<Record<TileType, number>> = {
+  Wall: 1,
+  Door: 2,
+  Bed: 4,
+  Stove: 6,
+  Counter: 3,
+  Table: 4,
+  Chair: 1,
+};
+
+// Maps a blueprint's target furniture tile back to the FurnitureKind to place.
+const TILE_FURNITURE: Partial<Record<TileType, FurnitureKind>> = {
+  Bed: "bed",
+  Stove: "stove",
+  Counter: "counter",
+  Table: "table",
+  Chair: "chair",
+};
+
 // Public order: crowding and discontent breed friction; police and a station
 // keep it in check. Unrest is a 0..100 meter that drives the police job and
 // occasionally erupts into a quarrel that dents the participants' comfort.
@@ -329,6 +350,8 @@ type SaveData = {
   nextItemId?: number;
   animals: Animal[];
   nextAnimalId: number;
+  blueprints?: Blueprint[];
+  nextBlueprintId?: number;
 };
 
 export class Simulation {
@@ -338,6 +361,10 @@ export class Simulation {
   readonly buildings: Building[] = [];
   readonly animals: Animal[] = [];
   readonly litter: Vec2[] = [];
+  // Architect resident-build queue: player-ordered wall/door/furniture jobs that
+  // residents construct by hand. Empty in Auto mode and in instant Architect mode.
+  readonly blueprints: Blueprint[] = [];
+  private nextBlueprintId = 1;
   unrest = 0;
   era = 0;
   foodStock = 0;
@@ -428,6 +455,11 @@ export class Simulation {
       }
       this.nextItemId = saved.nextItemId ?? 1;
       this.nextAnimalId = saved.nextAnimalId ?? 1;
+      for (const blueprint of saved.blueprints ?? []) {
+        // Claims are transient — drop them so any idle resident can resume the job.
+        this.blueprints.push({ ...blueprint, claimedBy: undefined });
+      }
+      this.nextBlueprintId = saved.nextBlueprintId ?? 1;
       for (const animal of saved.animals ?? []) {
         this.animals.push({ ...animal, path: undefined });
       }
@@ -1642,6 +1674,7 @@ export class Simulation {
       const type = this.world.getTile(position)?.type;
       return type !== undefined && FURNITURE_PAINTABLE.has(type);
     });
+    this.clearBlueprintsAt(anchors); // an instant placement supersedes any ghost here
     let changed = 0;
 
     if (kind === "bed") {
@@ -1704,6 +1737,7 @@ export class Simulation {
       return 0;
     }
 
+    this.clearBlueprintsAt(tiles); // an instant placement supersedes any ghost here
     this.removeTilesFromCustomBuildings(tiles);
     let changed = 0;
     for (const position of tiles) {
@@ -1719,6 +1753,142 @@ export class Simulation {
       this.notifyChanged();
     }
     return changed;
+  }
+
+  // --- Architect blueprints: player-ordered jobs residents build by hand -------
+
+  /** True if a blueprint is already queued at this tile. */
+  private hasBlueprintAt(position: Vec2): boolean {
+    return this.blueprints.some((b) => b.x === position.x && b.y === position.y);
+  }
+
+  /** Queue one blueprint, unless the tile is already that type or already queued. */
+  private addBlueprint(position: Vec2, t: TileType, cost: number): boolean {
+    if (this.world.getTile(position)?.type === t || this.hasBlueprintAt(position)) {
+      return false;
+    }
+    this.blueprints.push({ id: `bp-${this.nextBlueprintId++}`, x: position.x, y: position.y, t, cost });
+    return true;
+  }
+
+  /** Drop any blueprint sitting on these tiles (e.g. when the tile is edited). */
+  private clearBlueprintsAt(positions: Vec2[]): void {
+    if (this.blueprints.length === 0) {
+      return;
+    }
+    const keys = new Set(positions.map((p) => `${p.x},${p.y}`));
+    for (let i = this.blueprints.length - 1; i >= 0; i -= 1) {
+      const b = this.blueprints[i];
+      if (keys.has(`${b.x},${b.y}`)) {
+        this.blueprints.splice(i, 1);
+      }
+    }
+  }
+
+  /** Plan furniture as blueprints residents build (Architect resident-build mode). */
+  devPlanFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): number {
+    const anchors = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && FURNITURE_PAINTABLE.has(type);
+    });
+    const target: TileType = kind === "bed" ? "Bed" : FURNITURE_TILE[kind];
+    const cost = BLUEPRINT_COST[target] ?? 1;
+    let added = 0;
+    for (const position of anchors) {
+      if (this.addBlueprint(position, target, cost)) {
+        added += 1;
+      }
+    }
+    if (added > 0) {
+      this.notifyChanged();
+    }
+    return added;
+  }
+
+  /** Plan walls/doors as blueprints residents build (Architect resident-build mode). */
+  devPlanStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): number {
+    const tiles = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && STRUCTURE_PAINTABLE.has(type);
+    });
+    const cost = BLUEPRINT_COST[structure] ?? 1;
+    let added = 0;
+    for (const position of tiles) {
+      if (this.addBlueprint(position, structure, cost)) {
+        added += 1;
+      }
+    }
+    if (added > 0) {
+      this.notifyChanged();
+    }
+    return added;
+  }
+
+  /**
+   * The nearest buildable blueprint to a point: one that isn't being actively
+   * built by another resident and whose ground can still take it. Returns it
+   * (without claiming) for the brain to commit to.
+   */
+  nearestBlueprint(from: Vec2, builderId: string): Blueprint | undefined {
+    const activeOthers = new Set(
+      this.agents
+        .filter(
+          (a) =>
+            a.id !== builderId &&
+            a.blueprintId &&
+            (a.state === "MoveToBlueprint" || a.state === "BuildBlueprint"),
+        )
+        .map((a) => a.blueprintId as string),
+    );
+    let best: Blueprint | undefined;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (const b of this.blueprints) {
+      if (activeOthers.has(b.id)) {
+        continue;
+      }
+      // A furniture blueprint needs floor (or existing furniture) under it; a
+      // wall/door needs paintable ground. If the spot is no longer suitable the
+      // blueprint is stale — skip it.
+      const type = this.world.getTile(b)?.type;
+      const ok =
+        type !== undefined &&
+        (TILE_FURNITURE[b.t] ? FURNITURE_PAINTABLE.has(type) : STRUCTURE_PAINTABLE.has(type));
+      if (!ok) {
+        continue;
+      }
+      const d = Math.abs(b.x - from.x) + Math.abs(b.y - from.y);
+      if (d < bestD) {
+        bestD = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  getBlueprint(id: string | undefined): Blueprint | undefined {
+    return id ? this.blueprints.find((b) => b.id === id) : undefined;
+  }
+
+  /** A resident finishes a blueprint: stamp its real tile and dequeue it. */
+  buildBlueprint(id: string): boolean {
+    const index = this.blueprints.findIndex((b) => b.id === id);
+    if (index < 0) {
+      return false;
+    }
+    const b = this.blueprints[index];
+    this.blueprints.splice(index, 1);
+    const position = { x: b.x, y: b.y };
+    const furniture = TILE_FURNITURE[b.t];
+    if (furniture) {
+      // Reuse the placement path (beds get their foot, furniture clears the spot).
+      this.devPaintFurnitureTiles(furniture, [position]);
+    } else if (b.t === "Wall" || b.t === "Door") {
+      this.devPaintStructureTiles([position], b.t);
+    } else {
+      this.world.setTile(position, b.t);
+    }
+    this.notifyChanged();
+    return true;
   }
 
   /**
@@ -2467,6 +2637,8 @@ export class Simulation {
           path: undefined,
         })),
         nextAnimalId: this.nextAnimalId,
+        blueprints: this.blueprints.map((b) => ({ ...b, claimedBy: undefined })),
+        nextBlueprintId: this.nextBlueprintId,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -3218,6 +3390,12 @@ export class Simulation {
     const type = this.world.getTile(position)?.type;
     if (type === undefined) {
       return false;
+    }
+    // A queued blueprint here is cancelled along with the tile.
+    if (this.hasBlueprintAt(position)) {
+      this.clearBlueprintsAt([position]);
+      this.notifyChanged();
+      return true;
     }
     if (Simulation.FURNITURE_TILES.has(type)) {
       if (!this.clearFurnitureAt(position)) {

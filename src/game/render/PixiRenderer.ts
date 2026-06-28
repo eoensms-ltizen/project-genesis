@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
 import weatherNightOverlayUrl from "../../assets/skin/weather-night-overlay.png";
-import type { Agent, AgentState, Animal, Building, BuildingKind, FurnitureKind, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
+import type { Agent, AgentState, Animal, Blueprint, Building, BuildingKind, FurnitureKind, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
@@ -501,6 +501,7 @@ export class PixiRenderer {
     weather: WeatherState = CLEAR_WEATHER,
     coasterTrack: Vec2[] = [],
     coasterCars: Vec2[] = [],
+    blueprints: Blueprint[] = [],
   ) {
     if (!this.initialized) {
       return;
@@ -717,6 +718,19 @@ export class PixiRenderer {
     }
 
     drawArchitectDraftPreview(this.overlayGraphics, this.architectDraftPreview, this.skinMode);
+
+    // Architect blueprints: queued build jobs shown as translucent blue ghosts of
+    // the tile to come, so the player sees what residents are about to construct.
+    for (const bp of blueprints) {
+      const bx = bp.x * TILE_SIZE;
+      const by = bp.y * TILE_SIZE;
+      this.overlayGraphics.rect(bx + 1, by + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      this.overlayGraphics.fill({ color: 0x5aa8ff, alpha: 0.22 });
+      this.overlayGraphics.rect(bx + 1, by + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      this.overlayGraphics.stroke({ color: 0x9ccbff, width: 1, alpha: 0.85 });
+      this.overlayGraphics.rect(bx + 2, by + 2, 3, 3);
+      this.overlayGraphics.fill({ color: 0xdcecff, alpha: 0.9 });
+    }
 
     drawWeatherOverlay(this.overlayGraphics, world, weather, this.effectTime, this.skinMode);
 

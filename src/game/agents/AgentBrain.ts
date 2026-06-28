@@ -435,6 +435,12 @@ export class AgentBrain {
       case "BuildTile":
         this.buildTile(agent, simulation, deltaSeconds);
         break;
+      case "MoveToBlueprint":
+        this.moveAlongPath(agent, simulation, deltaSeconds, "BuildBlueprint");
+        break;
+      case "BuildBlueprint":
+        this.buildBlueprint(agent, simulation, deltaSeconds);
+        break;
       case "MoveToFunfair":
         this.moveAlongPath(agent, simulation, deltaSeconds, "Ride");
         break;
@@ -849,6 +855,12 @@ export class AgentBrain {
       return true;
     }
     if (this.tryCook(agent, simulation)) {
+      return true;
+    }
+    // Architect resident-build: once fed, residents fulfil the player's queued
+    // wall/door/furniture blueprints (hauling wood, building each by hand) before
+    // any autonomous work. No-op when the queue is empty (Auto / instant mode).
+    if (this.tryBuildBlueprint(agent, simulation)) {
       return true;
     }
     // Provisioning is need-driven from the very first resident, not gated on
@@ -2702,6 +2714,85 @@ export class AgentBrain {
     } else {
       this.setState(agent, simulation, "BuildHouse");
     }
+  }
+
+  /**
+   * Architect resident-build: take on the nearest queued blueprint (a player-
+   * ordered wall/door/furniture tile), hauling the wood it needs and walking to
+   * it. The actual laying happens in buildBlueprint once the resident arrives.
+   */
+  private tryBuildBlueprint(agent: Agent, simulation: Simulation): boolean {
+    if (agent.projectBuildingId || simulation.blueprints.length === 0) {
+      return false;
+    }
+    // Resume the job we already committed to if it's still pending, else grab the
+    // nearest one going.
+    let bp = simulation.getBlueprint(agent.blueprintId);
+    if (!bp) {
+      bp = simulation.nearestBlueprint(agent.position, agent.id);
+    }
+    if (!bp) {
+      agent.blueprintId = undefined;
+      return false;
+    }
+    agent.blueprintId = bp.id;
+
+    // Carry the wood it costs (top up to a full load while we're at the warehouse).
+    if (agent.inventory.wood < bp.cost) {
+      if (this.fetchWood(agent, simulation, Math.max(bp.cost, BUILD_CARRY_WOOD))) {
+        return true;
+      }
+      // No wood to be had right now — drop the claim and let something else run.
+      agent.blueprintId = undefined;
+      return false;
+    }
+
+    const target = { x: bp.x, y: bp.y };
+    const path = findPath(simulation.world, {
+      start: agent.position,
+      goal: target,
+      stopAdjacent: true,
+    });
+    if (!path) {
+      // Can't path beside it (boxed in) — lay it from where we stand rather than
+      // deadlock, paying the wood now.
+      agent.inventory.wood = Math.max(0, agent.inventory.wood - bp.cost);
+      simulation.buildBlueprint(bp.id);
+      agent.blueprintId = undefined;
+      return true;
+    }
+    agent.buildTarget = target;
+    agent.target = { ...target };
+    agent.path = path;
+    agent.actionTimer = 0;
+    this.setState(agent, simulation, "MoveToBlueprint");
+    return true;
+  }
+
+  /** Arrived beside a blueprint: spend the wood, stamp the real tile, move on. */
+  private buildBlueprint(agent: Agent, simulation: Simulation, deltaSeconds: number) {
+    const bp = simulation.getBlueprint(agent.blueprintId);
+    if (!bp || !agent.buildTarget) {
+      agent.blueprintId = undefined;
+      agent.buildTarget = undefined;
+      this.setState(agent, simulation, "Idle");
+      return;
+    }
+    agent.actionTimer += deltaSeconds;
+    if (agent.actionTimer < PER_TILE_BUILD_SECONDS) {
+      return;
+    }
+    agent.actionTimer = 0;
+    if (agent.inventory.wood >= bp.cost) {
+      agent.inventory.wood -= bp.cost;
+      simulation.buildBlueprint(bp.id);
+    }
+    // Either way release the job: if we were short on wood, the next pass refetches.
+    agent.blueprintId = undefined;
+    agent.buildTarget = undefined;
+    agent.target = undefined;
+    agent.path = undefined;
+    this.setState(agent, simulation, "Idle");
   }
 
   /** Finish a walled room: stamp it built, move in (houses) or open it (civic). */

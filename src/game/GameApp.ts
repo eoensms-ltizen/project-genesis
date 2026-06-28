@@ -331,6 +331,26 @@ export class GameApp {
     return ok;
   }
 
+  /** Architect resident-build: queue furniture as blueprints residents construct. */
+  devPlanFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): boolean {
+    const ok = this.simulation.devPlanFurnitureTiles(
+      kind,
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
+  /** Architect resident-build: queue walls/doors as blueprints residents construct. */
+  devPlanStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): boolean {
+    const ok = this.simulation.devPlanStructureTiles(
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+      structure,
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
   /**
    * Arm the placement ghost shown under the cursor. Pass a building kind to ghost
    * its footprint, `tileTool` true to ghost a single tile (road/demolish), or
@@ -474,6 +494,7 @@ export class GameApp {
       // otherwise coasterCarTiles() would index an empty ring and crash.
       track,
       track.length > 0 ? this.simulation.coasterCarTiles() : [],
+      this.simulation.blueprints,
     );
   }
 }

@@ -162,17 +162,31 @@ The next big step toward RimWorld feel is to turn Architect edits into build job
 
 ## Recommended Next Implementation
 
-### 1. Furniture Blueprints
+### 1. Furniture Blueprints — DONE (phase 1)
 
-Current state:
+Implemented. The Architect panel's `주민 건설 / 즉시` (resident-build / instant) toggle
+now actually drives `Apply`:
 
-- `Apply` places furniture instantly.
+- `즉시` (instant): stamps the final tile at once, as before.
+- `주민 건설` (resident-build): queues a `Blueprint` (see `types.ts`) per tile.
+  Residents fulfil them in `AgentBrain.tryBuildBlueprint` / `buildBlueprint`,
+  hauling the wood it costs (`BLUEPRINT_COST` in `Simulation.ts`) and laying each
+  tile by hand. Until built they render as translucent blue ghosts.
 
-Recommended next state:
+Scope: walls, doors, and furniture (Bed/Stove/Counter/Table/Chair) are blueprinted.
+Beds queue a single `Bed` blueprint; the foot is placed automatically when built.
+Blueprints are saved/loaded and cancelled when their tile is demolished/overwritten.
 
-- `Apply` creates planned furniture sites.
-- Residents haul materials.
-- Residents build furniture tile-by-tile or job-by-job.
+Still instant even in resident-build mode (NEXT phase candidates):
+
+- Building floor zones (`devPaintFloorZone` — entangled with the customLayout
+  merge/bounds machinery; defer to its own pass).
+- Fields and roads (terrain designations).
+
+Possible follow-ups:
+
+- Make floor zones resident-built (lay `Floor` blueprints; building "site" state).
+- Material variety (stone for stove/counter) instead of wood-only.
 
 Possible model:
 
