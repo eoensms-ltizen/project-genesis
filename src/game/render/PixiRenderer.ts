@@ -754,13 +754,31 @@ export class PixiRenderer {
         const d = FURN_DIRS[((this.furniturePreview.rotation % 4) + 4) % 4];
         cells.push({ x: this.hoverTile.x + d.x, y: this.hoverTile.y + d.y, head: false });
       }
+      // Furniture may only sit on a floor (or be swapped onto existing furniture).
+      // Show the ghost red when the spot can't take it, so a click won't no-op.
+      const placeable = (x: number, y: number): boolean => {
+        const t = world.getTile({ x, y })?.type;
+        return (
+          t === "Floor" ||
+          t === "Bed" ||
+          t === "BedFoot" ||
+          t === "BedSite" ||
+          t === "Stove" ||
+          t === "Counter" ||
+          t === "Table" ||
+          t === "Chair"
+        );
+      };
+      const valid = cells.every((c) => placeable(c.x, c.y));
+      const fill = valid ? 0x6ad08a : 0xd05a5a;
+      const line = valid ? 0x9be3b0 : 0xe89090;
       for (const c of cells) {
         const cx = c.x * TILE_SIZE;
         const cy = c.y * TILE_SIZE;
         this.overlayGraphics.rect(cx + 1, cy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-        this.overlayGraphics.fill({ color: 0x6ad08a, alpha: c.head ? 0.3 : 0.18 });
+        this.overlayGraphics.fill({ color: fill, alpha: c.head ? 0.3 : 0.18 });
         this.overlayGraphics.rect(cx + 1, cy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-        this.overlayGraphics.stroke({ color: 0x9be3b0, width: 1.2, alpha: 0.95 });
+        this.overlayGraphics.stroke({ color: line, width: 1.2, alpha: 0.95 });
       }
     }
 
