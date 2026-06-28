@@ -55,6 +55,8 @@ export type TileType =
   | "Lamp"
   | "Rail";
 
+export type FurnitureKind = "bed" | "stove" | "counter" | "table" | "chair";
+
 export type AgentState =
   | "Idle"
   | "FindTree"

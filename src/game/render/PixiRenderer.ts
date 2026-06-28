@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import skinGroundTextureUrl from "../../assets/skin/colony-ground-texture.png";
 import weatherNightOverlayUrl from "../../assets/skin/weather-night-overlay.png";
-import type { Agent, AgentState, Animal, Building, BuildingKind, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
+import type { Agent, AgentState, Animal, Building, BuildingKind, FurnitureKind, ItemStack, ResourceKind, TileType, Vec2, WeatherState } from "../types";
 import { ROOM_BUILDING_KINDS } from "../types";
 import type { WorldMap } from "../world/WorldMap";
 
@@ -22,7 +22,7 @@ type RendererOptions = {
 
 export type ArchitectDraftPreview =
   | { kind: "rect"; rect: { x: number; y: number; width: number; height: number } }
-  | { kind: "tiles"; tiles: Vec2[]; mode: "floor" | "field" | "wall" | "door" | "road" | "erase"; building?: BuildingKind };
+  | { kind: "tiles"; tiles: Vec2[]; mode: "floor" | "field" | "wall" | "door" | "road" | "erase" | FurnitureKind; building?: BuildingKind };
 
 export class PixiRenderer {
   private readonly host: HTMLElement;
@@ -855,6 +855,15 @@ function architectPreviewColor(preview: Extract<ArchitectDraftPreview, { kind: "
   }
   if (preview.mode === "field") {
     return skinMode ? 0x8dae57 : 0x91c85e;
+  }
+  if (preview.mode === "bed") {
+    return skinMode ? 0xb787d8 : 0xd69cff;
+  }
+  if (preview.mode === "stove" || preview.mode === "counter") {
+    return skinMode ? 0xd0834f : 0xff9858;
+  }
+  if (preview.mode === "table" || preview.mode === "chair") {
+    return skinMode ? 0xc39a5c : 0xe0ad63;
   }
   switch (preview.building) {
     case "warehouse":

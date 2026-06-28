@@ -11,6 +11,7 @@ import type {
   BuildPlanTile,
   FoodBatch,
   FoodKind,
+  FurnitureKind,
   GameMode,
   GameClock,
   GameLogEntry,
@@ -253,6 +254,24 @@ const FIELD_PAINTABLE: ReadonlySet<TileType> = new Set([
   "FieldRipe",
   "Stump",
 ]);
+
+const FURNITURE_PAINTABLE: ReadonlySet<TileType> = new Set([
+  "Floor",
+  "Bed",
+  "BedFoot",
+  "BedSite",
+  "Stove",
+  "Counter",
+  "Table",
+  "Chair",
+]);
+
+const FURNITURE_TILE: Record<Exclude<FurnitureKind, "bed">, TileType> = {
+  stove: "Stove",
+  counter: "Counter",
+  table: "Table",
+  chair: "Chair",
+};
 
 // Public order: crowding and discontent breed friction; police and a station
 // keep it in check. Unrest is a 0..100 meter that drives the police job and
@@ -708,7 +727,12 @@ export class Simulation {
   private paintCustomFloorZone(building: Building) {
     for (const tile of building.tiles ?? []) {
       const type = this.world.getTile(tile)?.type;
-      if (type === undefined || type === "Wall" || type === "Door") {
+      if (
+        type === undefined ||
+        type === "Wall" ||
+        type === "Door" ||
+        Simulation.FURNITURE_TILES.has(type)
+      ) {
         continue;
       }
       this.world.setTile(tile, "Floor");
@@ -1232,6 +1256,67 @@ export class Simulation {
     this.notifyChanged();
   }
 
+  private releaseFurnitureUseAt(position: Vec2) {
+    const key = claimKey(position);
+    const cook = this.stoveCooks.get(key);
+    if (cook) {
+      this.stoveCooks.delete(key);
+      const agent = this.agents.find((a) => a.id === cook);
+      if (agent) {
+        agent.cookStove = undefined;
+        agent.carryFood = undefined;
+      }
+    }
+    const sitter = this.chairSitters.get(key);
+    if (sitter) {
+      this.chairSitters.delete(key);
+      const agent = this.agents.find((a) => a.id === sitter);
+      if (agent) {
+        agent.sitChair = undefined;
+      }
+    }
+  }
+
+  private clearFurnitureAt(position: Vec2): boolean {
+    const type = this.world.getTile(position)?.type;
+    if (!type || !Simulation.FURNITURE_TILES.has(type)) {
+      return false;
+    }
+    this.releaseFurnitureUseAt(position);
+    if (type === "Bed" || type === "BedFoot" || type === "BedSite") {
+      const isBedTile = (p: Vec2): boolean => {
+        const t = this.world.getTile(p)?.type;
+        return t === "Bed" || t === "BedFoot" || t === "BedSite";
+      };
+      const pair = [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 },
+      ]
+        .map((d) => ({ x: position.x + d.x, y: position.y + d.y }))
+        .find((p) => isBedTile(p));
+      this.world.setTile(position, "Floor");
+      if (pair) {
+        this.releaseFurnitureUseAt(pair);
+        this.world.setTile(pair, "Floor");
+      }
+      for (const agent of this.agents) {
+        const owns = (p?: Vec2) =>
+          p &&
+          ((p.x === position.x && p.y === position.y) ||
+            (pair && p.x === pair.x && p.y === pair.y));
+        if (owns(agent.bedPos) || owns(agent.bedFoot)) {
+          agent.bedPos = undefined;
+          agent.bedFoot = undefined;
+        }
+      }
+      return true;
+    }
+    this.world.setTile(position, "Floor");
+    return true;
+  }
+
   /** The interior (non-wall, non-door) floor tiles of a walled room. */
   interiorTiles(building: Building): Vec2[] {
     if (building.customLayout) {
@@ -1544,6 +1629,64 @@ export class Simulation {
       this.world.setTile(position, "FieldEmpty");
       changed += 1;
     }
+    if (changed > 0) {
+      this.refreshCustomBuildingEntrances();
+      this.refreshDoors();
+      this.notifyChanged();
+    }
+    return changed;
+  }
+
+  devPaintFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): number {
+    const anchors = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && FURNITURE_PAINTABLE.has(type);
+    });
+    let changed = 0;
+
+    if (kind === "bed") {
+      const occupied = new Set<string>();
+      const directions = [
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: -1, y: 0 },
+        { x: 0, y: -1 },
+      ];
+      const canUse = (position: Vec2): boolean => {
+        const type = this.world.getTile(position)?.type;
+        return type !== undefined && FURNITURE_PAINTABLE.has(type) && !occupied.has(claimKey(position));
+      };
+
+      for (const head of anchors) {
+        if (occupied.has(claimKey(head)) || this.world.getTile(head)?.type === "Bed") {
+          continue;
+        }
+        const foot = directions
+          .map((d) => ({ x: head.x + d.x, y: head.y + d.y }))
+          .find(canUse);
+        if (!foot) {
+          continue;
+        }
+        this.clearFurnitureAt(head);
+        this.clearFurnitureAt(foot);
+        this.world.setTile(head, "Bed");
+        this.world.setTile(foot, "BedFoot");
+        occupied.add(claimKey(head));
+        occupied.add(claimKey(foot));
+        changed += 2;
+      }
+    } else {
+      const tileType = FURNITURE_TILE[kind];
+      for (const position of anchors) {
+        if (this.world.getTile(position)?.type === tileType) {
+          continue;
+        }
+        this.clearFurnitureAt(position);
+        this.world.setTile(position, tileType);
+        changed += 1;
+      }
+    }
+
     if (changed > 0) {
       this.refreshCustomBuildingEntrances();
       this.refreshDoors();
@@ -2101,7 +2244,7 @@ export class Simulation {
       building.plan = undefined;
       // A kitchen comes with a stove to cook at, set on its interior floor — but
       // only if it hasn't got one already (an enlarged kitchen keeps its stove).
-      if (building.kind === "kitchen") {
+      if (building.kind === "kitchen" && this.gameMode !== "architect") {
         const interior = this.interiorTiles(building);
         const hasStove = interior.some((t) => this.world.getTile(t)?.type === "Stove");
         if (!hasStove) {
@@ -3076,6 +3219,13 @@ export class Simulation {
     if (type === undefined) {
       return false;
     }
+    if (Simulation.FURNITURE_TILES.has(type)) {
+      if (!this.clearFurnitureAt(position)) {
+        return false;
+      }
+      this.notifyChanged();
+      return true;
+    }
     this.removeTilesFromCustomBuildings([position]);
     this.world.setTile(position, "Grass");
     this.refreshCustomBuildingEntrances();
@@ -3116,6 +3266,12 @@ export class Simulation {
       seen.add(key);
       const type = this.world.getTile(position)?.type;
       if (type === undefined) {
+        continue;
+      }
+      if (Simulation.FURNITURE_TILES.has(type)) {
+        if (this.clearFurnitureAt(position)) {
+          changed += 1;
+        }
         continue;
       }
       this.removeTilesFromCustomBuildings([position]);

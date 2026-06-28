@@ -10,6 +10,7 @@ import type {
   Building,
   BuildingKind,
   FoodKind,
+  FurnitureKind,
   GameMode,
   GameClock,
   GameLogEntry,
@@ -30,11 +31,48 @@ const TICK_MS = 160;
 const SOUND_KEY = "pg-sound-enabled";
 const DEFAULT_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
+type ArchitectTileTool =
+  | "field"
+  | "road"
+  | "wall"
+  | "door"
+  | "demolishTile"
+  | FurnitureKind;
+
 type ArchitectDraft =
   | { kind: "building"; building: BuildingKind; tiles: Vec2[] }
-  | { kind: "tiles"; tool: "field" | "road" | "wall" | "door" | "demolishTile"; tiles: Vec2[] };
+  | { kind: "tiles"; tool: ArchitectTileTool; tiles: Vec2[] };
 
 type ArchitectStrokeMode = "add" | "remove";
+
+const ARCHITECT_TILE_TOOLS: ReadonlySet<string> = new Set([
+  "field",
+  "road",
+  "wall",
+  "door",
+  "demolishTile",
+  "bed",
+  "stove",
+  "counter",
+  "table",
+  "chair",
+]);
+
+const FURNITURE_TOOLS: ReadonlySet<string> = new Set([
+  "bed",
+  "stove",
+  "counter",
+  "table",
+  "chair",
+]);
+
+function isArchitectTileTool(tool: DevTileTool): tool is ArchitectTileTool {
+  return tool !== null && ARCHITECT_TILE_TOOLS.has(tool);
+}
+
+function isFurnitureTool(tool: DevTileTool | ArchitectTileTool): tool is FurnitureKind {
+  return tool !== null && FURNITURE_TOOLS.has(tool);
+}
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -215,7 +253,7 @@ export default function App() {
     draft: ArchitectDraft | null,
     target:
       | { kind: "building"; building: BuildingKind }
-      | { kind: "tiles"; tool: NonNullable<DevTileTool> },
+      | { kind: "tiles"; tool: ArchitectTileTool },
   ): boolean => {
     if (!draft || draft.kind !== target.kind) {
       return false;
@@ -272,7 +310,7 @@ export default function App() {
       return true;
     }
     const tool = devTileToolRef.current;
-    if (tool === "field" || tool === "road" || tool === "wall" || tool === "door" || tool === "demolishTile") {
+    if (isArchitectTileTool(tool)) {
       pauseForArchitectTool();
       architectDragLastRef.current = position;
       const current = architectDraftRef.current;
@@ -317,7 +355,9 @@ export default function App() {
       return { kind: "tiles" as const, tiles: draft.tiles, mode: "floor" as const, building: draft.building };
     }
     const mode =
-      draft.tool === "field"
+      isFurnitureTool(draft.tool)
+        ? draft.tool
+        : draft.tool === "field"
         ? ("field" as const)
         : draft.tool === "road"
         ? ("road" as const)
@@ -388,7 +428,9 @@ export default function App() {
         // of tiles in a row (e.g. tear out a whole wall, one tile at a time).
         if (devTileToolRef.current) {
           const tool = devTileToolRef.current;
-          if (tool === "field") {
+          if (isFurnitureTool(tool)) {
+            gameRef.current.devPaintFurnitureTiles(tool, [position]);
+          } else if (tool === "field") {
             gameRef.current.devPaintFieldTiles([position]);
           } else if (tool === "road") {
             gameRef.current.devPaveRoadAt(position);
@@ -535,6 +577,8 @@ export default function App() {
     }
     if (draft.kind === "building") {
       gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
+    } else if (isFurnitureTool(draft.tool)) {
+      gameRef.current.devPaintFurnitureTiles(draft.tool, draft.tiles);
     } else if (draft.tool === "field") {
       gameRef.current.devPaintFieldTiles(draft.tiles);
     } else if (draft.tool === "road") {

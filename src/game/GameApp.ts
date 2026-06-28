@@ -5,6 +5,7 @@ import { Simulation } from "./Simulation";
 import type {
   BuildingKind,
   FoodKind,
+  FurnitureKind,
   InspectionTarget,
   ResourceKind,
   SimulationSnapshot,
@@ -306,6 +307,15 @@ export class GameApp {
 
   devPaintFieldTiles(positions: Vec2[]): boolean {
     const ok = this.simulation.devPaintFieldTiles(
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
+  devPaintFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): boolean {
+    const ok = this.simulation.devPaintFurnitureTiles(
+      kind,
       positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
     ) > 0;
     if (ok) this.render();

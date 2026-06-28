@@ -89,6 +89,25 @@ export function ArchitectPanel({
         </button>
       </div>
 
+      <div className="tool-label">{tr("Furniture", "Furniture")}</div>
+      <div className="button-grid compact-grid">
+        <button type="button" data-active={tileTool === "bed"} onClick={() => onTileTool("bed")}>
+          {tr("Bed", "Bed")}
+        </button>
+        <button type="button" data-active={tileTool === "stove"} onClick={() => onTileTool("stove")}>
+          {tr("Stove", "Stove")}
+        </button>
+        <button type="button" data-active={tileTool === "counter"} onClick={() => onTileTool("counter")}>
+          {tr("Counter", "Counter")}
+        </button>
+        <button type="button" data-active={tileTool === "table"} onClick={() => onTileTool("table")}>
+          {tr("Table", "Table")}
+        </button>
+        <button type="button" data-active={tileTool === "chair"} onClick={() => onTileTool("chair")}>
+          {tr("Chair", "Chair")}
+        </button>
+      </div>
+
       <div className="tool-label">{tr("Path / erase", "Path / erase")}</div>
       <div className="tool-row">
         <button type="button" data-active={tileTool === "field"} onClick={() => onTileTool("field")}>

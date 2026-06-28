@@ -178,6 +178,11 @@ const AMBIANCE_COMFORT_RATE = 0.005;
 const ROOMY_AREA_PER_RESIDENT = 6;
 const CRAMP_COMFORT_RATE = 0.012;
 const AMBIANCE_SITING_WEIGHT = 1.5;
+// In Auto mode residents till their own fields as food runs low — capped so a
+// town doesn't carpet the map, and kept a few tiles clear of homes. (Architect
+// mode leaves all field-making to the player, so these only bite in Auto mode.)
+const MAX_FIELD_TILES = 12;
+const FIELD_HOME_BUFFER = 4;
 // A soft need must reach this urgency to pull an adult away from work.
 const NEED_ACT_THRESHOLD = 55;
 
@@ -1841,6 +1846,9 @@ export class AgentBrain {
   }
 
   private tryBuildBed(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.gameMode === "architect") {
+      return false;
+    }
     if (!agent.home || !agent.homeBuildingId) {
       return false;
     }
@@ -1923,6 +1931,9 @@ export class AgentBrain {
    * set is raised in one go from a tile beside it.
    */
   private tryBuildDiningSet(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.gameMode === "architect") {
+      return false;
+    }
     const kitchen = simulation.getKitchen();
     if (!kitchen || simulation.hasDiningTable()) {
       return false;
@@ -1972,6 +1983,9 @@ export class AgentBrain {
    * expansion logic first, then this adds the seats.
    */
   private tryExpandDiningSet(agent: Agent, simulation: Simulation): boolean {
+    if (simulation.gameMode === "architect") {
+      return false;
+    }
     const kitchen = simulation.getKitchen();
     if (!kitchen || !simulation.wantsMoreSeats()) {
       return false;
@@ -2970,8 +2984,46 @@ export class AgentBrain {
       return true;
     }
 
-    return false;
+    // No field to work. In Architect mode fields are the player's to lay, so
+    // residents stop here — they never break new ground themselves.
+    if (simulation.gameMode !== "auto") {
+      return false;
+    }
 
+    // Auto mode: break new ground when the larder is short and fields are scarce,
+    // so the colony farms its way to a food surplus instead of foraging forever.
+    const world = simulation.world;
+    const fieldCount =
+      world.countType("FieldEmpty") + world.countType("FieldGrowing") + world.countType("FieldRipe");
+    if (fieldCount >= Math.min(MAX_FIELD_TILES, simulation.agents.length * 2)) {
+      return false;
+    }
+
+    // Fields prefer low-ambiance ground — they cluster together near existing
+    // fields and steer clear of pleasant, residential areas.
+    const site = world.findBuildingSite(
+      agent.position,
+      3,
+      3,
+      (position) =>
+        simulation.isTileClaimed(position) ||
+        simulation.hasHouseNear(position, FIELD_HOME_BUFFER),
+      { extraScore: (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
+    );
+    if (!site) {
+      return false;
+    }
+    const center = { x: site.x + 1, y: site.y + 1 };
+    const path = findPath(world, { start: agent.position, goal: center });
+    if (!path) {
+      return false;
+    }
+
+    simulation.claimTile(center);
+    agent.target = center;
+    agent.path = path;
+    this.setState(agent, simulation, "MoveToFarm");
+    return true;
   }
 
   private farmWork(agent: Agent, simulation: Simulation, deltaSeconds: number) {
@@ -2999,6 +3051,18 @@ export class AgentBrain {
         if (Math.random() < 0.35) {
           simulation.log(tr(`${agent.name} sowed seeds.`, `${agent.name}이(가) 씨를 뿌렸다.`));
         }
+      } else if (tile?.type === "Grass" && simulation.gameMode === "auto") {
+        // Auto mode only: till a fresh 3x3 patch of unclaimed grass into field.
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const position = { x: center.x + dx, y: center.y + dy };
+            const patch = simulation.world.getTile(position);
+            if (patch?.type === "Grass" && !simulation.isTileClaimed(position)) {
+              simulation.world.setTile(position, "FieldEmpty");
+            }
+          }
+        }
+        simulation.log(tr(`${agent.name} tilled a new field.`, `${agent.name}이(가) 새 밭을 일궜다.`));
       }
     }
     agent.target = undefined;
