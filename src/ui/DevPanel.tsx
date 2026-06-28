@@ -2,7 +2,7 @@ import type { BuildingKind, FoodKind, ResourceKind } from "../game/types";
 import { tr } from "../i18n";
 
 /** A sticky map-click tool for free-form tile edits (null = none armed). */
-export type DevTileTool = "road" | "wall" | "door" | "demolishTile" | "demolishBuilding" | null;
+export type DevTileTool = "field" | "road" | "wall" | "door" | "demolishTile" | "demolishBuilding" | null;
 
 type Props = {
   era: number;

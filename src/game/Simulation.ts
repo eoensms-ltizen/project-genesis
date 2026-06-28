@@ -245,6 +245,15 @@ const STRUCTURE_PAINTABLE: ReadonlySet<TileType> = new Set([
   "RockFloor",
 ]);
 
+const FIELD_PAINTABLE: ReadonlySet<TileType> = new Set([
+  "Grass",
+  "Dirt",
+  "FieldEmpty",
+  "FieldGrowing",
+  "FieldRipe",
+  "Stump",
+]);
+
 // Public order: crowding and discontent breed friction; police and a station
 // keep it in check. Unrest is a 0..100 meter that drives the police job and
 // occasionally erupts into a quarrel that dents the participants' comfort.
@@ -1519,6 +1528,28 @@ export class Simulation {
     this.refreshDoors();
     this.notifyChanged();
     return tiles.length;
+  }
+
+  devPaintFieldTiles(positions: Vec2[]): number {
+    const tiles = uniqueTiles(positions).filter((position) => {
+      const type = this.world.getTile(position)?.type;
+      return type !== undefined && FIELD_PAINTABLE.has(type);
+    });
+    let changed = 0;
+    for (const position of tiles) {
+      if (this.world.getTile(position)?.type === "FieldEmpty") {
+        continue;
+      }
+      this.removeTilesFromCustomBuildings([position]);
+      this.world.setTile(position, "FieldEmpty");
+      changed += 1;
+    }
+    if (changed > 0) {
+      this.refreshCustomBuildingEntrances();
+      this.refreshDoors();
+      this.notifyChanged();
+    }
+    return changed;
   }
 
   devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): number {

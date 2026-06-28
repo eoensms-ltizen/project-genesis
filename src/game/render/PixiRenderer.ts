@@ -22,7 +22,7 @@ type RendererOptions = {
 
 export type ArchitectDraftPreview =
   | { kind: "rect"; rect: { x: number; y: number; width: number; height: number } }
-  | { kind: "tiles"; tiles: Vec2[]; mode: "floor" | "wall" | "door" | "road" | "erase"; building?: BuildingKind };
+  | { kind: "tiles"; tiles: Vec2[]; mode: "floor" | "field" | "wall" | "door" | "road" | "erase"; building?: BuildingKind };
 
 export class PixiRenderer {
   private readonly host: HTMLElement;
@@ -852,6 +852,9 @@ function architectPreviewColor(preview: Extract<ArchitectDraftPreview, { kind: "
   }
   if (preview.mode === "road") {
     return skinMode ? 0xd6bd78 : 0xffd75f;
+  }
+  if (preview.mode === "field") {
+    return skinMode ? 0x8dae57 : 0x91c85e;
   }
   switch (preview.building) {
     case "warehouse":

@@ -91,6 +91,9 @@ export function ArchitectPanel({
 
       <div className="tool-label">{tr("Path / erase", "Path / erase")}</div>
       <div className="tool-row">
+        <button type="button" data-active={tileTool === "field"} onClick={() => onTileTool("field")}>
+          {tr("Field", "Field")}
+        </button>
         <button type="button" data-active={tileTool === "road"} onClick={() => onTileTool("road")}>
           {tr("Road", "도로")}
         </button>

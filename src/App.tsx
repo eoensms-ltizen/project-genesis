@@ -32,7 +32,9 @@ const DEFAULT_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
 type ArchitectDraft =
   | { kind: "building"; building: BuildingKind; tiles: Vec2[] }
-  | { kind: "tiles"; tool: "road" | "wall" | "door" | "demolishTile"; tiles: Vec2[] };
+  | { kind: "tiles"; tool: "field" | "road" | "wall" | "door" | "demolishTile"; tiles: Vec2[] };
+
+type ArchitectStrokeMode = "add" | "remove";
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -177,6 +179,8 @@ export default function App() {
   const devTileToolRef = useRef<DevTileTool>(null);
   const [architectDraft, setArchitectDraft] = useState<ArchitectDraft | null>(null);
   const architectDraftRef = useRef<ArchitectDraft | null>(null);
+  const architectStrokeModeRef = useRef<ArchitectStrokeMode>("add");
+  const architectDragLastRef = useRef<Vec2 | null>(null);
   const pausedForDraftRef = useRef<number | null>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
@@ -203,6 +207,46 @@ export default function App() {
   const clearArchitectDraft = () => {
     architectDraftRef.current = null;
     setArchitectDraft(null);
+    architectDragLastRef.current = null;
+    architectStrokeModeRef.current = "add";
+  };
+
+  const sameArchitectDraftTool = (
+    draft: ArchitectDraft | null,
+    target:
+      | { kind: "building"; building: BuildingKind }
+      | { kind: "tiles"; tool: NonNullable<DevTileTool> },
+  ): boolean => {
+    if (!draft || draft.kind !== target.kind) {
+      return false;
+    }
+    if (draft.kind === "building" && target.kind === "building") {
+      return draft.building === target.building;
+    }
+    if (draft.kind === "tiles" && target.kind === "tiles") {
+      return draft.tool === target.tool;
+    }
+    return false;
+  };
+
+  const tileInDraft = (draft: ArchitectDraft | null, position: Vec2): boolean =>
+    Boolean(draft?.tiles.some((tile) => tileKey(tile) === tileKey(position)));
+
+  const editDraftTiles = (draft: ArchitectDraft, positions: Vec2[], mode: ArchitectStrokeMode): ArchitectDraft => {
+    const keys = new Set(positions.map(tileKey));
+    if (mode === "remove") {
+      return { ...draft, tiles: draft.tiles.filter((tile) => !keys.has(tileKey(tile))) };
+    }
+    const tiles = [...draft.tiles];
+    const seen = new Set(tiles.map(tileKey));
+    for (const tile of positions) {
+      const key = tileKey(tile);
+      if (!seen.has(key)) {
+        tiles.push(tile);
+        seen.add(key);
+      }
+    }
+    return { ...draft, tiles };
   };
 
   const beginArchitectDraft = (position: Vec2): boolean => {
@@ -212,13 +256,37 @@ export default function App() {
     const building = devPlaceKindRef.current;
     if (building) {
       pauseForArchitectTool();
-      updateArchitectDraft(() => ({ kind: "building", building, tiles: [position] }));
+      architectDragLastRef.current = position;
+      const current = architectDraftRef.current;
+      const target = { kind: "building" as const, building };
+      if (sameArchitectDraftTool(current, target)) {
+        const mode: ArchitectStrokeMode = tileInDraft(current, position) ? "remove" : "add";
+        architectStrokeModeRef.current = mode;
+        updateArchitectDraft((draft) =>
+          draft && sameArchitectDraftTool(draft, target) ? editDraftTiles(draft, [position], mode) : draft,
+        );
+      } else {
+        architectStrokeModeRef.current = "add";
+        updateArchitectDraft(() => ({ kind: "building", building, tiles: [position] }));
+      }
       return true;
     }
     const tool = devTileToolRef.current;
-    if (tool === "road" || tool === "wall" || tool === "door" || tool === "demolishTile") {
+    if (tool === "field" || tool === "road" || tool === "wall" || tool === "door" || tool === "demolishTile") {
       pauseForArchitectTool();
-      updateArchitectDraft(() => ({ kind: "tiles", tool, tiles: [position] }));
+      architectDragLastRef.current = position;
+      const current = architectDraftRef.current;
+      const target = { kind: "tiles" as const, tool };
+      if (sameArchitectDraftTool(current, target)) {
+        const mode: ArchitectStrokeMode = tileInDraft(current, position) ? "remove" : "add";
+        architectStrokeModeRef.current = mode;
+        updateArchitectDraft((draft) =>
+          draft && sameArchitectDraftTool(draft, target) ? editDraftTiles(draft, [position], mode) : draft,
+        );
+      } else {
+        architectStrokeModeRef.current = "add";
+        updateArchitectDraft(() => ({ kind: "tiles", tool, tiles: [position] }));
+      }
       return true;
     }
     return false;
@@ -229,22 +297,16 @@ export default function App() {
       if (!draft) {
         return draft;
       }
-      const tiles = [...draft.tiles];
-      const seen = new Set(tiles.map(tileKey));
-      const last = tiles[tiles.length - 1] ?? position;
-      for (const tile of lineTiles(last, position)) {
-        const key = tileKey(tile);
-        if (!seen.has(key)) {
-          tiles.push(tile);
-          seen.add(key);
-        }
-      }
-      return { ...draft, tiles };
+      const last = architectDragLastRef.current ?? position;
+      const edited = editDraftTiles(draft, lineTiles(last, position), architectStrokeModeRef.current);
+      architectDragLastRef.current = position;
+      return edited;
     });
   };
 
   const finishArchitectDraft = (position: Vec2) => {
     moveArchitectDraft(position);
+    architectDragLastRef.current = null;
   };
 
   const architectDraftPreview = (draft: ArchitectDraft | null): ArchitectDraftPreview | null => {
@@ -255,7 +317,9 @@ export default function App() {
       return { kind: "tiles" as const, tiles: draft.tiles, mode: "floor" as const, building: draft.building };
     }
     const mode =
-      draft.tool === "road"
+      draft.tool === "field"
+        ? ("field" as const)
+        : draft.tool === "road"
         ? ("road" as const)
         : draft.tool === "wall"
           ? ("wall" as const)
@@ -324,7 +388,9 @@ export default function App() {
         // of tiles in a row (e.g. tear out a whole wall, one tile at a time).
         if (devTileToolRef.current) {
           const tool = devTileToolRef.current;
-          if (tool === "road") {
+          if (tool === "field") {
+            gameRef.current.devPaintFieldTiles([position]);
+          } else if (tool === "road") {
             gameRef.current.devPaveRoadAt(position);
           } else if (tool === "wall") {
             gameRef.current.devPaintStructureTiles([position], "Wall");
@@ -469,6 +535,8 @@ export default function App() {
     }
     if (draft.kind === "building") {
       gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
+    } else if (draft.tool === "field") {
+      gameRef.current.devPaintFieldTiles(draft.tiles);
     } else if (draft.tool === "road") {
       gameRef.current.devPaveRoadTiles(draft.tiles);
     } else if (draft.tool === "wall") {

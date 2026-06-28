@@ -304,6 +304,14 @@ export class GameApp {
     return ok;
   }
 
+  devPaintFieldTiles(positions: Vec2[]): boolean {
+    const ok = this.simulation.devPaintFieldTiles(
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
   devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): boolean {
     const ok = this.simulation.devPaintStructureTiles(
       positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),

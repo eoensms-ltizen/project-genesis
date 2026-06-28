@@ -102,10 +102,6 @@ const NON_EXPERT_COOK_EFFICIENCY = 0.55;
 const FARM_WORK_DURATION_SECONDS = 2;
 const CLEAN_DURATION_SECONDS = 1.5;
 const PAVE_DURATION_SECONDS = 1.5;
-const MAX_FIELD_TILES = 12;
-// New fields are never tilled within this many tiles of a home, so farmland
-// keeps its distance from where people live.
-const FIELD_HOME_BUFFER = 4;
 const FOOD_STOCK_TARGET = 50;
 // Per-resident larder target — the real target is max(FOOD_STOCK_TARGET, pop ×
 // this), so farming keeps up as the town grows instead of stalling at a flat 50.
@@ -2963,7 +2959,6 @@ export class AgentBrain {
     if (simulation.foodStock >= target) {
       return false;
     }
-    const world = simulation.world;
     const route =
       this.routeToNearest(agent, simulation, "FieldRipe", false) ??
       this.routeToNearest(agent, simulation, "FieldEmpty", false);
@@ -2975,37 +2970,8 @@ export class AgentBrain {
       return true;
     }
 
-    const fieldCount =
-      world.countType("FieldEmpty") + world.countType("FieldGrowing") + world.countType("FieldRipe");
-    if (fieldCount >= Math.min(MAX_FIELD_TILES, simulation.agents.length * 2)) {
-      return false;
-    }
+    return false;
 
-    // Fields prefer low-ambiance ground — they cluster together near existing
-    // fields and steer clear of pleasant, residential areas.
-    const site = world.findBuildingSite(
-      agent.position,
-      3,
-      3,
-      (position) =>
-        simulation.isTileClaimed(position) ||
-        simulation.hasHouseNear(position, FIELD_HOME_BUFFER),
-      { extraScore: (cx, cy) => -simulation.ambianceAt({ x: cx, y: cy }) * AMBIANCE_SITING_WEIGHT },
-    );
-    if (!site) {
-      return false;
-    }
-    const center = { x: site.x + 1, y: site.y + 1 };
-    const path = findPath(world, { start: agent.position, goal: center });
-    if (!path) {
-      return false;
-    }
-
-    simulation.claimTile(center);
-    agent.target = center;
-    agent.path = path;
-    this.setState(agent, simulation, "MoveToFarm");
-    return true;
   }
 
   private farmWork(agent: Agent, simulation: Simulation, deltaSeconds: number) {
@@ -3033,17 +2999,6 @@ export class AgentBrain {
         if (Math.random() < 0.35) {
           simulation.log(tr(`${agent.name} sowed seeds.`, `${agent.name}이(가) 씨를 뿌렸다.`));
         }
-      } else if (tile?.type === "Grass") {
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const position = { x: center.x + dx, y: center.y + dy };
-            const patch = simulation.world.getTile(position);
-            if (patch?.type === "Grass" && !simulation.isTileClaimed(position)) {
-              simulation.world.setTile(position, "FieldEmpty");
-            }
-          }
-        }
-        simulation.log(tr(`${agent.name} tilled a new field.`, `${agent.name}이(가) 새 밭을 일궜다.`));
       }
     }
     agent.target = undefined;
