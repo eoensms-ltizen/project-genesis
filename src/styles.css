@@ -40,6 +40,15 @@ button[data-active="true"] {
   background: #d7b65f;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button:disabled:hover {
+  background: #293329;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

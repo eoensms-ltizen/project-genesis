@@ -15,7 +15,14 @@ const CLEAR_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
 
 type RendererOptions = {
   onTileClick: (position: Vec2) => void;
+  onTileDragStart?: (position: Vec2) => boolean;
+  onTileDragMove?: (position: Vec2) => void;
+  onTileDragEnd?: (position: Vec2) => void;
 };
+
+export type ArchitectDraftPreview =
+  | { kind: "rect"; rect: { x: number; y: number; width: number; height: number } }
+  | { kind: "tiles"; tiles: Vec2[]; mode: "road" | "erase" };
 
 export class PixiRenderer {
   private readonly host: HTMLElement;
@@ -60,6 +67,7 @@ export class PixiRenderer {
   private followAgentId: string | null = null;
   private followTarget: { x: number; y: number } | null = null;
   private readonly activePointers = new Map<number, { x: number; y: number }>();
+  private drawPointerId: number | null = null;
   private dragStart: { x: number; y: number; panX: number; panY: number } | null = null;
   private dragMoved = false;
   private pinchStartDist = 0;
@@ -68,6 +76,7 @@ export class PixiRenderer {
   // to ghost there for a dev placement (null when no dev tool is armed).
   private hoverTile: Vec2 | null = null;
   private placementPreview: { w: number; h: number; tile: boolean } | null = null;
+  private architectDraftPreview: ArchitectDraftPreview | null = null;
 
   constructor(host: HTMLElement, options: RendererOptions) {
     this.host = host;
@@ -126,14 +135,37 @@ export class PixiRenderer {
     this.initialized = true;
   }
 
+  private screenToTile(event: PointerEvent): Vec2 {
+    const rect = this.app.canvas.getBoundingClientRect();
+    const local = this.worldLayer.toLocal({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
+    return {
+      x: Math.floor(local.x / TILE_SIZE),
+      y: Math.floor(local.y / TILE_SIZE),
+    };
+  }
+
   /** Pointer drag pans, wheel/pinch zooms, and a clean tap inspects a tile. */
   private attachCameraControls() {
     const canvas = this.app.canvas;
     canvas.style.touchAction = "none";
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
     const TAP_SLOP = 6;
 
     canvas.addEventListener("pointerdown", (event) => {
+      const tile = this.screenToTile(event);
+      this.hoverTile = tile;
+      if (event.button === 0 && this.options.onTileDragStart?.(tile)) {
+        event.preventDefault();
+        canvas.setPointerCapture?.(event.pointerId);
+        this.drawPointerId = event.pointerId;
+        this.dragStart = null;
+        this.dragMoved = false;
+        return;
+      }
       canvas.setPointerCapture?.(event.pointerId);
       this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (this.activePointers.size === 1) {
@@ -149,15 +181,7 @@ export class PixiRenderer {
 
     // Track the hovered tile so a dev placement can be ghosted under the cursor.
     const updateHover = (event: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const local = this.worldLayer.toLocal({
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      });
-      this.hoverTile = {
-        x: Math.floor(local.x / TILE_SIZE),
-        y: Math.floor(local.y / TILE_SIZE),
-      };
+      this.hoverTile = this.screenToTile(event);
     };
     canvas.addEventListener("pointermove", (event) => updateHover(event));
     canvas.addEventListener("pointerleave", () => {
@@ -165,6 +189,12 @@ export class PixiRenderer {
     });
 
     canvas.addEventListener("pointermove", (event) => {
+      if (this.drawPointerId === event.pointerId) {
+        const tile = this.screenToTile(event);
+        this.hoverTile = tile;
+        this.options.onTileDragMove?.(tile);
+        return;
+      }
       if (!this.activePointers.has(event.pointerId)) {
         return;
       }
@@ -192,6 +222,13 @@ export class PixiRenderer {
     });
 
     const endPointer = (event: PointerEvent) => {
+      if (this.drawPointerId === event.pointerId) {
+        const tile = this.screenToTile(event);
+        this.hoverTile = tile;
+        this.options.onTileDragEnd?.(tile);
+        this.drawPointerId = null;
+        return;
+      }
       const wasSingle = this.activePointers.size === 1;
       this.activePointers.delete(event.pointerId);
       if (wasSingle && this.dragStart && !this.dragMoved) {
@@ -345,6 +382,10 @@ export class PixiRenderer {
    */
   setPlacementPreview(spec: { w: number; h: number; tile: boolean } | null) {
     this.placementPreview = spec;
+  }
+
+  setArchitectDraftPreview(preview: ArchitectDraftPreview | null) {
+    this.architectDraftPreview = preview;
   }
 
   /** Create one Graphics per CHUNK×CHUNK block of tiles, once we know the size. */
@@ -665,6 +706,8 @@ export class PixiRenderer {
       }
     }
 
+    drawArchitectDraftPreview(this.overlayGraphics, this.architectDraftPreview, this.skinMode);
+
     drawWeatherOverlay(this.overlayGraphics, world, weather, this.effectTime, this.skinMode);
 
     this.nightGraphics.clear();
@@ -741,6 +784,40 @@ export class PixiRenderer {
       layer.scale.set(scale);
       layer.position.set(left, top);
     }
+  }
+}
+
+function drawArchitectDraftPreview(
+  graphics: Graphics,
+  preview: ArchitectDraftPreview | null,
+  skinMode: boolean,
+) {
+  if (!preview) {
+    return;
+  }
+  if (preview.kind === "rect") {
+    const { x, y, width, height } = preview.rect;
+    const px = x * TILE_SIZE;
+    const py = y * TILE_SIZE;
+    const color = skinMode ? 0xd6bd78 : 0xffd75f;
+    graphics.rect(px, py, width * TILE_SIZE, height * TILE_SIZE);
+    graphics.fill({ color, alpha: 0.22 });
+    graphics.rect(px, py, width * TILE_SIZE, height * TILE_SIZE);
+    graphics.stroke({ color, width: 2, alpha: 0.95 });
+    graphics.rect((x + Math.floor(width / 2)) * TILE_SIZE, (y + height - 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    graphics.fill({ color: skinMode ? 0x68a6c8 : 0x4aa3ff, alpha: 0.42 });
+    return;
+  }
+
+  const color =
+    preview.mode === "road" ? (skinMode ? 0xd6bd78 : 0xffd75f) : skinMode ? 0xdf6b6b : 0xff5a5a;
+  for (const tile of preview.tiles) {
+    const px = tile.x * TILE_SIZE;
+    const py = tile.y * TILE_SIZE;
+    graphics.rect(px, py, TILE_SIZE, TILE_SIZE);
+    graphics.fill({ color, alpha: preview.mode === "road" ? 0.26 : 0.2 });
+    graphics.rect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    graphics.stroke({ color, width: 1.2, alpha: 0.9 });
   }
 }
 

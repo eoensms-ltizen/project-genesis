@@ -6,9 +6,12 @@ type Props = {
   placingKind: BuildingKind | null;
   instantBuild: boolean;
   tileTool: DevTileTool;
+  draftActive: boolean;
   onPlaceBuild: (kind: BuildingKind) => void;
   onInstantBuild: (instant: boolean) => void;
   onTileTool: (tool: DevTileTool) => void;
+  onApplyDraft: () => void;
+  onCancelDraft: () => void;
   onClose: () => void;
 };
 
@@ -16,9 +19,12 @@ export function ArchitectPanel({
   placingKind,
   instantBuild,
   tileTool,
+  draftActive,
   onPlaceBuild,
   onInstantBuild,
   onTileTool,
+  onApplyDraft,
+  onCancelDraft,
   onClose,
 }: Props) {
   const active = Boolean(placingKind || tileTool);
@@ -48,6 +54,15 @@ export function ArchitectPanel({
         </button>
         <button type="button" data-active={instantBuild} onClick={() => onInstantBuild(true)}>
           {tr("Instant", "즉시")}
+        </button>
+      </div>
+
+      <div className="tool-row draft-actions">
+        <button type="button" data-active={draftActive} disabled={!draftActive} onClick={onApplyDraft}>
+          {tr("Apply", "Apply")}
+        </button>
+        <button type="button" disabled={!draftActive} onClick={onCancelDraft}>
+          {tr("Cancel draft", "Cancel draft")}
         </button>
       </div>
 

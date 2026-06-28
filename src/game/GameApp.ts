@@ -1,5 +1,6 @@
 import { SoundManager } from "./audio/SoundManager";
-import { PixiRenderer } from "./render/PixiRenderer";
+import { normalizeDraftRect, type TileRect } from "./planning";
+import { PixiRenderer, type ArchitectDraftPreview } from "./render/PixiRenderer";
 import { Simulation } from "./Simulation";
 import type {
   BuildingKind,
@@ -13,6 +14,9 @@ import type {
 type GameAppOptions = {
   onChange: (snapshot: SimulationSnapshot) => void;
   onTileClick: (position: Vec2) => void;
+  onTileDragStart?: (position: Vec2) => boolean;
+  onTileDragMove?: (position: Vec2) => void;
+  onTileDragEnd?: (position: Vec2) => void;
 };
 
 export class GameApp {
@@ -29,6 +33,9 @@ export class GameApp {
     });
     this.renderer = new PixiRenderer(host, {
       onTileClick: options.onTileClick,
+      onTileDragStart: options.onTileDragStart,
+      onTileDragMove: options.onTileDragMove,
+      onTileDragEnd: options.onTileDragEnd,
     });
   }
 
@@ -222,8 +229,8 @@ export class GameApp {
     park: [3, 3],
   };
 
-  private devRaise(kind: BuildingKind, x: number, y: number, instant: boolean): boolean {
-    const [w, h] = GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
+  private devRaise(kind: BuildingKind, x: number, y: number, instant: boolean, size?: [number, number]): boolean {
+    const [w, h] = size ?? GameApp.DEV_BUILD_SIZES[kind] ?? [4, 4];
     const building = this.simulation.registerBuilding({
       kind,
       x,
@@ -245,6 +252,17 @@ export class GameApp {
     this.simulation.notifyChanged();
     this.render();
     return true;
+  }
+
+  private clampRectToWorld(rect: TileRect): TileRect {
+    const width = Math.max(1, Math.min(rect.width, this.simulation.world.width));
+    const height = Math.max(1, Math.min(rect.height, this.simulation.world.height));
+    return {
+      x: Math.max(0, Math.min(this.simulation.world.width - width, rect.x)),
+      y: Math.max(0, Math.min(this.simulation.world.height - height, rect.y)),
+      width,
+      height,
+    };
   }
 
   /** Place a building near the village centre — finished (instant) or as a site. */
@@ -269,6 +287,11 @@ export class GameApp {
     return this.devRaise(kind, x, y, instant);
   }
 
+  devBuildRect(kind: BuildingKind, start: Vec2, end: Vec2, instant = true): boolean {
+    const rect = this.clampRectToWorld(normalizeDraftRect(kind, start, end));
+    return this.devRaise(kind, rect.x, rect.y, instant, [rect.width, rect.height]);
+  }
+
   /**
    * Arm the placement ghost shown under the cursor. Pass a building kind to ghost
    * its footprint, `tileTool` true to ghost a single tile (road/demolish), or
@@ -285,6 +308,10 @@ export class GameApp {
     }
   }
 
+  setArchitectDraftPreview(preview: ArchitectDraftPreview | null) {
+    this.renderer.setArchitectDraftPreview(preview);
+  }
+
   /** Dev tool: pave the clicked ground tile into a road. */
   devPaveRoadAt(position: Vec2): boolean {
     const ok = this.simulation.devPaveRoad({ x: Math.round(position.x), y: Math.round(position.y) });
@@ -292,9 +319,21 @@ export class GameApp {
     return ok;
   }
 
+  devPaveRoadTiles(positions: Vec2[]): boolean {
+    const ok = this.simulation.devPaveRoadTiles(positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
   /** Dev tool: demolish the single clicked tile (wall/floor/door/fence/road). */
   devDemolishTileAt(position: Vec2): boolean {
     const ok = this.simulation.devDemolishTile({ x: Math.round(position.x), y: Math.round(position.y) });
+    if (ok) this.render();
+    return ok;
+  }
+
+  devDemolishTiles(positions: Vec2[]): boolean {
+    const ok = this.simulation.devDemolishTiles(positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))) > 0;
     if (ok) this.render();
     return ok;
   }

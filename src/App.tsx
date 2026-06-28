@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GameApp } from "./game/GameApp";
+import { lineTiles, normalizeDraftRect, tileKey } from "./game/planning";
+import type { ArchitectDraftPreview } from "./game/render/PixiRenderer";
 import { ERA_NAMES, NEW_GAME_MODE_KEY, SAVE_KEY } from "./game/Simulation";
 import type {
   Agent,
@@ -27,6 +29,10 @@ import { Inspector } from "./ui/Inspector";
 const TICK_MS = 160;
 const SOUND_KEY = "pg-sound-enabled";
 const DEFAULT_WEATHER: WeatherState = { kind: "clear", intensity: 1 };
+
+type ArchitectDraft =
+  | { kind: "building"; building: BuildingKind; start: Vec2; end: Vec2 }
+  | { kind: "tiles"; tool: "road" | "demolishTile"; tiles: Vec2[] };
 
 const ERA_LABELS_KO = ["개척", "정착", "마을", "도시", "산업"];
 
@@ -143,6 +149,7 @@ export default function App() {
   const [clock, setClock] = useState<GameClock | null>(null);
   const [weather, setWeather] = useState<WeatherState>(DEFAULT_WEATHER);
   const [gameMode, setGameMode] = useState<GameMode>("auto");
+  const gameModeRef = useRef<GameMode>("auto");
   const [era, setEra] = useState(0);
   const [supportedPop, setSupportedPop] = useState(0);
   const [foodStock, setFoodStock] = useState(0);
@@ -168,6 +175,9 @@ export default function App() {
   const devInstantRef = useRef(true);
   const [devTileTool, setDevTileTool] = useState<DevTileTool>(null);
   const devTileToolRef = useRef<DevTileTool>(null);
+  const [architectDraft, setArchitectDraft] = useState<ArchitectDraft | null>(null);
+  const architectDraftRef = useRef<ArchitectDraft | null>(null);
+  const pausedForDraftRef = useRef<number | null>(null);
   const [tab, setTab] = useState<"world" | "people" | "log">("world");
   const [flatBuildings, setFlatBuildings] = useState(
     () => localStorage.getItem("pg-flat-buildings") === "1",
@@ -181,6 +191,78 @@ export default function App() {
   const [lang, setLangState] = useState<Lang>(() => getLang());
 
   const defaultSpawn = useMemo<Vec2>(() => ({ x: 32, y: 32 }), []);
+
+  const updateArchitectDraft = (updater: (draft: ArchitectDraft | null) => ArchitectDraft | null) => {
+    setArchitectDraft((current) => {
+      const next = updater(current);
+      architectDraftRef.current = next;
+      return next;
+    });
+  };
+
+  const clearArchitectDraft = () => {
+    architectDraftRef.current = null;
+    setArchitectDraft(null);
+  };
+
+  const beginArchitectDraft = (position: Vec2): boolean => {
+    if (gameModeRef.current !== "architect") {
+      return false;
+    }
+    const building = devPlaceKindRef.current;
+    if (building) {
+      pauseForArchitectTool();
+      updateArchitectDraft(() => ({ kind: "building", building, start: position, end: position }));
+      return true;
+    }
+    const tool = devTileToolRef.current;
+    if (tool === "road" || tool === "demolishTile") {
+      pauseForArchitectTool();
+      updateArchitectDraft(() => ({ kind: "tiles", tool, tiles: [position] }));
+      return true;
+    }
+    return false;
+  };
+
+  const moveArchitectDraft = (position: Vec2) => {
+    updateArchitectDraft((draft) => {
+      if (!draft) {
+        return draft;
+      }
+      if (draft.kind === "building") {
+        return { ...draft, end: position };
+      }
+      const tiles = [...draft.tiles];
+      const seen = new Set(tiles.map(tileKey));
+      const last = tiles[tiles.length - 1] ?? position;
+      for (const tile of lineTiles(last, position)) {
+        const key = tileKey(tile);
+        if (!seen.has(key)) {
+          tiles.push(tile);
+          seen.add(key);
+        }
+      }
+      return { ...draft, tiles };
+    });
+  };
+
+  const finishArchitectDraft = (position: Vec2) => {
+    moveArchitectDraft(position);
+  };
+
+  const architectDraftPreview = (draft: ArchitectDraft | null): ArchitectDraftPreview | null => {
+    if (!draft) {
+      return null;
+    }
+    if (draft.kind === "building") {
+      return { kind: "rect" as const, rect: normalizeDraftRect(draft.building, draft.start, draft.end) };
+    }
+    return {
+      kind: "tiles" as const,
+      tiles: draft.tiles,
+      mode: draft.tool === "road" ? ("road" as const) : ("erase" as const),
+    };
+  };
 
   useEffect(() => {
     if (gameMode === "architect" && devInstantRef.current) {
@@ -204,6 +286,7 @@ export default function App() {
         setLogs(snapshot.logs);
         setClock(snapshot.clock);
         setWeather(snapshot.weather);
+        gameModeRef.current = snapshot.gameMode;
         setGameMode(snapshot.gameMode);
         setEra(snapshot.era);
         setSupportedPop(snapshot.supportedPopulation);
@@ -253,6 +336,9 @@ export default function App() {
         }
         setSelection(gameRef.current.inspectAt(position));
       },
+      onTileDragStart: beginArchitectDraft,
+      onTileDragMove: moveArchitectDraft,
+      onTileDragEnd: finishArchitectDraft,
     });
 
     gameRef.current = game;
@@ -323,30 +409,67 @@ export default function App() {
   const devAdvanceTime = (seconds: number) => gameRef.current?.devAdvanceTime(seconds);
   const devPlace = (kind: BuildingKind) => {
     // Toggle: pick a building to drop with the next map click, or cancel.
+    clearArchitectDraft();
     const next = devPlaceKindRef.current === kind ? null : kind;
     devPlaceKindRef.current = next;
     setDevPlaceKind(next);
     // Arming a building cancels any tile tool, so clicks don't do two things.
     devTileToolRef.current = null;
     setDevTileTool(null);
-    gameRef.current?.setPlacementPreview(next, false);
+    gameRef.current?.setPlacementPreview(gameModeRef.current === "architect" ? null : next, false);
+    if (gameModeRef.current === "architect") {
+      if (next) {
+        pauseForArchitectTool();
+      } else {
+        restoreAfterArchitectTool();
+      }
+    }
   };
   const devTool = (tool: DevTileTool) => {
     // Toggle a sticky tile tool (road / demolish); arming one cancels building place.
+    clearArchitectDraft();
     const next = devTileToolRef.current === tool ? null : tool;
     devTileToolRef.current = next;
     setDevTileTool(next);
     devPlaceKindRef.current = null;
     setDevPlaceKind(null);
-    gameRef.current?.setPlacementPreview(null, next !== null);
+    gameRef.current?.setPlacementPreview(null, gameModeRef.current === "architect" ? false : next !== null);
+    if (gameModeRef.current === "architect") {
+      if (next) {
+        pauseForArchitectTool();
+      } else {
+        restoreAfterArchitectTool();
+      }
+    }
   };
   const devDisarm = () => {
     // Drop every armed dev tool and clear the cursor ghost.
+    clearArchitectDraft();
     devPlaceKindRef.current = null;
     setDevPlaceKind(null);
     devTileToolRef.current = null;
     setDevTileTool(null);
     gameRef.current?.setPlacementPreview(null, false);
+    gameRef.current?.setArchitectDraftPreview(null);
+    restoreAfterArchitectTool();
+  };
+  const applyArchitectDraft = () => {
+    const draft = architectDraftRef.current;
+    if (!draft || !gameRef.current) {
+      return;
+    }
+    if (draft.kind === "building") {
+      gameRef.current.devBuildRect(draft.building, draft.start, draft.end, devInstantRef.current);
+    } else if (draft.tool === "road") {
+      gameRef.current.devPaveRoadTiles(draft.tiles);
+    } else {
+      gameRef.current.devDemolishTiles(draft.tiles);
+    }
+    devDisarm();
+  };
+  const cancelArchitectDraft = () => {
+    clearArchitectDraft();
+    gameRef.current?.setArchitectDraftPreview(null);
   };
   const devSetInstant = (instant: boolean) => {
     devInstantRef.current = instant;
@@ -357,10 +480,61 @@ export default function App() {
     patch: Parameters<NonNullable<typeof gameRef.current>["devSetAgent"]>[1],
   ) => gameRef.current?.devSetAgent(agentId, patch);
 
+  function isArchitectToolArmed() {
+    return (
+      gameModeRef.current === "architect" &&
+      Boolean(devPlaceKindRef.current || devTileToolRef.current || architectDraftRef.current)
+    );
+  }
+
   const changeSpeed = (value: number) => {
+    if (value > 0 && isArchitectToolArmed()) {
+      pausedForDraftRef.current = value;
+      speedRef.current = 0;
+      setSpeed(0);
+      return;
+    }
     speedRef.current = value;
     setSpeed(value);
   };
+
+  const pauseForArchitectTool = () => {
+    if (pausedForDraftRef.current === null) {
+      pausedForDraftRef.current = speedRef.current;
+    }
+    speedRef.current = 0;
+    setSpeed(0);
+  };
+
+  const restoreAfterArchitectTool = () => {
+    if (pausedForDraftRef.current === null) {
+      return;
+    }
+    const restoreSpeed = pausedForDraftRef.current;
+    pausedForDraftRef.current = null;
+    speedRef.current = restoreSpeed;
+    setSpeed(restoreSpeed);
+  };
+
+  const architectToolActive =
+    gameMode === "architect" && Boolean(devPlaceKind || devTileTool || architectDraft);
+
+  useEffect(() => {
+    if (architectToolActive && pausedForDraftRef.current === null) {
+      pausedForDraftRef.current = speedRef.current;
+      changeSpeed(0);
+    } else if (!architectToolActive && pausedForDraftRef.current !== null) {
+      const restoreSpeed = pausedForDraftRef.current;
+      pausedForDraftRef.current = null;
+      if (speedRef.current === 0 && restoreSpeed > 0) {
+        changeSpeed(restoreSpeed);
+      }
+    }
+  }, [architectToolActive]);
+
+  useEffect(() => {
+    gameRef.current?.setArchitectDraftPreview(architectDraftPreview(architectDraft));
+  }, [architectDraft]);
 
   const toggleLang = () => {
     const next: Lang = lang === "ko" ? "en" : "ko";
@@ -584,9 +758,12 @@ export default function App() {
                 placingKind={devPlaceKind}
                 instantBuild={devInstant}
                 tileTool={devTileTool}
+                draftActive={architectDraft !== null}
                 onPlaceBuild={devPlace}
                 onInstantBuild={devSetInstant}
                 onTileTool={devTool}
+                onApplyDraft={applyArchitectDraft}
+                onCancelDraft={cancelArchitectDraft}
                 onClose={devDisarm}
               />
             )}

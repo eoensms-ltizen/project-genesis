@@ -2786,6 +2786,50 @@ export class Simulation {
     return true;
   }
 
+  devPaveRoadTiles(positions: Vec2[]): number {
+    let changed = 0;
+    const seen = new Set<string>();
+    for (const position of positions) {
+      const key = claimKey(position);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      if (!ROADABLE.has(this.world.getTile(position)?.type as TileType)) {
+        continue;
+      }
+      this.world.setTile(position, "Road");
+      changed += 1;
+    }
+    if (changed > 0) {
+      this.notifyChanged();
+    }
+    return changed;
+  }
+
+  devDemolishTiles(positions: Vec2[]): number {
+    let changed = 0;
+    const seen = new Set<string>();
+    for (const position of positions) {
+      const key = claimKey(position);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const type = this.world.getTile(position)?.type;
+      if (type === undefined) {
+        continue;
+      }
+      this.world.setTile(position, "Grass");
+      changed += 1;
+    }
+    if (changed > 0) {
+      this.refreshDoors();
+      this.notifyChanged();
+    }
+    return changed;
+  }
+
   /** Dev tool: tear down the whole building under a tile (no repair follows). */
   devDemolishBuildingAt(position: Vec2): boolean {
     const building = this.buildingAt(position);
