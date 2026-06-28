@@ -2,14 +2,19 @@ import type { BuildingKind } from "../game/types";
 import { tr } from "../i18n";
 import type { DevTileTool } from "./DevPanel";
 
+const FURNITURE_TOOLS = new Set(["bed", "stove", "counter", "table", "chair"]);
+const ROTATION_LABELS = ["→", "↓", "←", "↑"];
+
 type Props = {
   placingKind: BuildingKind | null;
   instantBuild: boolean;
   tileTool: DevTileTool;
   draftActive: boolean;
+  rotation: number;
   onPlaceBuild: (kind: BuildingKind) => void;
   onInstantBuild: (instant: boolean) => void;
   onTileTool: (tool: DevTileTool) => void;
+  onRotate: () => void;
   onApplyDraft: () => void;
   onCancelDraft: () => void;
   onClose: () => void;
@@ -20,13 +25,16 @@ export function ArchitectPanel({
   instantBuild,
   tileTool,
   draftActive,
+  rotation,
   onPlaceBuild,
   onInstantBuild,
   onTileTool,
+  onRotate,
   onApplyDraft,
   onCancelDraft,
   onClose,
 }: Props) {
+  const furnitureArmed = tileTool !== null && FURNITURE_TOOLS.has(tileTool);
   const active = Boolean(placingKind || tileTool);
   const buildings: { kind: BuildingKind; label: string }[] = [
     { kind: "house", label: tr("House", "집") },
@@ -107,6 +115,16 @@ export function ArchitectPanel({
           {tr("Chair", "Chair")}
         </button>
       </div>
+      {furnitureArmed && (
+        <div className="tool-row">
+          <button type="button" onClick={onRotate}>
+            {tr("Rotate (R)", "회전 (R)")} {ROTATION_LABELS[rotation % 4]}
+          </button>
+          <span className="muted" style={{ fontSize: 11 }}>
+            {tr("Click to place", "클릭해서 배치")}
+          </span>
+        </div>
+      )}
 
       <div className="tool-label">{tr("Path / erase", "Path / erase")}</div>
       <div className="tool-row">

@@ -313,15 +313,6 @@ export class GameApp {
     return ok;
   }
 
-  devPaintFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): boolean {
-    const ok = this.simulation.devPaintFurnitureTiles(
-      kind,
-      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
-    ) > 0;
-    if (ok) this.render();
-    return ok;
-  }
-
   devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): boolean {
     const ok = this.simulation.devPaintStructureTiles(
       positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
@@ -331,12 +322,24 @@ export class GameApp {
     return ok;
   }
 
-  /** Architect resident-build: queue furniture as blueprints residents construct. */
-  devPlanFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): boolean {
-    const ok = this.simulation.devPlanFurnitureTiles(
+  /** Place a single furniture unit (rotatable, 2-tile bed) at a tile, finished. */
+  devPlaceFurniture(kind: FurnitureKind, position: Vec2, rotation: number): boolean {
+    const ok = this.simulation.devPlaceFurniture(
       kind,
-      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
-    ) > 0;
+      { x: Math.round(position.x), y: Math.round(position.y) },
+      rotation,
+    );
+    if (ok) this.render();
+    return ok;
+  }
+
+  /** Queue a single furniture unit (rotatable, 2-tile bed) as a blueprint. */
+  devPlanFurniture(kind: FurnitureKind, position: Vec2, rotation: number): boolean {
+    const ok = this.simulation.devPlanFurniture(
+      kind,
+      { x: Math.round(position.x), y: Math.round(position.y) },
+      rotation,
+    );
     if (ok) this.render();
     return ok;
   }
@@ -369,6 +372,11 @@ export class GameApp {
 
   setArchitectDraftPreview(preview: ArchitectDraftPreview | null) {
     this.renderer.setArchitectDraftPreview(preview);
+  }
+
+  /** Show (or clear) a rotatable furniture ghost under the cursor. */
+  setFurniturePreview(kind: FurnitureKind | null, rotation = 0) {
+    this.renderer.setFurniturePreview(kind ? { kind, rotation } : null);
   }
 
   /** Dev tool: pave the clicked ground tile into a road. */

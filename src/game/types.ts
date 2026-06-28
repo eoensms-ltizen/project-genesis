@@ -250,6 +250,9 @@ export type Blueprint = {
   t: TileType;
   // Wood the builder must carry to raise it.
   cost: number;
+  // Orientation 0..3 (right/down/left/up) for multi-tile furniture — a Bed uses it
+  // to place its foot. Undefined for single-tile blueprints.
+  dir?: number;
   // Id of the resident currently building it (so two don't both grab it).
   claimedBy?: string;
 };

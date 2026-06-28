@@ -285,6 +285,15 @@ const BLUEPRINT_COST: Partial<Record<TileType, number>> = {
   Chair: 1,
 };
 
+// Furniture orientation offsets, indexed by rotation 0..3 (right/down/left/up).
+// A Bed's foot sits one tile away in this direction.
+const FURNITURE_DIRS: Vec2[] = [
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+  { x: 0, y: -1 },
+];
+
 // Maps a blueprint's target furniture tile back to the FurnitureKind to place.
 const TILE_FURNITURE: Partial<Record<TileType, FurnitureKind>> = {
   Bed: "bed",
@@ -1669,65 +1678,6 @@ export class Simulation {
     return changed;
   }
 
-  devPaintFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): number {
-    const anchors = uniqueTiles(positions).filter((position) => {
-      const type = this.world.getTile(position)?.type;
-      return type !== undefined && FURNITURE_PAINTABLE.has(type);
-    });
-    this.clearBlueprintsAt(anchors); // an instant placement supersedes any ghost here
-    let changed = 0;
-
-    if (kind === "bed") {
-      const occupied = new Set<string>();
-      const directions = [
-        { x: 1, y: 0 },
-        { x: 0, y: 1 },
-        { x: -1, y: 0 },
-        { x: 0, y: -1 },
-      ];
-      const canUse = (position: Vec2): boolean => {
-        const type = this.world.getTile(position)?.type;
-        return type !== undefined && FURNITURE_PAINTABLE.has(type) && !occupied.has(claimKey(position));
-      };
-
-      for (const head of anchors) {
-        if (occupied.has(claimKey(head)) || this.world.getTile(head)?.type === "Bed") {
-          continue;
-        }
-        const foot = directions
-          .map((d) => ({ x: head.x + d.x, y: head.y + d.y }))
-          .find(canUse);
-        if (!foot) {
-          continue;
-        }
-        this.clearFurnitureAt(head);
-        this.clearFurnitureAt(foot);
-        this.world.setTile(head, "Bed");
-        this.world.setTile(foot, "BedFoot");
-        occupied.add(claimKey(head));
-        occupied.add(claimKey(foot));
-        changed += 2;
-      }
-    } else {
-      const tileType = FURNITURE_TILE[kind];
-      for (const position of anchors) {
-        if (this.world.getTile(position)?.type === tileType) {
-          continue;
-        }
-        this.clearFurnitureAt(position);
-        this.world.setTile(position, tileType);
-        changed += 1;
-      }
-    }
-
-    if (changed > 0) {
-      this.refreshCustomBuildingEntrances();
-      this.refreshDoors();
-      this.notifyChanged();
-    }
-    return changed;
-  }
-
   devPaintStructureTiles(positions: Vec2[], structure: "Wall" | "Door"): number {
     const tiles = uniqueTiles(positions).filter((position) => {
       const type = this.world.getTile(position)?.type;
@@ -1763,12 +1713,89 @@ export class Simulation {
   }
 
   /** Queue one blueprint, unless the tile is already that type or already queued. */
-  private addBlueprint(position: Vec2, t: TileType, cost: number): boolean {
+  private addBlueprint(position: Vec2, t: TileType, cost: number, dir?: number): boolean {
     if (this.world.getTile(position)?.type === t || this.hasBlueprintAt(position)) {
       return false;
     }
-    this.blueprints.push({ id: `bp-${this.nextBlueprintId++}`, x: position.x, y: position.y, t, cost });
+    this.blueprints.push({
+      id: `bp-${this.nextBlueprintId++}`,
+      x: position.x,
+      y: position.y,
+      t,
+      cost,
+      dir,
+    });
     return true;
+  }
+
+  /**
+   * The foot tile for a bed head at the given rotation: one tile away in that
+   * direction if it's free, otherwise the first free adjacent tile (so a bed
+   * placed against a wall still finds room). Undefined if fully boxed in.
+   */
+  private bedFoot(head: Vec2, rotation: number): Vec2 | undefined {
+    const order = [FURNITURE_DIRS[((rotation % 4) + 4) % 4], ...FURNITURE_DIRS];
+    for (const d of order) {
+      const foot = { x: head.x + d.x, y: head.y + d.y };
+      const type = this.world.getTile(foot)?.type;
+      if (type !== undefined && FURNITURE_PAINTABLE.has(type)) {
+        return foot;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Stamp a furniture unit at `head`: a Bed lays its head + a BedFoot one tile
+   * away in the rotation direction; everything else is a single tile. Returns
+   * false if a bed can't find room for its foot.
+   */
+  private placeFurnitureUnit(kind: FurnitureKind, head: Vec2, rotation: number): boolean {
+    if (kind === "bed") {
+      const foot = this.bedFoot(head, rotation);
+      if (!foot) {
+        return false;
+      }
+      this.clearFurnitureAt(head);
+      this.clearFurnitureAt(foot);
+      this.world.setTile(head, "Bed");
+      this.world.setTile(foot, "BedFoot");
+      return true;
+    }
+    this.clearFurnitureAt(head);
+    this.world.setTile(head, FURNITURE_TILE[kind]);
+    return true;
+  }
+
+  /** Place a single furniture unit instantly at a tile, with rotation. */
+  devPlaceFurniture(kind: FurnitureKind, position: Vec2, rotation: number): boolean {
+    const type = this.world.getTile(position)?.type;
+    if (type === undefined || !FURNITURE_PAINTABLE.has(type)) {
+      return false;
+    }
+    this.clearBlueprintsAt([position]);
+    if (!this.placeFurnitureUnit(kind, position, rotation)) {
+      return false;
+    }
+    this.refreshCustomBuildingEntrances();
+    this.refreshDoors();
+    this.notifyChanged();
+    return true;
+  }
+
+  /** Queue a single furniture unit as a blueprint, with rotation (Architect build). */
+  devPlanFurniture(kind: FurnitureKind, position: Vec2, rotation: number): boolean {
+    const type = this.world.getTile(position)?.type;
+    if (type === undefined || !FURNITURE_PAINTABLE.has(type)) {
+      return false;
+    }
+    const target: TileType = kind === "bed" ? "Bed" : FURNITURE_TILE[kind];
+    const cost = BLUEPRINT_COST[target] ?? 1;
+    const added = this.addBlueprint(position, target, cost, kind === "bed" ? rotation : undefined);
+    if (added) {
+      this.notifyChanged();
+    }
+    return added;
   }
 
   /** Drop any blueprint sitting on these tiles (e.g. when the tile is edited). */
@@ -1783,26 +1810,6 @@ export class Simulation {
         this.blueprints.splice(i, 1);
       }
     }
-  }
-
-  /** Plan furniture as blueprints residents build (Architect resident-build mode). */
-  devPlanFurnitureTiles(kind: FurnitureKind, positions: Vec2[]): number {
-    const anchors = uniqueTiles(positions).filter((position) => {
-      const type = this.world.getTile(position)?.type;
-      return type !== undefined && FURNITURE_PAINTABLE.has(type);
-    });
-    const target: TileType = kind === "bed" ? "Bed" : FURNITURE_TILE[kind];
-    const cost = BLUEPRINT_COST[target] ?? 1;
-    let added = 0;
-    for (const position of anchors) {
-      if (this.addBlueprint(position, target, cost)) {
-        added += 1;
-      }
-    }
-    if (added > 0) {
-      this.notifyChanged();
-    }
-    return added;
   }
 
   /** Plan walls/doors as blueprints residents build (Architect resident-build mode). */
@@ -1880,8 +1887,10 @@ export class Simulation {
     const position = { x: b.x, y: b.y };
     const furniture = TILE_FURNITURE[b.t];
     if (furniture) {
-      // Reuse the placement path (beds get their foot, furniture clears the spot).
-      this.devPaintFurnitureTiles(furniture, [position]);
+      // Lay the unit with its stored orientation (a bed gets its foot in `dir`).
+      this.placeFurnitureUnit(furniture, position, b.dir ?? 0);
+      this.refreshCustomBuildingEntrances();
+      this.refreshDoors();
     } else if (b.t === "Wall" || b.t === "Door") {
       this.devPaintStructureTiles([position], b.t);
     } else {

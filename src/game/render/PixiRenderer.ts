@@ -77,6 +77,8 @@ export class PixiRenderer {
   private hoverTile: Vec2 | null = null;
   private placementPreview: { w: number; h: number; tile: boolean } | null = null;
   private architectDraftPreview: ArchitectDraftPreview | null = null;
+  // A rotatable furniture ghost under the cursor (Architect click-to-place).
+  private furniturePreview: { kind: FurnitureKind; rotation: number } | null = null;
 
   constructor(host: HTMLElement, options: RendererOptions) {
     this.host = host;
@@ -386,6 +388,10 @@ export class PixiRenderer {
 
   setArchitectDraftPreview(preview: ArchitectDraftPreview | null) {
     this.architectDraftPreview = preview;
+  }
+
+  setFurniturePreview(spec: { kind: FurnitureKind; rotation: number } | null) {
+    this.furniturePreview = spec;
   }
 
   /** Create one Graphics per CHUNK×CHUNK block of tiles, once we know the size. */
@@ -730,6 +736,32 @@ export class PixiRenderer {
       this.overlayGraphics.stroke({ color: 0x9ccbff, width: 1, alpha: 0.85 });
       this.overlayGraphics.rect(bx + 2, by + 2, 3, 3);
       this.overlayGraphics.fill({ color: 0xdcecff, alpha: 0.9 });
+    }
+
+    // Rotatable furniture ghost under the cursor (Architect click-to-place). A bed
+    // shows both its head and foot tile so its orientation is obvious before placing.
+    if (this.furniturePreview && this.hoverTile) {
+      const FURN_DIRS = [
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: -1, y: 0 },
+        { x: 0, y: -1 },
+      ];
+      const cells: { x: number; y: number; head: boolean }[] = [
+        { x: this.hoverTile.x, y: this.hoverTile.y, head: true },
+      ];
+      if (this.furniturePreview.kind === "bed") {
+        const d = FURN_DIRS[((this.furniturePreview.rotation % 4) + 4) % 4];
+        cells.push({ x: this.hoverTile.x + d.x, y: this.hoverTile.y + d.y, head: false });
+      }
+      for (const c of cells) {
+        const cx = c.x * TILE_SIZE;
+        const cy = c.y * TILE_SIZE;
+        this.overlayGraphics.rect(cx + 1, cy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        this.overlayGraphics.fill({ color: 0x6ad08a, alpha: c.head ? 0.3 : 0.18 });
+        this.overlayGraphics.rect(cx + 1, cy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        this.overlayGraphics.stroke({ color: 0x9be3b0, width: 1.2, alpha: 0.95 });
+      }
     }
 
     drawWeatherOverlay(this.overlayGraphics, world, weather, this.effectTime, this.skinMode);

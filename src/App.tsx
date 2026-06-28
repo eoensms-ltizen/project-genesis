@@ -217,6 +217,9 @@ export default function App() {
   const devInstantRef = useRef(true);
   const [devTileTool, setDevTileTool] = useState<DevTileTool>(null);
   const devTileToolRef = useRef<DevTileTool>(null);
+  // Furniture is click-to-place (not drag) and rotatable with R; 0..3 = R/D/L/U.
+  const [architectRotation, setArchitectRotation] = useState(0);
+  const architectRotationRef = useRef(0);
   const [architectDraft, setArchitectDraft] = useState<ArchitectDraft | null>(null);
   const architectDraftRef = useRef<ArchitectDraft | null>(null);
   const architectStrokeModeRef = useRef<ArchitectStrokeMode>("add");
@@ -312,6 +315,10 @@ export default function App() {
       return true;
     }
     const tool = devTileToolRef.current;
+    // Furniture is click-to-place, not drag — let the tap fall through to onTileClick.
+    if (isFurnitureTool(tool)) {
+      return false;
+    }
     if (isArchitectTileTool(tool)) {
       pauseForArchitectTool();
       architectDragLastRef.current = position;
@@ -431,7 +438,14 @@ export default function App() {
         if (devTileToolRef.current) {
           const tool = devTileToolRef.current;
           if (isFurnitureTool(tool)) {
-            gameRef.current.devPaintFurnitureTiles(tool, [position]);
+            // Click-to-place a single rotated unit (bed = 2 tiles). Stays armed so
+            // several can be dropped; "주민 건설" queues it as a blueprint instead.
+            const rot = architectRotationRef.current;
+            if (gameModeRef.current === "architect" && !devInstantRef.current) {
+              gameRef.current.devPlanFurniture(tool, position, rot);
+            } else {
+              gameRef.current.devPlaceFurniture(tool, position, rot);
+            }
           } else if (tool === "field") {
             gameRef.current.devPaintFieldTiles([position]);
           } else if (tool === "road") {
@@ -487,12 +501,25 @@ export default function App() {
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
 
+    // R rotates the armed furniture ghost (Architect click-to-place).
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+        return;
+      }
+      if (event.key === "r" || event.key === "R") {
+        rotateArchitectFurniture();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", saveOnHide);
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("keydown", onKeyDown);
       game.simulation.saveNow();
       game.destroy();
       gameRef.current = null;
@@ -535,6 +562,7 @@ export default function App() {
     // Arming a building cancels any tile tool, so clicks don't do two things.
     devTileToolRef.current = null;
     setDevTileTool(null);
+    gameRef.current?.setFurniturePreview(null);
     gameRef.current?.setPlacementPreview(gameModeRef.current === "architect" ? null : next, false);
     if (gameModeRef.current === "architect") {
       if (next) {
@@ -553,6 +581,15 @@ export default function App() {
     devPlaceKindRef.current = null;
     setDevPlaceKind(null);
     gameRef.current?.setPlacementPreview(null, gameModeRef.current === "architect" ? false : next !== null);
+    // Furniture tools show a rotatable ghost (and reset to facing right); other
+    // tools clear it.
+    if (isFurnitureTool(next)) {
+      architectRotationRef.current = 0;
+      setArchitectRotation(0);
+      gameRef.current?.setFurniturePreview(next, 0);
+    } else {
+      gameRef.current?.setFurniturePreview(null);
+    }
     if (gameModeRef.current === "architect") {
       if (next) {
         pauseForArchitectTool();
@@ -569,26 +606,31 @@ export default function App() {
     devTileToolRef.current = null;
     setDevTileTool(null);
     gameRef.current?.setPlacementPreview(null, false);
+    gameRef.current?.setFurniturePreview(null);
     gameRef.current?.setArchitectDraftPreview(null);
     restoreAfterArchitectTool();
+  };
+  const rotateArchitectFurniture = () => {
+    if (!isFurnitureTool(devTileToolRef.current)) {
+      return;
+    }
+    const next = (architectRotationRef.current + 1) % 4;
+    architectRotationRef.current = next;
+    setArchitectRotation(next);
+    gameRef.current?.setFurniturePreview(devTileToolRef.current, next);
   };
   const applyArchitectDraft = () => {
     const draft = architectDraftRef.current;
     if (!draft || !gameRef.current) {
       return;
     }
-    // "주민 건설" (resident-build) queues walls/doors/furniture as blueprints for
-    // residents to construct with materials; "즉시" (instant) stamps them at once.
-    // Floor zones, fields, roads and demolition are always instant.
+    // "주민 건설" (resident-build) queues walls/doors as blueprints for residents
+    // to construct with materials; "즉시" (instant) stamps them at once. Floor
+    // zones, fields, roads and demolition are always instant. (Furniture is no
+    // longer drafted here — it's click-to-placed per unit via onTileClick.)
     const residentBuild = !devInstantRef.current;
     if (draft.kind === "building") {
       gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
-    } else if (isFurnitureTool(draft.tool)) {
-      if (residentBuild) {
-        gameRef.current.devPlanFurnitureTiles(draft.tool, draft.tiles);
-      } else {
-        gameRef.current.devPaintFurnitureTiles(draft.tool, draft.tiles);
-      }
     } else if (draft.tool === "field") {
       gameRef.current.devPaintFieldTiles(draft.tiles);
     } else if (draft.tool === "road") {
@@ -902,9 +944,11 @@ export default function App() {
                 instantBuild={devInstant}
                 tileTool={devTileTool}
                 draftActive={architectDraft !== null}
+                rotation={architectRotation}
                 onPlaceBuild={devPlace}
                 onInstantBuild={devSetInstant}
                 onTileTool={devTool}
+                onRotate={rotateArchitectFurniture}
                 onApplyDraft={applyArchitectDraft}
                 onCancelDraft={cancelArchitectDraft}
                 onClose={devDisarm}
