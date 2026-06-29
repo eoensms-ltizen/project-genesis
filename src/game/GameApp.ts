@@ -384,6 +384,20 @@ export class GameApp {
     this.renderer.setFurniturePreview(kind ? { kind, rotation } : null);
   }
 
+  /** Dev: the full game state as a JSON string (for sharing/debugging). */
+  exportState(): string {
+    return this.simulation.serialize();
+  }
+
+  /** Dev: load a shared/imported state JSON, reloading the page to apply it. */
+  importState(json: string): boolean {
+    const ok = this.simulation.importSerialized(json.trim());
+    if (ok) {
+      window.location.reload();
+    }
+    return ok;
+  }
+
   /** Dev tool: pave the clicked ground tile into a road. */
   devPaveRoadAt(position: Vec2): boolean {
     const ok = this.simulation.devPaveRoad({ x: Math.round(position.x), y: Math.round(position.y) });

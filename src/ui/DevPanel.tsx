@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { BuildingKind, FoodKind, FurnitureKind, ResourceKind } from "../game/types";
 import { tr } from "../i18n";
 
@@ -27,6 +28,8 @@ type Props = {
   onTileTool: (tool: DevTileTool) => void;
   onClose: () => void;
   onEra: (era: number) => void;
+  onExport: () => string;
+  onImport: (json: string) => boolean;
 };
 
 const BUILDINGS: { kind: BuildingKind; label: string }[] = [
@@ -70,7 +73,25 @@ export function DevPanel({
   onTileTool,
   onClose,
   onEra,
+  onExport,
+  onImport,
 }: Props) {
+  const [saveText, setSaveText] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const doExport = () => {
+    const json = onExport();
+    setSaveText(json);
+    setSaveMsg(tr(`Exported (${json.length} chars).`, `내보냄 (${json.length}자). 복사해서 공유하세요.`));
+    void navigator.clipboard?.writeText(json).catch(() => {});
+  };
+  const doImport = () => {
+    const ok = onImport(saveText);
+    setSaveMsg(
+      ok
+        ? tr("Imported — reloading…", "가져오기 성공 — 다시 불러옵니다…")
+        : tr("Invalid save data.", "잘못된 저장 데이터입니다."),
+    );
+  };
   return (
     <details
       className="panel-section"
@@ -193,6 +214,34 @@ export function DevPanel({
         <button type="button" onClick={() => onEra(era - 1)}>−</button>
         <button type="button" onClick={() => onEra(era + 1)}>+</button>
       </div>
+
+      <div style={rowStyle}>
+        <span style={labelStyle}>{tr("Save", "저장")}</span>
+        <button type="button" onClick={doExport}>{tr("Export", "내보내기")}</button>
+        <button type="button" onClick={doImport}>{tr("Import", "가져오기")}</button>
+      </div>
+      <textarea
+        value={saveText}
+        onChange={(e) => setSaveText(e.target.value)}
+        placeholder={tr(
+          "Export to copy state here, or paste a shared state and Import.",
+          "내보내기로 현재 상태를 여기에 담거나, 공유받은 상태를 붙여넣고 가져오기.",
+        )}
+        spellCheck={false}
+        style={{
+          width: "100%",
+          height: 56,
+          fontSize: 10,
+          fontFamily: "monospace",
+          resize: "vertical",
+          boxSizing: "border-box",
+        }}
+      />
+      {saveMsg && (
+        <p className="muted" style={{ fontSize: 11, margin: "2px 0" }}>
+          {saveMsg}
+        </p>
+      )}
     </details>
   );
 }

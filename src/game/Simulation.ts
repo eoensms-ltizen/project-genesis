@@ -2742,13 +2742,10 @@ export class Simulation {
     this.savingDisabled = true;
   }
 
-  saveNow() {
-    if (this.savingDisabled) {
-      return;
-    }
-    try {
-      const data: SaveData = {
-        version: SAVE_VERSION,
+  /** Assemble the full save snapshot (shared by autosave and dev export). */
+  private buildSaveData(): SaveData {
+    return {
+      version: SAVE_VERSION,
         gameMode: this.gameMode,
         elapsedSeconds: this.elapsedSeconds,
         lastBirthAt: this.lastBirthAt,
@@ -2803,10 +2800,44 @@ export class Simulation {
         nextAnimalId: this.nextAnimalId,
         blueprints: this.blueprints.map((b) => ({ ...b, claimedBy: undefined })),
         nextBlueprintId: this.nextBlueprintId,
-      };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    };
+  }
+
+  saveNow() {
+    if (this.savingDisabled) {
+      return;
+    }
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(this.buildSaveData()));
     } catch {
       // Storage may be full or unavailable; the game keeps running without saves.
+    }
+  }
+
+  /** The full game state as a JSON string — for dev export/sharing/debugging. */
+  serialize(): string {
+    return JSON.stringify(this.buildSaveData());
+  }
+
+  /**
+   * Replace the persisted save with an imported snapshot and signal the caller to
+   * reload (the constructor re-reads it on the next load). Returns true if the JSON
+   * parsed as a save; false otherwise (the caller can surface a "bad data" message).
+   */
+  importSerialized(json: string): boolean {
+    try {
+      const parsed = JSON.parse(json) as Partial<SaveData>;
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.agents)) {
+        return false;
+      }
+      localStorage.setItem(SAVE_KEY, json);
+      // Stop THIS (about-to-be-discarded) instance from autosaving or saving on
+      // unload — otherwise the live state would clobber the imported save before
+      // the reload re-reads it. The fresh instance after reload saves normally.
+      this.savingDisabled = true;
+      return true;
+    } catch {
+      return false;
     }
   }
 

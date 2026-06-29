@@ -974,6 +974,8 @@ export default function App() {
               onTileTool={devTool}
               onClose={devDisarm}
               onEra={devEra}
+              onExport={() => gameRef.current?.exportState() ?? ""}
+              onImport={(json) => gameRef.current?.importState(json) ?? false}
             />
           </>
         )}
