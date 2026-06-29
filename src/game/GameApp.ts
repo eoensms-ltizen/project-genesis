@@ -126,22 +126,12 @@ export class GameApp {
       return { kind: "item", itemId: pile.id };
     }
 
-    // Walls, doors, floors and furniture are selectable structures in their own
-    // right, even though they sit inside a building's footprint — clicking a bed
-    // inspects the bed, not the whole building.
+    // Walls, doors and furniture are individually inspectable even inside a
+    // building's footprint — clicking a bed inspects the bed, not the whole house.
     const structureTile = this.simulation.world.getTile(position)?.type;
-    // Clicking inside the granary shows its food store (grain/meat), not the bare
-    // floor tile under the sacks.
-    const granaryHere = this.simulation.buildings.find(
-      (b) => b.kind === "granary" && this.buildingContains(b, position),
-    );
-    if (granaryHere && structureTile === "Floor") {
-      return { kind: "building", buildingId: granaryHere.id };
-    }
     if (
       structureTile === "Wall" ||
       structureTile === "Door" ||
-      structureTile === "Floor" ||
       structureTile === "Bed" ||
       structureTile === "BedFoot" ||
       structureTile === "BedSite" ||
@@ -154,6 +144,9 @@ export class GameApp {
       return { kind: "tile", position: { ...position } };
     }
 
+    // Anything else inside a building — its floor, or a yard's grass/plaza —
+    // inspects the building itself, so clicking a warehouse / kitchen / house /
+    // granary consistently shows that building rather than the bare ground.
     const building = this.simulation.buildings.find(
       (candidate) => this.buildingContains(candidate, position),
     );
@@ -161,6 +154,8 @@ export class GameApp {
       return { kind: "building", buildingId: building.id };
     }
 
+    // A floor tile that doesn't belong to any building (a stray remnant) still
+    // inspects as a plain tile.
     return { kind: "tile", position: { ...position } };
   }
 
