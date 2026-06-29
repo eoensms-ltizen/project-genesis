@@ -5398,28 +5398,71 @@ export class Simulation {
     this.onChange(this.getSnapshot());
   }
 
+  /**
+   * How many walkable tiles connect to `start` (bounded by `cap`): a cheap flood
+   * fill that tells an isolated pocket (a 1-tile patch walled in by rock/water)
+   * from open, connected ground.
+   */
+  private openRegionSize(start: Vec2, cap: number): number {
+    if (!this.world.isWalkable(start)) {
+      return 0;
+    }
+    const seen = new Set<string>([`${start.x},${start.y}`]);
+    const queue: Vec2[] = [start];
+    let count = 0;
+    while (queue.length > 0 && count < cap) {
+      const cur = queue.shift() as Vec2;
+      count += 1;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const n = { x: cur.x + dx, y: cur.y + dy };
+        const key = `${n.x},${n.y}`;
+        if (!seen.has(key) && this.world.isWalkable(n)) {
+          seen.add(key);
+          queue.push(n);
+        }
+      }
+    }
+    return count;
+  }
+
   private findSpawnPosition(preferred: Vec2): Vec2 {
     const rounded = {
       x: Math.max(0, Math.min(this.world.width - 1, Math.round(preferred.x))),
       y: Math.max(0, Math.min(this.world.height - 1, Math.round(preferred.y))),
     };
+    // A spawn must sit in open, connected ground — not an isolated walkable pocket
+    // sealed off by rock or water, where a resident would be trapped and starve.
+    const OPEN = 24;
+    const open = (c: Vec2) => this.openRegionSize(c, OPEN) >= OPEN;
 
-    if (this.world.isWalkable(rounded)) {
+    if (this.world.isWalkable(rounded) && open(rounded)) {
       return rounded;
     }
 
-    for (let radius = 1; radius < 12; radius += 1) {
+    // First pass: the nearest open, connected tile. Second pass: settle for any
+    // walkable tile (so spawning never hard-fails, even on a cramped map).
+    let firstWalkable: Vec2 | undefined;
+    for (let radius = 1; radius < 20; radius += 1) {
       for (let y = rounded.y - radius; y <= rounded.y + radius; y += 1) {
         for (let x = rounded.x - radius; x <= rounded.x + radius; x += 1) {
           const candidate = { x, y };
-          if (this.world.isWalkable(candidate)) {
+          if (!this.world.isWalkable(candidate)) {
+            continue;
+          }
+          if (open(candidate)) {
             return candidate;
           }
+          firstWalkable = firstWalkable ?? candidate;
         }
       }
     }
 
-    return { x: 0, y: 0 };
+    return firstWalkable ?? { x: 0, y: 0 };
   }
 }
 
