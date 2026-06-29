@@ -910,8 +910,16 @@ export class AgentBrain {
       if (this.findHaulWork(agent, simulation)) {
         return true;
       }
+      // Felling is normally left to woodcutters in a busy town, but a small hamlet
+      // (everyone pitches in) or a settlement that simply has no woodcutter yet —
+      // e.g. an era-0 pioneer camp, or an Architect village the player has stocked
+      // with residents before jobs exist — would otherwise never fill its
+      // warehouse. In those cases let any idle hand gather.
+      const noWoodcutter = !simulation.agents.some((a) => a.job === "woodcutter");
       const mayGather =
-        agent.job === "woodcutter" || simulation.agents.length <= SMALL_SETTLEMENT;
+        agent.job === "woodcutter" ||
+        simulation.agents.length <= SMALL_SETTLEMENT ||
+        noWoodcutter;
       if (mayGather) {
         const woodSupply = simulation.stockOf("wood") + simulation.groundTotal("wood");
         // Urgent wood first; once a working reserve exists, mine soft rock for a
