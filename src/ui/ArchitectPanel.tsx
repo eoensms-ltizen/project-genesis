@@ -67,10 +67,10 @@ export function ArchitectPanel({
 
       <div className="tool-row draft-actions">
         <button type="button" data-active={draftActive} disabled={!draftActive} onClick={onApplyDraft}>
-          {tr("Apply", "Apply")}
+          {tr("Apply", "적용")}
         </button>
         <button type="button" disabled={!draftActive} onClick={onCancelDraft}>
-          {tr("Cancel draft", "Cancel draft")}
+          {tr("Cancel draft", "초안 취소")}
         </button>
       </div>
 
@@ -87,32 +87,32 @@ export function ArchitectPanel({
         ))}
       </div>
 
-      <div className="tool-label">{tr("Structure", "Structure")}</div>
+      <div className="tool-label">{tr("Structure", "구조물")}</div>
       <div className="tool-row">
         <button type="button" data-active={tileTool === "wall"} onClick={() => onTileTool("wall")}>
-          {tr("Wall", "Wall")}
+          {tr("Wall", "벽")}
         </button>
         <button type="button" data-active={tileTool === "door"} onClick={() => onTileTool("door")}>
-          {tr("Door", "Door")}
+          {tr("Door", "문")}
         </button>
       </div>
 
-      <div className="tool-label">{tr("Furniture", "Furniture")}</div>
+      <div className="tool-label">{tr("Furniture", "가구")}</div>
       <div className="button-grid compact-grid">
         <button type="button" data-active={tileTool === "bed"} onClick={() => onTileTool("bed")}>
-          {tr("Bed", "Bed")}
+          {tr("Bed", "침대")}
         </button>
         <button type="button" data-active={tileTool === "stove"} onClick={() => onTileTool("stove")}>
-          {tr("Stove", "Stove")}
+          {tr("Stove", "화덕")}
         </button>
         <button type="button" data-active={tileTool === "counter"} onClick={() => onTileTool("counter")}>
-          {tr("Counter", "Counter")}
+          {tr("Counter", "조리대")}
         </button>
         <button type="button" data-active={tileTool === "table"} onClick={() => onTileTool("table")}>
-          {tr("Table", "Table")}
+          {tr("Table", "식탁")}
         </button>
         <button type="button" data-active={tileTool === "chair"} onClick={() => onTileTool("chair")}>
-          {tr("Chair", "Chair")}
+          {tr("Chair", "의자")}
         </button>
       </div>
       {furnitureArmed && (
@@ -126,10 +126,10 @@ export function ArchitectPanel({
         </div>
       )}
 
-      <div className="tool-label">{tr("Path / erase", "Path / erase")}</div>
+      <div className="tool-label">{tr("Path / erase", "경로 / 철거")}</div>
       <div className="tool-row">
         <button type="button" data-active={tileTool === "field"} onClick={() => onTileTool("field")}>
-          {tr("Field", "Field")}
+          {tr("Field", "밭")}
         </button>
         <button type="button" data-active={tileTool === "road"} onClick={() => onTileTool("road")}>
           {tr("Road", "도로")}
