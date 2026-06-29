@@ -248,8 +248,11 @@ export type Blueprint = {
   y: number;
   // The tile this becomes once a resident finishes it.
   t: TileType;
-  // Wood the builder must carry to raise it.
+  // Wood the builder must carry to raise it (the "labour" cost).
   cost: number;
+  // Stone drawn from the warehouse when it's finished (stove/counter masonry).
+  // Undefined for wood-only jobs. Residents only take the job once it's in stock.
+  stone?: number;
   // Orientation 0..3 (right/down/left/up) for multi-tile furniture — a Bed uses it
   // to place its foot. Undefined for single-tile blueprints.
   dir?: number;

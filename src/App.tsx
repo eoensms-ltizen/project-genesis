@@ -624,13 +624,17 @@ export default function App() {
     if (!draft || !gameRef.current) {
       return;
     }
-    // "주민 건설" (resident-build) queues walls/doors as blueprints for residents
-    // to construct with materials; "즉시" (instant) stamps them at once. Floor
-    // zones, fields, roads and demolition are always instant. (Furniture is no
-    // longer drafted here — it's click-to-placed per unit via onTileClick.)
+    // "주민 건설" (resident-build) stakes floor zones and queues walls/doors as
+    // blueprints for residents to construct; "즉시" (instant) stamps them at once.
+    // Fields, roads and demolition are always instant. (Furniture is no longer
+    // drafted here — it's click-to-placed per unit via onTileClick.)
     const residentBuild = !devInstantRef.current;
     if (draft.kind === "building") {
-      gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
+      if (residentBuild) {
+        gameRef.current.devPlanFloorZone(draft.building, draft.tiles);
+      } else {
+        gameRef.current.devPaintFloorZone(draft.building, draft.tiles);
+      }
     } else if (draft.tool === "field") {
       gameRef.current.devPaintFieldTiles(draft.tiles);
     } else if (draft.tool === "road") {

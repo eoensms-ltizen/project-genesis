@@ -2755,9 +2755,10 @@ export class AgentBrain {
     });
     if (!path) {
       // Can't path beside it (boxed in) — lay it from where we stand rather than
-      // deadlock, paying the wood now.
-      agent.inventory.wood = Math.max(0, agent.inventory.wood - bp.cost);
-      simulation.buildBlueprint(bp.id);
+      // deadlock. Wood is only spent if the build actually goes through.
+      if (simulation.buildBlueprint(bp.id)) {
+        agent.inventory.wood = Math.max(0, agent.inventory.wood - bp.cost);
+      }
       agent.blueprintId = undefined;
       return true;
     }
@@ -2783,11 +2784,13 @@ export class AgentBrain {
       return;
     }
     agent.actionTimer = 0;
-    if (agent.inventory.wood >= bp.cost) {
+    // Build only if we carry the wood; the sim also draws any masonry stone from
+    // the warehouse and returns false if it's short, so we keep our wood for a
+    // later attempt rather than burning it on a job that didn't complete.
+    if (agent.inventory.wood >= bp.cost && simulation.buildBlueprint(bp.id)) {
       agent.inventory.wood -= bp.cost;
-      simulation.buildBlueprint(bp.id);
     }
-    // Either way release the job: if we were short on wood, the next pass refetches.
+    // Either way release the job: if we were short, the next pass refetches/retries.
     agent.blueprintId = undefined;
     agent.buildTarget = undefined;
     agent.target = undefined;

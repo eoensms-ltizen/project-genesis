@@ -274,15 +274,23 @@ const FURNITURE_TILE: Record<Exclude<FurnitureKind, "bed">, TileType> = {
   chair: "Chair",
 };
 
-// Wood a resident must haul to raise each Architect blueprint by hand.
+// Wood a resident hauls to raise each Architect blueprint by hand (the labour).
 const BLUEPRINT_COST: Partial<Record<TileType, number>> = {
   Wall: 1,
   Door: 2,
+  Floor: 0,
   Bed: 4,
-  Stove: 6,
-  Counter: 3,
+  Stove: 2,
+  Counter: 1,
   Table: 4,
   Chair: 1,
+};
+
+// Masonry blueprints also draw stone from the warehouse when finished, so a stove
+// or counter needs the colony to have quarried stone — not just felled wood.
+const BLUEPRINT_STONE: Partial<Record<TileType, number>> = {
+  Stove: 6,
+  Counter: 3,
 };
 
 // Furniture orientation offsets, indexed by rotation 0..3 (right/down/left/up).
@@ -561,6 +569,8 @@ export class Simulation {
       this.runSmelters();
       this.decayInfrastructure();
       this.detectDamage();
+      this.pruneStaleBlueprints();
+      this.promotePendingFloorZones();
       this.recomputeAmbiance();
       this.relocateMisplacedWork();
       this.spawnLitter();
@@ -1592,7 +1602,12 @@ export class Simulation {
     return true;
   }
 
-  devPaintFloorZone(kind: BuildingKind, positions: Vec2[]): number {
+  /** Architect resident-build: lay a floor zone's floor by hand (Floor blueprints). */
+  devPlanFloorZone(kind: BuildingKind, positions: Vec2[]): number {
+    return this.devPaintFloorZone(kind, positions, true);
+  }
+
+  devPaintFloorZone(kind: BuildingKind, positions: Vec2[], plan = false): number {
     const tiles = uniqueTiles(positions).filter((position) => {
       const type = this.world.getTile(position)?.type;
       return type !== undefined && FLOOR_ZONE_PAINTABLE.has(type);
@@ -1602,12 +1617,16 @@ export class Simulation {
     }
 
     const tileKeys = new Set(tiles.map(tileKey));
-    const mergeTargets = this.buildings.filter(
-      (building) =>
-        building.customLayout &&
-        building.kind === kind &&
-        this.customBuildingTouches(building, tileKeys),
-    );
+    // A resident-build zone always starts a fresh under-construction building (no
+    // merging into a finished one — that would un-finish it).
+    const mergeTargets = plan
+      ? []
+      : this.buildings.filter(
+          (building) =>
+            building.customLayout &&
+            building.kind === kind &&
+            this.customBuildingTouches(building, tileKeys),
+        );
 
     this.removeTilesFromCustomBuildings(tiles);
 
@@ -1628,11 +1647,17 @@ export class Simulation {
         customLayout: true,
         tiles,
       });
-      target.stage = "built";
-      target.builtAtDay = Math.floor(
-        (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
-      );
-      target.durability = 100;
+      // Instant zones are finished at once; resident-build zones stay a "site"
+      // until residents lay every floor tile (promotePendingFloorZones finishes it).
+      if (plan) {
+        target.stage = "site";
+      } else {
+        target.stage = "built";
+        target.builtAtDay = Math.floor(
+          (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
+        );
+        target.durability = 100;
+      }
     } else {
       const merged = [...(target.tiles ?? []), ...tiles];
       for (const other of mergeTargets) {
@@ -1649,11 +1674,62 @@ export class Simulation {
     }
 
     this.syncCustomBuildingBounds(target);
-    this.paintCustomFloorZone(target);
+    if (plan) {
+      // Queue each floor tile as a (free) build job; residents lay them by hand,
+      // and the building goes live once they're all down.
+      for (const t of tiles) {
+        this.addBlueprint(t, "Floor", BLUEPRINT_COST.Floor ?? 0);
+      }
+    } else {
+      this.paintCustomFloorZone(target);
+    }
     this.refreshCustomBuildingEntrances();
     this.refreshDoors();
     this.notifyChanged();
     return tiles.length;
+  }
+
+  /**
+   * Finish any resident-build floor zone whose tiles are all floored now: it
+   * leaves "site" and starts functioning as its building kind.
+   */
+  private promotePendingFloorZones(): void {
+    let changed = false;
+    for (const building of this.buildings) {
+      if (!building.customLayout || building.stage === "built" || !building.tiles?.length) {
+        continue;
+      }
+      let allFloored = true;
+      for (const t of building.tiles) {
+        if (this.world.getTile(t)?.type === "Floor") {
+          continue;
+        }
+        allFloored = false;
+        // A floor tile that lost its job (e.g. the ground was edited) is re-queued
+        // so the zone can still finish instead of stalling forever.
+        if (!this.hasBlueprintAt(t) && this.blueprintGroundOk({ id: "", x: t.x, y: t.y, t: "Floor", cost: 0 })) {
+          this.addBlueprint(t, "Floor", BLUEPRINT_COST.Floor ?? 0);
+        }
+      }
+      if (!allFloored) {
+        continue;
+      }
+      building.stage = "built";
+      building.builtAtDay = Math.floor(
+        (this.elapsedSeconds + CLOCK_START_OFFSET_SECONDS) / DAY_LENGTH_SECONDS,
+      );
+      building.durability = 100;
+      this.paintCustomFloorZone(building);
+      this.log(
+        tr("A resident-built floor is finished. 🧱", "주민이 바닥 공사를 마쳤다. 🧱"),
+      );
+      changed = true;
+    }
+    if (changed) {
+      this.refreshCustomBuildingEntrances();
+      this.refreshDoors();
+      this.notifyChanged();
+    }
   }
 
   devPaintFieldTiles(positions: Vec2[]): number {
@@ -1713,7 +1789,13 @@ export class Simulation {
   }
 
   /** Queue one blueprint, unless the tile is already that type or already queued. */
-  private addBlueprint(position: Vec2, t: TileType, cost: number, dir?: number): boolean {
+  private addBlueprint(
+    position: Vec2,
+    t: TileType,
+    cost: number,
+    dir?: number,
+    stone?: number,
+  ): boolean {
     if (this.world.getTile(position)?.type === t || this.hasBlueprintAt(position)) {
       return false;
     }
@@ -1723,6 +1805,7 @@ export class Simulation {
       y: position.y,
       t,
       cost,
+      stone,
       dir,
     });
     return true;
@@ -1791,7 +1874,13 @@ export class Simulation {
     }
     const target: TileType = kind === "bed" ? "Bed" : FURNITURE_TILE[kind];
     const cost = BLUEPRINT_COST[target] ?? 1;
-    const added = this.addBlueprint(position, target, cost, kind === "bed" ? rotation : undefined);
+    const added = this.addBlueprint(
+      position,
+      target,
+      cost,
+      kind === "bed" ? rotation : undefined,
+      BLUEPRINT_STONE[target],
+    );
     if (added) {
       this.notifyChanged();
     }
@@ -1836,6 +1925,25 @@ export class Simulation {
    * built by another resident and whose ground can still take it. Returns it
    * (without claiming) for the brain to commit to.
    */
+  /**
+   * Whether a blueprint's ground can still take it: a furniture blueprint needs
+   * floor (or existing furniture) under it; a wall/door/floor needs paintable
+   * ground. A blueprint already sitting on its target tile counts as done (false).
+   */
+  private blueprintGroundOk(b: Blueprint): boolean {
+    const type = this.world.getTile(b)?.type;
+    if (type === undefined || type === b.t) {
+      return false;
+    }
+    if (TILE_FURNITURE[b.t]) {
+      return FURNITURE_PAINTABLE.has(type);
+    }
+    if (b.t === "Floor") {
+      return FLOOR_ZONE_PAINTABLE.has(type);
+    }
+    return STRUCTURE_PAINTABLE.has(type);
+  }
+
   nearestBlueprint(from: Vec2, builderId: string): Blueprint | undefined {
     const activeOthers = new Set(
       this.agents
@@ -1850,17 +1958,12 @@ export class Simulation {
     let best: Blueprint | undefined;
     let bestD = Number.POSITIVE_INFINITY;
     for (const b of this.blueprints) {
-      if (activeOthers.has(b.id)) {
+      if (activeOthers.has(b.id) || !this.blueprintGroundOk(b)) {
         continue;
       }
-      // A furniture blueprint needs floor (or existing furniture) under it; a
-      // wall/door needs paintable ground. If the spot is no longer suitable the
-      // blueprint is stale — skip it.
-      const type = this.world.getTile(b)?.type;
-      const ok =
-        type !== undefined &&
-        (TILE_FURNITURE[b.t] ? FURNITURE_PAINTABLE.has(type) : STRUCTURE_PAINTABLE.has(type));
-      if (!ok) {
+      // Stone-costed jobs (stove/counter) wait until the warehouse has the stone,
+      // so a resident never commits to one it can't finish.
+      if (b.stone && this.stockOf("stone") < b.stone) {
         continue;
       }
       const d = Math.abs(b.x - from.x) + Math.abs(b.y - from.y);
@@ -1872,17 +1975,51 @@ export class Simulation {
     return best;
   }
 
+  /** Drop blueprints whose ground can no longer take them (and nobody's building). */
+  private pruneStaleBlueprints(): void {
+    if (this.blueprints.length === 0) {
+      return;
+    }
+    const active = new Set(
+      this.agents
+        .filter((a) => a.blueprintId && (a.state === "MoveToBlueprint" || a.state === "BuildBlueprint"))
+        .map((a) => a.blueprintId as string),
+    );
+    let removed = false;
+    for (let i = this.blueprints.length - 1; i >= 0; i -= 1) {
+      const b = this.blueprints[i];
+      if (!active.has(b.id) && !this.blueprintGroundOk(b)) {
+        this.blueprints.splice(i, 1);
+        removed = true;
+      }
+    }
+    if (removed) {
+      this.notifyChanged();
+    }
+  }
+
   getBlueprint(id: string | undefined): Blueprint | undefined {
     return id ? this.blueprints.find((b) => b.id === id) : undefined;
   }
 
-  /** A resident finishes a blueprint: stamp its real tile and dequeue it. */
+  /**
+   * A resident finishes a blueprint: pay any masonry stone from the warehouse,
+   * stamp its real tile, and dequeue it. Returns false (leaving the blueprint
+   * queued) if the stone isn't actually in stock — the caller then keeps its wood.
+   */
   buildBlueprint(id: string): boolean {
     const index = this.blueprints.findIndex((b) => b.id === id);
     if (index < 0) {
       return false;
     }
     const b = this.blueprints[index];
+    if (b.stone) {
+      const drawn = this.withdraw("stone", b.stone);
+      if (drawn < b.stone) {
+        this.store("stone", drawn); // put the partial draw back; try again later
+        return false;
+      }
+    }
     this.blueprints.splice(index, 1);
     const position = { x: b.x, y: b.y };
     const furniture = TILE_FURNITURE[b.t];
@@ -4053,7 +4190,14 @@ export class Simulation {
   }
 
   private wantTarget(resource: ResourceKind): number {
-    return resource === "wood" ? WOOD_WANT_TARGET : resource === "stone" ? STONE_WANT_TARGET : ORE_WANT_TARGET;
+    const base =
+      resource === "wood" ? WOOD_WANT_TARGET : resource === "stone" ? STONE_WANT_TARGET : ORE_WANT_TARGET;
+    if (resource === "stone") {
+      // Quarry extra to cover the stone that queued masonry blueprints (stoves,
+      // counters) will draw, so a resident-build colony mines for what it ordered.
+      return base + this.blueprints.reduce((sum, b) => sum + (b.stone ?? 0), 0);
+    }
+    return base;
   }
 
   /** Loose piles of a material sitting outside the stockpile (awaiting hauling). */

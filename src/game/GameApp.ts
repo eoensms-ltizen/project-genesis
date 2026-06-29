@@ -305,6 +305,16 @@ export class GameApp {
     return ok;
   }
 
+  /** Architect resident-build: stake a floor zone whose floor residents lay. */
+  devPlanFloorZone(kind: BuildingKind, positions: Vec2[]): boolean {
+    const ok = this.simulation.devPlanFloorZone(
+      kind,
+      positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    ) > 0;
+    if (ok) this.render();
+    return ok;
+  }
+
   devPaintFieldTiles(positions: Vec2[]): boolean {
     const ok = this.simulation.devPaintFieldTiles(
       positions.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
