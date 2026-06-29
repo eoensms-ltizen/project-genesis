@@ -1630,16 +1630,16 @@ export class Simulation {
     }
 
     const tileKeys = new Set(tiles.map(tileKey));
-    // A resident-build zone always starts a fresh under-construction building (no
-    // merging into a finished one — that would un-finish it).
-    const mergeTargets = plan
-      ? []
-      : this.buildings.filter(
-          (building) =>
-            building.customLayout &&
-            building.kind === kind &&
-            this.customBuildingTouches(building, tileKeys),
-        );
+    // A same-kind zone painted onto (or against) an existing custom building joins
+    // it into one — in both instant and resident-build modes. Merging never changes
+    // the target's stage: a finished building stays finished and simply grows, with
+    // the freshly-added tiles laid as blueprints in resident-build mode.
+    const mergeTargets = this.buildings.filter(
+      (building) =>
+        building.customLayout &&
+        building.kind === kind &&
+        this.customBuildingTouches(building, tileKeys),
+    );
 
     this.removeTilesFromCustomBuildings(tiles);
 
