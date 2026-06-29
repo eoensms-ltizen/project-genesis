@@ -775,7 +775,20 @@ export class Simulation {
     }
   }
 
+  /**
+   * The interior tile an open-painted building lays over its zone: a walled room
+   * gets Floor, a fairground gets Plaza, and an open yard (pasture, park,
+   * cemetery) keeps Grass — so e.g. a pasture stays grazeable instead of paved.
+   */
+  private customInteriorTile(kind: BuildingKind): TileType {
+    if (ROOM_BUILDING_KINDS.has(kind)) {
+      return "Floor";
+    }
+    return kind === "funfair" ? "Plaza" : "Grass";
+  }
+
   private paintCustomFloorZone(building: Building) {
+    const interior = this.customInteriorTile(building.kind);
     for (const tile of building.tiles ?? []) {
       const type = this.world.getTile(tile)?.type;
       if (
@@ -786,7 +799,7 @@ export class Simulation {
       ) {
         continue;
       }
-      this.world.setTile(tile, "Floor");
+      this.world.setTile(tile, interior);
     }
   }
 
@@ -1675,10 +1688,12 @@ export class Simulation {
 
     this.syncCustomBuildingBounds(target);
     if (plan) {
-      // Queue each floor tile as a (free) build job; residents lay them by hand,
-      // and the building goes live once they're all down.
+      // Queue each interior tile as a (free) build job — Floor for rooms, Grass for
+      // a pasture/yard, Plaza for a fairground; residents lay them by hand and the
+      // building goes live once they're all down.
+      const interior = this.customInteriorTile(kind);
       for (const t of tiles) {
-        this.addBlueprint(t, "Floor", BLUEPRINT_COST.Floor ?? 0);
+        this.addBlueprint(t, interior, BLUEPRINT_COST[interior] ?? 0);
       }
     } else {
       this.paintCustomFloorZone(target);
@@ -1699,19 +1714,20 @@ export class Simulation {
       if (!building.customLayout || building.stage === "built" || !building.tiles?.length) {
         continue;
       }
-      let allFloored = true;
+      const interior = this.customInteriorTile(building.kind);
+      let allLaid = true;
       for (const t of building.tiles) {
-        if (this.world.getTile(t)?.type === "Floor") {
+        if (this.world.getTile(t)?.type === interior) {
           continue;
         }
-        allFloored = false;
-        // A floor tile that lost its job (e.g. the ground was edited) is re-queued
-        // so the zone can still finish instead of stalling forever.
-        if (!this.hasBlueprintAt(t) && this.blueprintGroundOk({ id: "", x: t.x, y: t.y, t: "Floor", cost: 0 })) {
-          this.addBlueprint(t, "Floor", BLUEPRINT_COST.Floor ?? 0);
+        allLaid = false;
+        // An interior tile that lost its job (e.g. the ground was edited) is
+        // re-queued so the zone can still finish instead of stalling forever.
+        if (!this.hasBlueprintAt(t) && this.blueprintGroundOk({ id: "", x: t.x, y: t.y, t: interior, cost: 0 })) {
+          this.addBlueprint(t, interior, BLUEPRINT_COST[interior] ?? 0);
         }
       }
-      if (!allFloored) {
+      if (!allLaid) {
         continue;
       }
       building.stage = "built";
@@ -1938,7 +1954,9 @@ export class Simulation {
     if (TILE_FURNITURE[b.t]) {
       return FURNITURE_PAINTABLE.has(type);
     }
-    if (b.t === "Floor") {
+    // Interior tiles (a room's Floor, a yard's Grass, a fairground's Plaza) sit on
+    // the same paintable ground a floor zone uses.
+    if (b.t === "Floor" || b.t === "Grass" || b.t === "Plaza") {
       return FLOOR_ZONE_PAINTABLE.has(type);
     }
     return STRUCTURE_PAINTABLE.has(type);
